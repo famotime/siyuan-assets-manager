@@ -344,7 +344,15 @@ async function addAnnotationAt(x: number, y: number) {
         fabricText.relatedObj = fabricShape;
       }
       
+      // 生成后不选中新建的序号对象，以便于连续点击画布快速生成序列
+      canvas.discardActiveObject();
       canvas.renderAll();
+
+      // 在 TUI Image Editor 的异步更新执行后，再次确保取消选中状态
+      setTimeout(() => {
+        canvas.discardActiveObject();
+        canvas.renderAll();
+      }, 50);
     }
 
   } catch (e) {
