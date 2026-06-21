@@ -1,5 +1,5 @@
 <template>
-  <div class="assets-manager-container">
+  <div ref="containerEl" class="assets-manager-container" style="position: relative;">
     <div class="header">
       <h2>资源管家</h2>
       <div class="stats">
@@ -34,6 +34,9 @@
         @open-docs="handleOpenDocs"
         @edit="handleEdit"
         @delete="handleDelete"
+        @show-preview="handleShowPreview"
+        @update-preview="handleUpdatePreview"
+        @hide-preview="handleHidePreview"
       />
     </div>
     
@@ -46,11 +49,16 @@
       :assetName="currentEditAsset?.name || ''"
       @save-edited="handleSaveEdited"
     />
+
+    <!-- 限制在当前界面内的悬浮图片预览弹窗 -->
+    <div v-if="previewUrl" class="image-hover-preview" :style="previewStyle">
+      <img :src="previewUrl" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
 import { replaceAssetInBlocks, removeAssetFromBlocks } from '../utils/siyuan-block';
@@ -71,6 +79,86 @@ const sortOrder = ref<'asc' | 'desc'>('desc');
 
 const editorVisible = ref(false);
 const currentEditAsset = ref<AssetInfo | null>(null);
+
+const containerEl = ref<HTMLElement | null>(null);
+
+// 悬浮大图预览相关状态
+const previewUrl = ref('');
+const previewStyle = ref({
+  top: '0px',
+  left: '0px',
+});
+const mouseX = ref(0);
+const mouseY = ref(0);
+let previewTimeout: number | null = null;
+
+function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo }) {
+  const { event, asset } = payload;
+  if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(asset.name)) return;
+  
+  handleHidePreview();
+  
+  mouseX.value = event.clientX;
+  mouseY.value = event.clientY;
+  
+  previewTimeout = window.setTimeout(() => {
+    previewUrl.value = `/assets/${asset.name}`;
+    positionPreview(mouseX.value, mouseY.value);
+  }, 250); // 250ms 防抖，提供高级的 hover 体验
+}
+
+function handleUpdatePreview(payload: { event: MouseEvent }) {
+  const { event } = payload;
+  mouseX.value = event.clientX;
+  mouseY.value = event.clientY;
+  if (previewUrl.value) {
+    positionPreview(mouseX.value, mouseY.value);
+  }
+}
+
+function positionPreview(clientX: number, clientY: number) {
+  if (!containerEl.value) return;
+  const containerRect = containerEl.value.getBoundingClientRect();
+  
+  // 视口坐标转换为相对于 containerEl 的绝对定位坐标
+  const relativeX = clientX - containerRect.left;
+  const relativeY = clientY - containerRect.top;
+  
+  const offsetX = 20;
+  const offsetY = 20;
+  let x = relativeX + offsetX;
+  let y = relativeY + offsetY;
+  
+  const safeBound = 420; // 包含 padding/border 的最大安全边界 (400px 大图 + 20px 缓冲)
+  
+  if (x + safeBound > containerRect.width) {
+    x = relativeX - safeBound - offsetX;
+  }
+  if (y + safeBound > containerRect.height) {
+    y = relativeY - safeBound - offsetY;
+  }
+  
+  // 防溢出保护，不超出左边界和上边界
+  if (x < 0) x = 10;
+  if (y < 0) y = 10;
+  
+  previewStyle.value = {
+    top: `${y}px`,
+    left: `${x}px`,
+  };
+}
+
+function handleHidePreview() {
+  if (previewTimeout) {
+    clearTimeout(previewTimeout);
+    previewTimeout = null;
+  }
+  previewUrl.value = '';
+}
+
+onUnmounted(() => {
+  handleHidePreview();
+});
 
 async function loadData() {
   loading.value = true;
@@ -294,6 +382,31 @@ async function handleSaveEdited(payload: { oldName: string, dataUrl: string }) {
   align-items: center;
   color: var(--b3-theme-on-surface-light);
   font-size: 16px;
+}
+
+.image-hover-preview {
+  position: absolute;
+  z-index: 9999;
+  pointer-events: none;
+  background-color: var(--b3-theme-background-light);
+  border: 1px solid var(--b3-theme-surface-lighter);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 6px;
+  display: block;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-sizing: border-box;
+}
+
+.image-hover-preview img {
+  display: block;
+  max-width: 400px;
+  max-height: 400px;
+  width: auto;
+  height: auto;
+  border-radius: 4px;
 }
 </style>
 
