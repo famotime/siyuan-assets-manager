@@ -47,6 +47,18 @@
           </div>
         </div>
 
+        <!-- 自定义画笔工具箭头选项（悬浮在左上角） -->
+        <div v-if="drawSubmenuActive" class="custom-draw-overlay">
+          <div class="submenu-item" style="flex-direction: row; gap: 8px;">
+            <span class="submenu-label">画笔箭头:</span>
+            <select v-model="drawArrowType" class="b3-select" style="border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 2px 8px; background: #1f1f1f; color: #fff;">
+              <option value="none">无箭头</option>
+              <option value="single">→ 单向箭头</option>
+              <option value="double">↔ 双向箭头</option>
+            </select>
+          </div>
+        </div>
+
       </div>
       <div class="am-dialog__footer">
         <span v-if="annotationMode" style="margin-right: auto; color: var(--b3-theme-primary); font-size: 14px; font-weight: bold;">
@@ -90,10 +102,16 @@ const annotationTextColor = ref('#ffffff');
 const annotationFontSize = ref(20);
 let customMenuEl: HTMLElement | null = null;
 
+// 画笔箭头相关状态
+const drawArrowType = ref<'none' | 'single' | 'double'>('none');
+const drawSubmenuActive = ref(false);
+
 watch(() => props.visible, async (newVal) => {
   if (newVal && props.assetName) {
     annotationMode.value = false;
     annotationStep.value = 1;
+    drawArrowType.value = 'none';
+    drawSubmenuActive.value = false;
     
     const blob = await readAssetFile(props.assetName);
     if (blob) {
@@ -234,6 +252,136 @@ function initEditor(url: string) {
       }
       activeObject.lastLeft = activeObject.left;
       activeObject.lastTop = activeObject.top;
+    });
+
+    // 监听画笔自由绘制路径
+    canvas.on('path:created', (options: any) => {
+      const originalPath = options.path;
+      if (!originalPath || drawArrowType.value === 'none') return;
+
+      const pathData = originalPath.path;
+      if (!pathData || pathData.length < 2) return;
+
+      const strokeWidth = originalPath.strokeWidth || 1;
+      const len = Math.max(12, strokeWidth * 3);
+      const arrowAngle = Math.PI * 5 / 6;
+
+      const newPathData = [...pathData];
+
+      // 添加尾部箭头 (单向或双向时都需要在尾部生成)
+      if (drawArrowType.value === 'single' || drawArrowType.value === 'double') {
+        const endPt = getSegmentEndPoint(pathData[pathData.length - 1]);
+        const endDir = getEndDirection(pathData);
+        if (endPt && endDir) {
+          const angle = Math.atan2(endDir.dy, endDir.dx);
+          const x1 = endPt.x + len * Math.cos(angle + arrowAngle);
+          const y1 = endPt.y + len * Math.sin(angle + arrowAngle);
+          const x2 = endPt.x + len * Math.cos(angle - arrowAngle);
+          const y2 = endPt.y + len * Math.sin(angle - arrowAngle);
+
+          newPathData.push(['M', x1, y1]);
+          newPathData.push(['L', endPt.x, endPt.y]);
+          newPathData.push(['L', x2, y2]);
+        }
+      }
+
+      // 添加头部箭头 (仅在双向时生成)
+      if (drawArrowType.value === 'double') {
+        const startPt = { x: pathData[0][1], y: pathData[0][2] };
+        const startDir = getStartDirection(pathData);
+        if (startPt && startDir) {
+          const angle = Math.atan2(startDir.dy, startDir.dx);
+          const x1 = startPt.x + len * Math.cos(angle + arrowAngle);
+          const y1 = startPt.y + len * Math.sin(angle + arrowAngle);
+          const x2 = startPt.x + len * Math.cos(angle - arrowAngle);
+          const y2 = startPt.y + len * Math.sin(angle - arrowAngle);
+
+          newPathData.push(['M', x1, y1]);
+          newPathData.push(['L', startPt.x, startPt.y]);
+          newPathData.push(['L', x2, y2]);
+        }
+      }
+
+      // 原地更新路径数据
+      originalPath._setPath(newPathData);
+      originalPath.setCoords();
+      canvas.renderAll();
+    });
+
+    // 监听直线工具绘制（TUI直线工具添加的是fabric.Line）
+    canvas.on('object:added', (options: any) => {
+      const obj = options.target;
+      if (!obj) return;
+
+      if (drawArrowType.value !== 'none' && drawSubmenuActive.value) {
+        if (obj.type === 'line' && !obj.arrowProcessed) {
+          obj.arrowProcessed = true;
+
+          const arrowType = drawArrowType.value;
+          const strokeWidth = obj.strokeWidth || 1;
+          const len = Math.max(12, strokeWidth * 3);
+          const arrowAngle = Math.PI * 5 / 6;
+
+          const originalRender = obj._render;
+
+          obj._render = function(this: any, ctx: CanvasRenderingContext2D) {
+            // 1. 绘制原本的直线
+            originalRender.call(this, ctx);
+
+            // 2. 绘制箭头
+            ctx.save();
+
+            // 计算相对于直线中心点的局部坐标
+            const cx = (this.x1 + this.x2) / 2;
+            const cy = (this.y1 + this.y2) / 2;
+            const startPt = { x: this.x1 - cx, y: this.y1 - cy };
+            const endPt = { x: this.x2 - cx, y: this.y2 - cy };
+
+            ctx.strokeStyle = this.stroke;
+            ctx.lineWidth = this.strokeWidth;
+            ctx.lineCap = this.strokeLineCap;
+            ctx.lineJoin = this.strokeLineJoin;
+
+            // 绘制尾部箭头
+            if (arrowType === 'single' || arrowType === 'double') {
+              const dx = endPt.x - startPt.x;
+              const dy = endPt.y - startPt.y;
+              const angle = Math.atan2(dy, dx);
+
+              const x1 = endPt.x + len * Math.cos(angle + arrowAngle);
+              const y1 = endPt.y + len * Math.sin(angle + arrowAngle);
+              const x2 = endPt.x + len * Math.cos(angle - arrowAngle);
+              const y2 = endPt.y + len * Math.sin(angle - arrowAngle);
+
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(endPt.x, endPt.y);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+            }
+
+            // 绘制头部箭头
+            if (arrowType === 'double') {
+              const dx = startPt.x - endPt.x;
+              const dy = startPt.y - endPt.y;
+              const angle = Math.atan2(dy, dx);
+
+              const x1 = startPt.x + len * Math.cos(angle + arrowAngle);
+              const y1 = startPt.y + len * Math.sin(angle + arrowAngle);
+              const x2 = startPt.x + len * Math.cos(angle - arrowAngle);
+              const y2 = startPt.y + len * Math.sin(angle - arrowAngle);
+
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(startPt.x, startPt.y);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+            }
+
+            ctx.restore();
+          };
+        }
+      }
     });
   }
 
@@ -398,6 +546,7 @@ function injectCustomMenu() {
       li.addEventListener('click', (e) => {
         e.stopPropagation(); // 防止冒泡触发其他逻辑
         toggleAnnotationMode();
+        drawSubmenuActive.value = false; // 关闭画笔箭头子菜单
         
         // 样式控制：移除其他菜单的激活状态
         const allItems = menuContainer.querySelectorAll('.tui-image-editor-item');
@@ -418,7 +567,13 @@ function injectCustomMenu() {
         }
       });
 
-      // 监听其他原生按钮的点击，自动退出我们的标注模式
+      const isDrawButton = (el: HTMLElement) => {
+        const html = el.innerHTML.toLowerCase();
+        const title = el.getAttribute('title') || '';
+        return html.includes('draw') || title.includes('画笔') || title.includes('draw');
+      };
+
+      // 监听其他原生按钮的点击，自动退出我们的标注模式，并控制画笔子菜单状态
       const nativeItems = menuContainer.querySelectorAll('.tui-image-editor-item:not(.custom-annotation-menu)');
       nativeItems.forEach(item => {
         item.addEventListener('click', () => {
@@ -429,6 +584,12 @@ function injectCustomMenu() {
             li.classList.add('normal');
             li.style.backgroundColor = 'transparent';
             (li.querySelector('div') as HTMLElement).style.color = '#fff';
+          }
+
+          if (isDrawButton(item as HTMLElement)) {
+            drawSubmenuActive.value = true;
+          } else {
+            drawSubmenuActive.value = false;
           }
         });
       });
@@ -490,6 +651,58 @@ function save() {
     dataUrl: dataUrl
   });
   close();
+}
+
+// 路径与箭头方向辅助计算函数
+function getSegmentEndPoint(segment: any[]): { x: number; y: number } | null {
+  if (!segment || segment.length < 3) return null;
+  const type = segment[0];
+  if (type === 'M' || type === 'L') {
+    return { x: segment[1], y: segment[2] };
+  } else if (type === 'Q') {
+    return { x: segment[3], y: segment[4] };
+  } else if (type === 'C') {
+    return { x: segment[5], y: segment[6] };
+  }
+  return null;
+}
+
+function getEndDirection(pathData: any[][]): { dx: number; dy: number } | null {
+  if (pathData.length < 2) return null;
+  const lastSeg = pathData[pathData.length - 1];
+  const endPt = getSegmentEndPoint(lastSeg);
+  if (!endPt) return null;
+
+  for (let i = pathData.length - 2; i >= 0; i--) {
+    const prevSeg = pathData[i];
+    const prevPt = getSegmentEndPoint(prevSeg) || (i === 0 ? { x: pathData[0][1], y: pathData[0][2] } : null);
+    if (prevPt) {
+      const dx = endPt.x - prevPt.x;
+      const dy = endPt.y - prevPt.y;
+      if (dx !== 0 || dy !== 0) {
+        return { dx, dy };
+      }
+    }
+  }
+  return null;
+}
+
+function getStartDirection(pathData: any[][]): { dx: number; dy: number } | null {
+  if (pathData.length < 2) return null;
+  const startPt = { x: pathData[0][1], y: pathData[0][2] };
+
+  for (let i = 1; i < pathData.length; i++) {
+    const nextSeg = pathData[i];
+    const nextPt = getSegmentEndPoint(nextSeg);
+    if (nextPt) {
+      const dx = startPt.x - nextPt.x;
+      const dy = startPt.y - nextPt.y;
+      if (dx !== 0 || dy !== 0) {
+        return { dx, dy };
+      }
+    }
+  }
+  return null;
 }
 </script>
 
@@ -595,5 +808,20 @@ function save() {
 /* 隐藏 TUI Image Editor 左上角的 LOGO / 标题 */
 :deep(.tui-image-editor-header-logo) {
   display: none !important;
+}
+
+/* 自定义画笔工具箭头浮动选项栏 */
+.custom-draw-overlay {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  background-color: rgba(21, 21, 21, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 8px 12px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
 }
 </style>
