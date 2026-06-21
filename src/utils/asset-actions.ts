@@ -16,11 +16,11 @@ export function buildEditedAssetName(oldName: string, timestamp: number = Date.n
   return `${baseName}_edited_${timestamp}.${ext || 'png'}`
 }
 
-export function resolveRenameAssetName(
+export async function resolveRenameAssetName(
   oldName: string,
   inputName: string,
-  confirmExtensionChange: (oldExt: string, newExt: string) => boolean,
-): RenameAssetNameResult {
+  confirmExtensionChange: (oldExt: string, newExt: string) => Promise<boolean>,
+): Promise<RenameAssetNameResult> {
   const oldExtIdx = oldName.lastIndexOf('.')
   const oldExt = oldExtIdx <= 0 ? '' : oldName.slice(oldExtIdx)
 
@@ -52,7 +52,7 @@ export function resolveRenameAssetName(
 
   if (newExt !== oldExt) {
     if (newExt) {
-      const confirmed = confirmExtensionChange(oldExt, newExt)
+      const confirmed = await confirmExtensionChange(oldExt, newExt)
       if (!confirmed) {
         return {
           ok: false,

@@ -1,14 +1,19 @@
 <template>
-  <div v-if="visible" class="image-editor-dialog-overlay">
-    <div class="image-editor-dialog-content" :style="{ width: dialogWidth, height: dialogHeight }">
-      <div class="dialog-header">
+  <div v-if="visible" class="am-dialog-overlay" style="z-index: 1000;">
+    <div class="am-dialog image-editor-dialog-content" :style="{ width: dialogWidth, height: dialogHeight }">
+      <div class="am-dialog__header">
         <h3>编辑图片: {{ assetName }}</h3>
         <div class="header-actions" style="display: flex; gap: 8px;">
           <!-- 原本这里的“开启序号标注”按钮被移除，移至 TUI 内部原生菜单栏 -->
-          <button class="close-btn" @click="close">×</button>
+          <button class="am-dialog__close" @click="close" aria-label="关闭">
+            <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
         </div>
       </div>
-      <div class="dialog-body" style="position: relative;" :class="{ 'annotation-mode-active': annotationMode }">
+      <div class="am-dialog__body" style="position: relative; background: #282828; padding: 16px; display: flex;" :class="{ 'annotation-mode-active': annotationMode }">
         <div ref="tuiEditorContainer" style="width: 100%; height: 100%;"></div>
         
         <!-- 自定义序号标注子菜单（悬浮在底部原生菜单上方） -->
@@ -38,18 +43,18 @@
           </div>
           <div class="submenu-item">
             <span class="submenu-label">下次序号</span>
-            <input type="number" v-model="annotationStep" class="b3-text-field" style="width: 50px; text-align: center; font-size: 12px; padding: 2px;" min="1" />
+            <input type="number" v-model="annotationStep" class="am-input" style="width: 50px; text-align: center; font-size: 12px; padding: 2px;" min="1" />
           </div>
         </div>
 
       </div>
-      <div class="dialog-footer">
+      <div class="am-dialog__footer">
         <span v-if="annotationMode" style="margin-right: auto; color: var(--b3-theme-primary); font-size: 14px; font-weight: bold;">
           📍 序号标注模式进行中 (点击画面添加序号: {{ annotationStep }})
         </span>
-        <button class="b3-button b3-button--outline" @click="downloadLocal" style="margin-right: 8px;" title="当前编辑的图片另存到本地">另存</button>
-        <button class="b3-button b3-button--cancel" @click="close" title="取消编辑并关闭窗口">取消</button>
-        <button class="b3-button b3-button--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存</button>
+        <button class="am-btn am-btn--outline" @click="downloadLocal" style="margin-right: 8px;" title="当前编辑的图片另存到本地">另存</button>
+        <button class="am-btn am-btn--ghost" @click="close" title="取消编辑并关闭窗口">取消</button>
+        <button class="am-btn am-btn--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存</button>
       </div>
     </div>
   </div>
@@ -386,85 +391,12 @@ function save() {
 </script>
 
 <style scoped>
-.image-editor-dialog-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 1000;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  pointer-events: auto;
-}
 .image-editor-dialog-content {
-  background: var(--b3-theme-background);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  display: flex;
-  flex-direction: column;
   resize: both;
-  overflow: hidden;
   min-width: 600px;
   min-height: 400px;
   max-width: 95vw;
   max-height: 95vh;
-}
-.dialog-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--b3-theme-surface-lighter);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-shrink: 0;
-}
-.dialog-header h3 {
-  margin: 0;
-}
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: var(--b3-theme-on-surface);
-  line-height: 1;
-}
-.dialog-body {
-  padding: 16px;
-  background: #282828; /* TUI Editor 默认是暗色 */
-  flex: 1;
-  display: flex;
-  min-height: 0; /* flex child 缩放必需 */
-}
-.dialog-footer {
-  padding: 16px;
-  border-top: 1px solid var(--b3-theme-surface-lighter);
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-shrink: 0;
-}
-.b3-button {
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 4px;
-  border: 1px solid transparent;
-}
-.b3-button--cancel {
-  background-color: transparent;
-  border-color: var(--b3-theme-on-surface-light);
-  color: var(--b3-theme-on-surface);
-}
-.b3-button--primary {
-  background-color: var(--b3-theme-primary);
-  color: var(--b3-theme-on-primary);
-}
-.b3-button--outline {
-  background-color: transparent;
-  border-color: var(--b3-theme-primary);
-  color: var(--b3-theme-primary);
 }
 
 /* 修复 tui-color-picker 被思源全局 CSS 覆盖导致色块变成一条线的问题 */
@@ -497,18 +429,19 @@ function save() {
 
 .custom-submenu-overlay {
   position: absolute;
-  bottom: 80px; /* 原生菜单高度约64px + padding 16px */
-  left: 16px;
-  right: 16px;
-  height: 50px;
-  background-color: #151515; /* 使用深色实色背景，防止和底图重叠看不清 */
+  bottom: 80px; /* 与底部主菜单的距离 */
+  left: 0;
+  right: 0;
+  height: 80px; /* 增加高度，留出更多的上下空白间距 */
+  background-color: rgba(21, 21, 21, 0.95); /* 统一暗色背景 */
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 32px;
+  gap: 40px; /* 选项之间的水平间距 */
   z-index: 100;
   pointer-events: auto;
-  border-bottom: 1px solid #333; /* 与底部主菜单的分割线 */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 .submenu-item {
   display: flex;
@@ -521,6 +454,7 @@ function save() {
 .submenu-label {
   color: #aaa;
   font-weight: 600;
+  white-space: nowrap;
 }
 .b3-select {
   background: transparent;

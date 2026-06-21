@@ -10,18 +10,18 @@
           v-model="searchQuery" 
           type="text" 
           placeholder="搜索资源名称..." 
-          class="b3-text-field"
+          class="am-input"
         />
-        <select v-model="filterType" class="b3-select">
+        <select v-model="filterType" class="am-input">
           <option value="all">全部类型</option>
           <option value="image">图片</option>
           <option value="unreferenced">未引用 (孤儿资源)</option>
           <option value="large">大文件 (>1MB)</option>
         </select>
-        <button class="b3-button b3-button--error" @click="handleCleanupUnreferenced" style="margin-right: 4px;" title="清理所有未引用的资源">
+        <button class="am-btn am-btn--danger" @click="handleCleanupUnreferenced" style="margin-right: 4px;" title="清理所有未引用的资源">
           清理
         </button>
-        <button class="b3-button" @click="loadData" title="刷新资源列表">
+        <button class="am-btn" @click="loadData" title="刷新资源列表">
           <svg v-if="loading" class="icon spinning" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
           <span v-else>刷新</span>
         </button>
@@ -61,6 +61,7 @@ import { openTab } from 'siyuan';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
 import { calculateUnreferencedCleanup, filterAssets, formatAssetSize, isImageAsset, sortAssets } from '../utils/asset-list';
+import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { usePlugin } from '../main';
 import VirtualAssetList from './VirtualAssetList.vue';
@@ -227,7 +228,12 @@ function handleEdit(asset: AssetInfo) {
 }
 
 async function handleDelete(asset: AssetInfo) {
-  const confirmDelete = window.confirm(`确定要删除 ${asset.name} 吗？\n注意：将自动移入回收站或被移除，且文档中的引用块也将被清理。`);
+  const confirmDelete = await showConfirm({
+    title: '确认删除',
+    message: `确定要删除 ${asset.name} 吗？\n注意：将自动移入回收站或被移除，且文档中的引用块也将被清理。`,
+    confirmText: '删除',
+    danger: true
+  });
   if (!confirmDelete) return;
 
   try {
@@ -260,13 +266,16 @@ async function handleCleanupUnreferenced() {
     return;
   }
 
-  const confirmCleanup = window.confirm(
-    `【警告】此操作将永久清理所有未被文档引用的资源文件（孤儿资源）。\n\n` +
-    `统计信息：\n` +
-    `• 待清理资源数量：${cleanup.count} 个\n` +
-    `• 预计释放空间：${cleanup.sizeText}\n\n` +
-    `该操作直接删除物理文件，无法撤销！确定要执行清理吗？`
-  );
+  const confirmCleanup = await showConfirm({
+    title: '清理孤儿资源',
+    message: `【警告】此操作将永久清理所有未被文档引用的资源文件（孤儿资源）。\n\n` +
+      `统计信息：\n` +
+      `• 待清理资源数量：${cleanup.count} 个\n` +
+      `• 预计释放空间：${cleanup.sizeText}\n\n` +
+      `该操作直接删除物理文件，无法撤销！确定要执行清理吗？`,
+    confirmText: '执行清理',
+    danger: true
+  });
 
   if (!confirmCleanup) return;
 
@@ -316,97 +325,6 @@ async function handleCleanupUnreferenced() {
 .actions {
   display: flex;
   gap: 12px;
-}
-.b3-text-field, .b3-select {
-  box-sizing: border-box;
-  height: 32px;
-  padding: 4px 8px;
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 4px;
-  background: var(--b3-theme-background-light);
-  color: var(--b3-theme-on-background);
-  font-size: 14px;
-}
-.b3-button {
-  cursor: pointer;
-  box-sizing: border-box;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 4px;
-  border: 1px solid transparent;
-  background-color: var(--b3-theme-primary);
-  color: var(--b3-theme-on-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-}
-.b3-button--error {
-  background-color: var(--b3-theme-error);
-  color: var(--b3-theme-on-error);
-}
-
-/* 自定义重命名弹窗样式 */
-.rename-dialog-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 1001;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-.rename-dialog-content {
-  background: var(--b3-theme-background);
-  color: var(--b3-theme-on-background);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  width: 400px;
-  max-width: 90vw;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.rename-dialog-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--b3-theme-surface-lighter);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.rename-dialog-header h3 {
-  margin: 0;
-  font-size: 16px;
-}
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: var(--b3-theme-on-surface);
-  line-height: 1;
-}
-.rename-dialog-body {
-  padding: 16px;
-}
-.rename-dialog-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--b3-theme-surface-lighter);
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-}
-.b3-button--cancel {
-  background-color: transparent;
-  border-color: var(--b3-theme-on-surface-light);
-  color: var(--b3-theme-on-surface);
-}
-.b3-button--primary {
-  background-color: var(--b3-theme-primary);
-  color: var(--b3-theme-on-primary);
 }
 .spinning {
   animation: spin 1s linear infinite;

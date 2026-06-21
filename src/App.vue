@@ -1,12 +1,13 @@
 <template>
-  <div class="plugin-app-main" v-if="visible">
-    <div class="manager-dialog">
-      <div class="dialog-close-btn" @click="closeManager">
-        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <ConfirmDialog />
+  <div class="am-dialog-overlay" v-if="visible">
+    <div class="am-dialog manager-dialog">
+      <button class="am-dialog__close" style="position: absolute; top: 16px; right: 16px; z-index: 10;" @click="closeManager" aria-label="关闭">
+        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
-      </div>
+      </button>
       <AssetsManager />
     </div>
   </div>
@@ -19,13 +20,18 @@
   />
 
   <!-- 全局重命名弹窗 -->
-  <div v-if="globalRenameVisible && globalRenameAsset" class="rename-dialog-overlay">
-    <div class="rename-dialog-content">
-      <div class="rename-dialog-header">
+  <div v-if="globalRenameVisible && globalRenameAsset" class="am-dialog-overlay" style="z-index: 1100;">
+    <div class="am-dialog" style="width: 400px; max-width: 90vw;">
+      <div class="am-dialog__header">
         <h3>重命名资源</h3>
-        <button class="close-btn" @click="closeGlobalRenameDialog">×</button>
+        <button class="am-dialog__close" @click="closeGlobalRenameDialog" aria-label="关闭">
+          <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
       </div>
-      <div class="rename-dialog-body">
+      <div class="am-dialog__body">
         <div style="margin-bottom: 12px; color: var(--b3-theme-on-surface-light); word-break: break-all; font-size: 13px;">
           原文件名: <strong>{{ globalRenameAsset.name }}</strong>
         </div>
@@ -34,15 +40,15 @@
           <input 
             v-model="globalRenameNewName" 
             type="text" 
-            class="b3-text-field" 
-            style="width: 100%; box-sizing: border-box;"
+            class="am-input" 
+            style="width: 100%;"
             @keyup.enter="submitGlobalRename"
           />
         </div>
       </div>
-      <div class="rename-dialog-footer">
-        <button class="b3-button b3-button--cancel" @click="closeGlobalRenameDialog">取消</button>
-        <button class="b3-button b3-button--primary" @click="submitGlobalRename">确认修改</button>
+      <div class="am-dialog__footer">
+        <button class="am-btn am-btn--ghost" @click="closeGlobalRenameDialog">取消</button>
+        <button class="am-btn am-btn--primary" @click="submitGlobalRename">确认修改</button>
       </div>
     </div>
   </div>
@@ -53,10 +59,12 @@ import { ref, onMounted } from 'vue';
 import { usePlugin } from '@/main';
 import AssetsManager from './components/AssetsManager.vue';
 import ImageEditorDialog from './components/ImageEditorDialog.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
 import { getAssetInfoByName, deleteAssetFile, type AssetInfo } from './utils/siyuan-db';
 import { saveAssetFile, renameAssetFile } from './utils/file-system';
 import { replaceAssetInBlocks } from './utils/siyuan-block';
 import { buildEditedAssetName, resolveRenameAssetName } from './utils/asset-actions';
+import { showConfirm } from './utils/confirm';
 import { pushMsg } from './api';
 
 const visible = ref(false);
@@ -134,7 +142,12 @@ async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: strin
     }
     
     // 3. 询问是否删除旧图片
-    const delOld = window.confirm(`图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`);
+    const delOld = await showConfirm({
+      title: '删除原文件',
+      message: `图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`,
+      confirmText: '放入回收站',
+      danger: true
+    });
     if (delOld) {
       await deleteAssetFile(oldName);
     }
@@ -161,8 +174,13 @@ async function submitGlobalRename() {
   const asset = globalRenameAsset.value;
   const oldName = asset.name;
 
-  const renameResult = resolveRenameAssetName(oldName, globalRenameNewName.value, (oldExt, newExt) => {
-    return window.confirm(`检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`);
+  const renameResult = await resolveRenameAssetName(oldName, globalRenameNewName.value, async (oldExt, newExt) => {
+    return await showConfirm({
+      title: '修改文件后缀名',
+      message: `检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`,
+      confirmText: '确认修改',
+      danger: true
+    });
   });
 
   if (renameResult.ok && !renameResult.changed) {
@@ -213,100 +231,10 @@ async function submitGlobalRename() {
 </script>
 
 <style lang="scss" scoped>
-.plugin-app-main {
-  width: 100vw;
-  height: 100vh;
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 100; /* 高层级覆盖 */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background-color: rgba(0, 0, 0, 0.4); /* 半透明遮罩 */
-  pointer-events: auto;
-}
-
 .manager-dialog {
   width: 90vw;
   height: 90vh;
-  background-color: var(--b3-theme-background);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  display: flex;
-  flex-direction: column;
   position: relative;
-  overflow: hidden;
-}
-
-.dialog-close-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  cursor: pointer;
-  color: var(--b3-theme-on-surface);
-  z-index: 10;
-  padding: 4px;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-  
-  &:hover {
-    background-color: var(--b3-theme-surface-lighter);
-  }
-}
-
-/* 全局重命名弹窗 */
-.rename-dialog-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 1100;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  pointer-events: auto;
-}
-.rename-dialog-content {
-  background: var(--b3-theme-background);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  display: flex;
-  flex-direction: column;
-  width: 400px;
-  max-width: 90vw;
-  overflow: hidden;
-}
-.rename-dialog-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--b3-theme-surface-lighter);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.rename-dialog-header h3 {
-  margin: 0;
-  color: var(--b3-theme-on-background);
-}
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: var(--b3-theme-on-surface);
-  line-height: 1;
-}
-.rename-dialog-body {
-  padding: 16px;
-}
-.rename-dialog-footer {
-  padding: 16px;
-  border-top: 1px solid var(--b3-theme-surface-lighter);
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
 }
 </style>
 

@@ -1,0 +1,209 @@
+// ===== 设计令牌 =====
+
+// 间距系统 (4px 基准)
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 12px;
+$spacing-lg: 16px;
+$spacing-xl: 24px;
+
+// 圆角
+$radius-sm: 4px;
+$radius-md: 8px;
+$radius-lg: 12px;
+
+// 字号
+$font-size-xs: 11px;
+$font-size-sm: 12px;
+$font-size-md: 13px;
+$font-size-base: 14px;
+$font-size-lg: 16px;
+$font-size-xl: 18px;
+
+// 阴影层级
+$shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.1);
+$shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
+$shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.2);
+$shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.25);
+
+// z-index 层级表
+$z-base: 1;
+$z-dropdown: 10;
+$z-sticky: 20;
+$z-overlay: 100;
+$z-modal: 200;
+$z-modal-nested: 300;
+$z-tooltip: 400;
+$z-preview: 500;
+
+// 动画
+$transition-fast: 0.15s ease;
+$transition-normal: 0.2s ease;
+$transition-slow: 0.3s ease;
+
+// ===== 基础输入框 =====
+.am-input {
+  box-sizing: border-box;
+  height: 32px;
+  padding: $spacing-xs $spacing-sm;
+  border: 1px solid var(--b3-theme-surface-lighter);
+  border-radius: $radius-sm;
+  background: var(--b3-theme-background-light);
+  color: var(--b3-theme-on-background);
+  font-size: $font-size-base;
+  transition: all $transition-fast;
+
+  &:focus {
+    border-color: var(--b3-theme-primary);
+    box-shadow: 0 0 0 2px rgba(var(--b3-theme-primary-rgb, 66, 133, 244), 0.2);
+    outline: none;
+  }
+}
+
+// ===== 按钮系统 =====
+.am-btn {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: $radius-sm;
+  font-size: $font-size-base;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all $transition-fast;
+  user-select: none;
+  height: 32px;
+  padding: 0 14px;
+  background-color: var(--b3-theme-background-light);
+  color: var(--b3-theme-on-background);
+
+  &:hover {
+    background-color: var(--b3-theme-surface-lighter);
+  }
+
+  // 小尺寸（列表内操作按钮）
+  &--sm {
+    height: 26px;
+    padding: 0 10px;
+    font-size: $font-size-sm;
+  }
+
+  // 主色按钮
+  &--primary {
+    background-color: var(--b3-theme-primary);
+    color: var(--b3-theme-on-primary);
+
+    &:hover { filter: brightness(1.1); }
+    &:active { filter: brightness(0.95); transform: scale(0.98); }
+  }
+
+  // 轮廓按钮
+  &--outline {
+    background-color: transparent;
+    border-color: var(--b3-theme-primary);
+    color: var(--b3-theme-primary);
+
+    &:hover { background-color: var(--b3-theme-primary); color: var(--b3-theme-on-primary); }
+    &:active { transform: scale(0.98); }
+  }
+
+  // 危险按钮
+  &--danger {
+    background-color: var(--b3-theme-error);
+    color: var(--b3-theme-on-error);
+
+    &:hover { filter: brightness(1.1); }
+    &:active { filter: brightness(0.95); transform: scale(0.98); }
+  }
+
+  // 取消/次要按钮
+  &--ghost {
+    background-color: transparent;
+    border-color: var(--b3-theme-on-surface-light);
+    color: var(--b3-theme-on-surface);
+
+    &:hover { 
+      background-color: var(--b3-theme-surface-lighter);
+      color: var(--b3-theme-on-background);
+    }
+  }
+
+  // 禁用态
+  &:disabled, &[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+}
+
+// ===== 弹窗系统 =====
+.am-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  z-index: $z-modal;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.am-dialog {
+  background: var(--b3-theme-background);
+  border-radius: $radius-md;
+  box-shadow: $shadow-lg;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--b3-theme-on-background);
+
+  &__header {
+    padding: $spacing-lg;
+    border-bottom: 1px solid var(--b3-theme-surface-lighter);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+
+    h3 { 
+      margin: 0; 
+      font-size: $font-size-lg; 
+      color: var(--b3-theme-on-background);
+    }
+  }
+
+  &__body {
+    padding: $spacing-lg;
+    flex: 1;
+    min-height: 0;
+  }
+
+  &__footer {
+    padding: $spacing-md $spacing-lg;
+    border-top: 1px solid var(--b3-theme-surface-lighter);
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: $spacing-md;
+    flex-shrink: 0;
+  }
+
+  &__close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--b3-theme-on-surface);
+    line-height: 1;
+    padding: $spacing-xs;
+    border-radius: $radius-sm;
+    transition: background-color $transition-fast;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &:hover { background-color: var(--b3-theme-surface-lighter); }
+  }
+}
