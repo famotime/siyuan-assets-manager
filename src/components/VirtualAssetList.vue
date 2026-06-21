@@ -30,7 +30,14 @@
             <span v-else>📁</span>
           </div>
           
-          <div class="asset-name" style="flex: 1; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 16px;" :title="item.data.name">
+          <div
+            class="asset-name"
+            style="flex: 1; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 16px;"
+            :title="item.data.name"
+            @mouseenter="showPreview($event, item.data)"
+            @mousemove="updatePreviewPos($event)"
+            @mouseleave="hidePreview"
+          >
             {{ splitFileName(item.data.name).name }}
           </div>
 
@@ -54,12 +61,17 @@
         </div>
       </div>
     </div>
+
+    <!-- 悬浮图片预览弹窗 -->
+    <div v-if="previewUrl" class="image-hover-preview" :style="previewStyle">
+      <img :src="previewUrl" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useVirtualList } from '@vueuse/core';
-import { toRefs } from 'vue';
+import { ref, toRefs, onUnmounted } from 'vue';
 import type { AssetInfo } from '../utils/siyuan-db';
 
 const props = defineProps<{
@@ -102,6 +114,72 @@ function splitFileName(fullName: string) {
 function isImage(name: string) {
   return /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
 }
+
+// 悬浮图片预览相关状态
+const previewUrl = ref('');
+const previewStyle = ref({
+  top: '0px',
+  left: '0px',
+});
+const mouseX = ref(0);
+const mouseY = ref(0);
+let previewTimeout: number | null = null;
+
+function showPreview(event: MouseEvent, asset: AssetInfo) {
+  if (!isImage(asset.name)) return;
+  
+  hidePreview();
+  
+  mouseX.value = event.clientX;
+  mouseY.value = event.clientY;
+  
+  previewTimeout = window.setTimeout(() => {
+    previewUrl.value = `/assets/${asset.name}`;
+    positionPreview(mouseX.value, mouseY.value);
+  }, 250); // 250ms 防抖，提供高级的 hover 体验
+}
+
+function updatePreviewPos(event: MouseEvent) {
+  mouseX.value = event.clientX;
+  mouseY.value = event.clientY;
+  if (previewUrl.value) {
+    positionPreview(mouseX.value, mouseY.value);
+  }
+}
+
+function positionPreview(clientX: number, clientY: number) {
+  const offsetX = 15;
+  const offsetY = 15;
+  let x = clientX + offsetX;
+  let y = clientY + offsetY;
+  
+  const previewWidth = 240;
+  const previewHeight = 240;
+  
+  if (x + previewWidth > window.innerWidth) {
+    x = clientX - previewWidth - offsetX;
+  }
+  if (y + previewHeight > window.innerHeight) {
+    y = clientY - previewHeight - offsetY;
+  }
+  
+  previewStyle.value = {
+    top: `${y}px`,
+    left: `${x}px`,
+  };
+}
+
+function hidePreview() {
+  if (previewTimeout) {
+    clearTimeout(previewTimeout);
+    previewTimeout = null;
+  }
+  previewUrl.value = '';
+}
+
+onUnmounted(() => {
+  hidePreview();
+});
 </script>
 
 <style scoped>
@@ -125,5 +203,32 @@ function isImage(name: string) {
 }
 .list-header > div:hover {
   color: var(--b3-theme-primary);
+}
+
+.image-hover-preview {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background-color: var(--b3-theme-background-light);
+  border: 1px solid var(--b3-theme-surface-lighter);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 8px;
+  max-width: 240px;
+  max-height: 240px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-sizing: border-box;
+}
+
+.image-hover-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
 }
 </style>
