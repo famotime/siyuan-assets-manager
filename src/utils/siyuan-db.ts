@@ -136,3 +136,77 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
 export async function deleteAssetFile(fileName: string): Promise<void> {
   await removeFile("/data/assets/" + fileName);
 }
+
+/**
+ * 根据资源文件名获取单个 Asset 信息，包括物理文件大小和被哪些 Block 引用
+ */
+export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | null> {
+  // 1. 尝试获取物理文件大小。如果 Electron 环境可用，用 fs.stat，否则通过 HEAD 请求
+  let size = 0;
+  let updated = Date.now();
+  
+  let fs: any;
+  let pathLib: any;
+  let dataDir = "";
+  try {
+    fs = (window as any).require("fs");
+    pathLib = (window as any).require("path");
+    dataDir = (window as any).siyuan?.config?.system?.dataDir;
+  } catch (e) {}
+
+  if (fs && pathLib && dataDir) {
+    try {
+      const absolutePath = pathLib.join(dataDir, "assets", fileName);
+      const stat = fs.statSync(absolutePath);
+      size = stat.size;
+      updated = stat.mtimeMs || Date.now();
+    } catch (e) {
+      console.warn("FS stat failed for", fileName, e);
+    }
+  } else {
+    try {
+      const response = await fetch(`/assets/${fileName}`, { method: 'HEAD' });
+      const contentLength = response.headers.get('content-length');
+      if (contentLength) {
+        size = parseInt(contentLength, 10);
+      }
+    } catch (e) {
+      console.warn("HEAD request failed for", fileName, e);
+    }
+  }
+
+  // 2. 查询所有引用了该 asset 的 blocks
+  const blocks: any[] = await sqlQuery(
+    `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/${fileName}%' LIMIT 1000`
+  );
+
+  const references: BlockRef[] = [];
+  if (blocks && blocks.length > 0) {
+    for (const block of blocks) {
+      const referencedAssets = extractAssetsFromMarkdown(block.markdown || "");
+      if (referencedAssets.includes(fileName)) {
+        references.push({
+          id: block.id,
+          root_id: block.root_id,
+          box: block.box,
+          content: block.content,
+          markdown: block.markdown,
+          path: block.path,
+        });
+      }
+    }
+  }
+
+  const docIds = new Set(references.map(r => r.root_id));
+
+  return {
+    name: fileName,
+    size,
+    updated,
+    isDir: false,
+    references,
+    refCount: references.length,
+    docCount: docIds.size
+  };
+}
+

@@ -1,6 +1,7 @@
 import {
   Plugin,
   getFrontend,
+  IMenuBaseDetail,
 } from "siyuan";
 import "@/index.scss";
 import PluginInfoString from '@/../plugin.json'
@@ -63,6 +64,66 @@ export default class PluginSample extends Plugin {
     console.log('Plugin loaded, the plugin is ', this)
 
     init(this)
+
+    this.eventBus.on("open-menu-image", (event: CustomEvent<IMenuBaseDetail>) => {
+      const detail = event.detail;
+      const assetName = this.getAssetNameFromElement(detail.element);
+      if (!assetName) return;
+
+      detail.menu.addItem({
+        label: "资源管家",
+        icon: "iconAssetsManager",
+        type: "submenu",
+        submenu: [
+          {
+            label: "编辑",
+            click: () => {
+              if ((window as any)._siyuan_assets_manager_open_editor) {
+                (window as any)._siyuan_assets_manager_open_editor(assetName);
+              }
+            }
+          },
+          {
+            label: "重命名",
+            click: () => {
+              if ((window as any)._siyuan_assets_manager_open_rename) {
+                (window as any)._siyuan_assets_manager_open_rename(assetName);
+              }
+            }
+          }
+        ]
+      });
+    });
+  }
+
+  private getAssetNameFromElement(element: HTMLElement): string | null {
+    if (!element) return null;
+    let src = element.getAttribute("src") || element.getAttribute("data-src");
+    
+    if (!src) {
+      const img = element.querySelector("img");
+      if (img) {
+        src = img.getAttribute("src") || img.getAttribute("data-src");
+      }
+    }
+    
+    if (!src) {
+      src = element.closest("[data-src]")?.getAttribute("data-src") || null;
+    }
+    
+    if (!src) return null;
+    
+    const match = src.match(/assets\/([^\s"'()\]\?#]+)/);
+    if (match) {
+      return match[1];
+    }
+    
+    if (src.includes("assets/")) {
+      const parts = src.split("assets/");
+      return parts[parts.length - 1].split("?")[0].split("#")[0];
+    }
+    
+    return null;
   }
 
   onunload() {

@@ -48,44 +48,9 @@
       正在扫描 Siyuan 数据库并构建资源关联表，请稍候...
     </div>
 
-    <ImageEditorDialog 
-      v-model:visible="editorVisible"
-      :assetName="currentEditAsset?.name || ''"
-      @save-edited="handleSaveEdited"
-    />
-
     <!-- 限制在当前界面内的悬浮图片预览弹窗 -->
     <div v-if="previewUrl" class="image-hover-preview" :style="previewStyle">
       <img :src="previewUrl" />
-    </div>
-
-    <!-- 自定义重命名弹窗 -->
-    <div v-if="renameDialogVisible && currentRenameAsset" class="rename-dialog-overlay">
-      <div class="rename-dialog-content">
-        <div class="rename-dialog-header">
-          <h3>重命名资源</h3>
-          <button class="close-btn" @click="closeRenameDialog">×</button>
-        </div>
-        <div class="rename-dialog-body">
-          <div style="margin-bottom: 12px; color: var(--b3-theme-on-surface-light); word-break: break-all; font-size: 13px;">
-            原文件名: <strong>{{ currentRenameAsset.name }}</strong>
-          </div>
-          <div class="form-item">
-            <label style="display: block; margin-bottom: 8px; font-weight: bold; font-size: 13px;">新文件名 (需保留相同的后缀名):</label>
-            <input 
-              v-model="renameNewName" 
-              type="text" 
-              class="b3-text-field" 
-              style="width: 100%; box-sizing: border-box;"
-              @keyup.enter="submitRename"
-            />
-          </div>
-        </div>
-        <div class="rename-dialog-footer">
-          <button class="b3-button b3-button--cancel" @click="closeRenameDialog">取消</button>
-          <button class="b3-button b3-button--primary" @click="submitRename">确认修改</button>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -94,29 +59,19 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
-import { replaceAssetInBlocks, removeAssetFromBlocks } from '../utils/siyuan-block';
-import { saveAssetFile, renameAssetFile } from '../utils/file-system';
+import { removeAssetFromBlocks } from '../utils/siyuan-block';
 import { pushMsg } from '../api';
 import { usePlugin } from '../main';
 import VirtualAssetList from './VirtualAssetList.vue';
-import ImageEditorDialog from './ImageEditorDialog.vue';
 
 const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
 const searchQuery = ref('');
 const filterType = ref('all');
 
-// 重命名相关状态
-const renameDialogVisible = ref(false);
-const currentRenameAsset = ref<AssetInfo | null>(null);
-const renameNewName = ref('');
-
 // 排序状态
 const sortField = ref<'name' | 'ext' | 'size' | 'docCount'>('size');
 const sortOrder = ref<'asc' | 'desc'>('desc');
-
-const editorVisible = ref(false);
-const currentEditAsset = ref<AssetInfo | null>(null);
 
 const containerEl = ref<HTMLElement | null>(null);
 
@@ -196,6 +151,7 @@ function handleHidePreview() {
 
 onUnmounted(() => {
   handleHidePreview();
+  window.removeEventListener('assets-manager-refresh', handleGlobalRefresh);
 });
 
 async function loadData() {
@@ -209,8 +165,13 @@ async function loadData() {
   }
 }
 
+const handleGlobalRefresh = () => {
+  loadData();
+};
+
 onMounted(() => {
   loadData();
+  window.addEventListener('assets-manager-refresh', handleGlobalRefresh);
 });
 
 const filteredAssets = computed(() => {
@@ -294,8 +255,9 @@ async function handleOpenDocs(asset: AssetInfo) {
 }
 
 function handleEdit(asset: AssetInfo) {
-  currentEditAsset.value = asset;
-  editorVisible.value = true;
+  if ((window as any)._siyuan_assets_manager_open_editor) {
+    (window as any)._siyuan_assets_manager_open_editor(asset.name);
+  }
 }
 
 async function handleDelete(asset: AssetInfo) {
@@ -319,119 +281,9 @@ async function handleDelete(asset: AssetInfo) {
   }
 }
 
-async function handleSaveEdited(payload: { oldName: string, dataUrl: string }) {
-  const { oldName, dataUrl } = payload;
-  
-  const ext = oldName.split('.').pop();
-  const baseName = oldName.substring(0, oldName.lastIndexOf('.'));
-  const timestamp = Date.now();
-  const newName = `${baseName}_edited_${timestamp}.${ext || 'png'}`;
-  
-  const res = await fetch(dataUrl);
-  const blob = await res.blob();
-  
-  await saveAssetFile(blob, newName);
-  
-  const assetRecord = assets.value.find(a => a.name === oldName);
-  if (assetRecord && assetRecord.references.length > 0) {
-    await replaceAssetInBlocks(assetRecord.references, oldName, newName);
-  }
-  
-  const delOld = window.confirm(`图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`);
-  if (delOld) {
-    await deleteAssetFile(oldName);
-  }
-  
-  pushMsg("编辑已成功保存并同步到所有引用文档！");
-  loadData();
-}
-
-function closeRenameDialog() {
-  renameDialogVisible.value = false;
-  currentRenameAsset.value = null;
-  renameNewName.value = '';
-}
-
 function handleRename(asset: AssetInfo) {
-  currentRenameAsset.value = asset;
-  renameNewName.value = asset.name;
-  renameDialogVisible.value = true;
-}
-
-async function submitRename() {
-  if (!currentRenameAsset.value) return;
-  const asset = currentRenameAsset.value;
-  const oldName = asset.name;
-  const oldExtIdx = oldName.lastIndexOf('.');
-  const oldExt = oldExtIdx <= 0 ? '' : oldName.slice(oldExtIdx);
-  
-  let newName = renameNewName.value.trim();
-  if (newName === oldName) {
-    closeRenameDialog();
-    return;
-  }
-  if (!newName) {
-    pushMsg("文件名不能为空");
-    return;
-  }
-
-  // 非法字符校验 \ / : * ? " < > |
-  const invalidChars = /[\\/:*?"<>|]/;
-  if (invalidChars.test(newName)) {
-    pushMsg("文件名不能包含字符: \\ / : * ? \" < > |");
-    return;
-  }
-
-  // 后缀名验证
-  const newExtIdx = newName.lastIndexOf('.');
-  const newExt = newExtIdx <= 0 ? '' : newName.slice(newExtIdx);
-  
-  if (newExt !== oldExt) {
-    if (newExt) {
-      const confirmExt = window.confirm(`检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`);
-      if (!confirmExt) return;
-    } else {
-      // 自动补齐后缀
-      newName = newName + oldExt;
-    }
-  }
-
-  closeRenameDialog();
-  loading.value = true;
-  try {
-    // 1. 重命名物理文件
-    const success = await renameAssetFile(oldName, newName);
-    if (!success) {
-      pushMsg("重命名物理文件失败");
-      return;
-    }
-
-    // 2. 联动更新文档中该资源的引用并同步修改内存数据，规避 SQL 索引延迟
-    if (asset.references && asset.references.length > 0) {
-      await replaceAssetInBlocks(asset.references, oldName, newName);
-      
-      const regex = new RegExp(`assets/${oldName}`, "g");
-      const newPath = `assets/${newName}`;
-      asset.references.forEach(ref => {
-        if (ref.markdown) {
-          ref.markdown = ref.markdown.replace(regex, newPath);
-        }
-      });
-    }
-
-    // 3. 就地更新内存中该 asset 的名字，触发 Vue 响应式 UI 刷新
-    asset.name = newName;
-
-    if (asset.references && asset.references.length > 0) {
-      pushMsg(`重命名成功！已自动更新 ${asset.references.length} 个文档引用`);
-    } else {
-      pushMsg("重命名成功！");
-    }
-  } catch (e) {
-    console.error("Failed to rename asset", e);
-    pushMsg("重命名操作失败");
-  } finally {
-    loading.value = false;
+  if ((window as any)._siyuan_assets_manager_open_rename) {
+    (window as any)._siyuan_assets_manager_open_rename(asset.name);
   }
 }
 

@@ -49,7 +49,7 @@
         </span>
         <button class="b3-button b3-button--outline" @click="downloadLocal" style="margin-right: 8px;" title="下载当前编辑的图片到本地电脑">下载到本地</button>
         <button class="b3-button b3-button--cancel" @click="close" title="取消编辑并关闭窗口">取消</button>
-        <button class="b3-button b3-button--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存并更新引用</button>
+        <button class="b3-button b3-button--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存</button>
       </div>
     </div>
   </div>
@@ -403,6 +403,7 @@ function save() {
   display: flex;
   justify-content: center;
   align-items: center;
+  pointer-events: auto;
 }
 .image-editor-dialog-content {
   background: var(--b3-theme-background);
