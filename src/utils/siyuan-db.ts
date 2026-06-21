@@ -16,6 +16,7 @@ export interface AssetInfo {
   isDir: boolean;
   references: BlockRef[];
   refCount: number;
+  docCount: number; // 引用文档数
 }
 
 /**
@@ -52,6 +53,7 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
         isDir: false,
         references: [],
         refCount: 0,
+        docCount: 0,
       });
     }
   }
@@ -118,6 +120,11 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
         }
       }
     }
+  }
+
+  for (const asset of assetsMap.values()) {
+    const docIds = new Set(asset.references.map(r => r.root_id));
+    asset.docCount = docIds.size;
   }
 
   return Array.from(assetsMap.values());

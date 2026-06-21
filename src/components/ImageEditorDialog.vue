@@ -133,6 +133,9 @@ function initEditor(url: string) {
       },
       theme: {
         // 默认暗色主题
+        'common.bi.image': '',
+        'common.bisize.width': '0px',
+        'common.bisize.height': '0px'
       },
       menu: ['crop', 'draw', 'shape', 'icon', 'text', 'filter'],
       initMenu: 'filter',
@@ -534,5 +537,10 @@ function save() {
 }
 .color-picker-input::-webkit-color-swatch-wrapper {
   padding: 0;
+}
+
+/* 隐藏 TUI Image Editor 左上角的 LOGO / 标题 */
+:deep(.tui-image-editor-header-logo) {
+  display: none !important;
 }
 </style>

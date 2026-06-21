@@ -1,7 +1,7 @@
 <template>
   <div class="assets-manager-container">
     <div class="header">
-      <h2>Siyuan 资源管家</h2>
+      <h2>资源管家</h2>
       <div class="stats">
         <span>总计: {{ sortedAssets.length }} / {{ assets.length }} 个资源</span>
       </div>
@@ -20,7 +20,7 @@
         </select>
         <button class="b3-button" @click="loadData">
           <svg v-if="loading" class="icon spinning" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
-          <span v-else>刷新数据</span>
+          <span v-else>刷新</span>
         </button>
       </div>
     </div>
@@ -31,7 +31,7 @@
         :sortField="sortField"
         :sortOrder="sortOrder"
         @sort="handleSortChange"
-        @view-refs="handleViewRefs"
+        @open-docs="handleOpenDocs"
         @edit="handleEdit"
         @delete="handleDelete"
       />
@@ -51,10 +51,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { openTab } from 'siyuan';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
-import { replaceAssetInBlocks } from '../utils/siyuan-block';
+import { replaceAssetInBlocks, removeAssetFromBlocks } from '../utils/siyuan-block';
 import { saveAssetFile } from '../utils/file-system';
 import { pushMsg } from '../api';
+import { usePlugin } from '../main';
 import VirtualAssetList from './VirtualAssetList.vue';
 import ImageEditorDialog from './ImageEditorDialog.vue';
 
@@ -64,7 +66,7 @@ const searchQuery = ref('');
 const filterType = ref('all');
 
 // 排序状态
-const sortField = ref<'name' | 'size' | 'refCount'>('size');
+const sortField = ref<'name' | 'ext' | 'size' | 'docCount'>('size');
 const sortOrder = ref<'asc' | 'desc'>('desc');
 
 const editorVisible = ref(false);
@@ -93,7 +95,7 @@ const filteredAssets = computed(() => {
     if (filterType.value === 'image' && !/\.(png|jpe?g|gif|webp|svg)$/i.test(asset.name)) {
       return false;
     }
-    if (filterType.value === 'unreferenced' && asset.refCount > 0) {
+    if (filterType.value === 'unreferenced' && asset.docCount > 0) {
       return false;
     }
     if (filterType.value === 'large' && asset.size < 1024 * 1024) {
@@ -106,8 +108,18 @@ const filteredAssets = computed(() => {
 const sortedAssets = computed(() => {
   const result = [...filteredAssets.value];
   result.sort((a, b) => {
-    let valA = a[sortField.value];
-    let valB = b[sortField.value];
+    let valA: string | number;
+    let valB: string | number;
+    
+    if (sortField.value === 'ext') {
+      const idxA = a.name.lastIndexOf('.');
+      valA = idxA <= 0 ? '' : a.name.slice(idxA + 1).toLowerCase();
+      const idxB = b.name.lastIndexOf('.');
+      valB = idxB <= 0 ? '' : b.name.slice(idxB + 1).toLowerCase();
+    } else {
+      valA = a[sortField.value];
+      valB = b[sortField.value];
+    }
     
     if (typeof valA === 'string' && typeof valB === 'string') {
       const cmp = valA.localeCompare(valB);
@@ -121,7 +133,7 @@ const sortedAssets = computed(() => {
   return result;
 });
 
-function handleSortChange(field: 'name' | 'size' | 'refCount') {
+function handleSortChange(field: 'name' | 'ext' | 'size' | 'docCount') {
   if (sortField.value === field) {
     sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
   } else {
@@ -130,9 +142,29 @@ function handleSortChange(field: 'name' | 'size' | 'refCount') {
   }
 }
 
-function handleViewRefs(asset: AssetInfo) {
-  let refsText = asset.references.map(r => r.path || r.id).join('\n');
-  pushMsg(`被 ${asset.refCount} 个地方引用:\n${refsText}`, 5000);
+async function handleOpenDocs(asset: AssetInfo) {
+  if (asset.references.length === 0) {
+    pushMsg("该资源未被任何文档引用");
+    return;
+  }
+  
+  const plugin = usePlugin();
+  try {
+    for (const ref of asset.references) {
+      await openTab({
+        app: plugin.app,
+        doc: {
+          id: ref.id,
+          action: ["cb-get-hl", "cb-get-focus"]
+        },
+        keepCursor: true
+      });
+    }
+    pushMsg(`已在后台打开并定位到 ${asset.references.length} 个引用位置`);
+  } catch (e) {
+    console.error("Failed to open documents", e);
+    pushMsg("打开文档失败");
+  }
 }
 
 function handleEdit(asset: AssetInfo) {
@@ -141,12 +173,19 @@ function handleEdit(asset: AssetInfo) {
 }
 
 async function handleDelete(asset: AssetInfo) {
-  const confirmDelete = window.confirm(`确定要删除 ${asset.name} 吗？\n注意：将自动移入回收站或被移除。`);
+  const confirmDelete = window.confirm(`确定要删除 ${asset.name} 吗？\n注意：将自动移入回收站或被移除，且文档中的引用块也将被清理。`);
   if (!confirmDelete) return;
 
   try {
+    // 1. 删除物理文件
     await deleteAssetFile(asset.name);
-    pushMsg(`资源 ${asset.name} 已删除`);
+    
+    // 2. 清除文档中的所有引用
+    if (asset.references && asset.references.length > 0) {
+      await removeAssetFromBlocks(asset.references, asset.name);
+    }
+    
+    pushMsg(`资源 ${asset.name} 及其文档引用已删除`);
     assets.value = assets.value.filter(a => a.name !== asset.name);
   } catch (e) {
     console.error(e);
@@ -198,6 +237,7 @@ async function handleSaveEdited(payload: { oldName: string, dataUrl: string }) {
   margin-bottom: 16px;
   flex-wrap: wrap;
   gap: 12px;
+  padding-right: 40px; /* 为右上角关闭按钮预留空间，防止重叠 */
 }
 .header h2 {
   margin: 0;
@@ -211,21 +251,28 @@ async function handleSaveEdited(payload: { oldName: string, dataUrl: string }) {
   gap: 12px;
 }
 .b3-text-field, .b3-select {
+  box-sizing: border-box;
+  height: 32px;
   padding: 4px 8px;
   border: 1px solid var(--b3-theme-surface-lighter);
   border-radius: 4px;
   background: var(--b3-theme-background-light);
   color: var(--b3-theme-on-background);
+  font-size: 14px;
 }
 .b3-button {
   cursor: pointer;
-  padding: 6px 12px;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 12px;
   border-radius: 4px;
   border: 1px solid transparent;
   background-color: var(--b3-theme-primary);
   color: var(--b3-theme-on-primary);
   display: flex;
   align-items: center;
+  justify-content: center;
+  font-size: 14px;
 }
 .spinning {
   animation: spin 1s linear infinite;

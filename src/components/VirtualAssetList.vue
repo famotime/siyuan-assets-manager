@@ -5,11 +5,14 @@
       <div style="flex: 1; cursor: pointer; user-select: none;" @click="handleSort('name')">
         文件名 <span v-if="sortField === 'name'">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
-      <div style="width: 120px; cursor: pointer; user-select: none;" @click="handleSort('size')">
+      <div style="width: 80px; cursor: pointer; user-select: none;" @click="handleSort('ext')">
+        后缀名 <span v-if="sortField === 'ext'">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+      </div>
+      <div style="width: 100px; cursor: pointer; user-select: none;" @click="handleSort('size')">
         大小 <span v-if="sortField === 'size'">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
-      <div style="width: 100px; cursor: pointer; user-select: none;" @click="handleSort('refCount')">
-        引用次数 <span v-if="sortField === 'refCount'">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+      <div style="width: 100px; cursor: pointer; user-select: none;" @click="handleSort('docCount')">
+        引用文档数 <span v-if="sortField === 'docCount'">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
       <div style="width: 180px; text-align: right;">操作</div>
     </div>
@@ -28,19 +31,23 @@
           </div>
           
           <div class="asset-name" style="flex: 1; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 16px;" :title="item.data.name">
-            {{ item.data.name }}
+            {{ splitFileName(item.data.name).name }}
           </div>
 
-          <div class="asset-size" style="width: 120px; color: var(--b3-theme-on-surface-light); flex-shrink: 0;">
+          <div class="asset-ext" style="width: 80px; color: var(--b3-theme-on-surface-light); flex-shrink: 0;">
+            {{ splitFileName(item.data.name).ext }}
+          </div>
+
+          <div class="asset-size" style="width: 100px; color: var(--b3-theme-on-surface-light); flex-shrink: 0;">
             {{ formatSize(item.data.size) }}
           </div>
 
           <div class="asset-refs" style="width: 100px; color: var(--b3-theme-on-surface-light); flex-shrink: 0;">
-            {{ item.data.refCount }}
+            {{ item.data.docCount }}
           </div>
 
           <div class="asset-actions" style="width: 180px; display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0;">
-            <button v-if="item.data.refCount > 0" class="b3-button b3-button--outline" @click="$emit('view-refs', item.data)">引用</button>
+            <button v-if="item.data.docCount > 0" class="b3-button b3-button--outline" @click="$emit('open-docs', item.data)">打开</button>
             <button v-if="isImage(item.data.name)" class="b3-button" @click="$emit('edit', item.data)">编辑</button>
             <button class="b3-button b3-button--error" @click="$emit('delete', item.data)">删除</button>
           </div>
@@ -57,7 +64,7 @@ import type { AssetInfo } from '../utils/siyuan-db';
 
 const props = defineProps<{
   assets: AssetInfo[];
-  sortField: 'name' | 'size' | 'refCount';
+  sortField: 'name' | 'ext' | 'size' | 'docCount';
   sortOrder: 'asc' | 'desc';
 }>();
 
@@ -67,9 +74,9 @@ const { list, containerProps, wrapperProps } = useVirtualList(assets, {
   itemHeight: 61, // 60px height + 1px border
 });
 
-const emit = defineEmits(['view-refs', 'edit', 'delete', 'sort']);
+const emit = defineEmits(['open-docs', 'edit', 'delete', 'sort']);
 
-function handleSort(field: 'name' | 'size' | 'refCount') {
+function handleSort(field: 'name' | 'ext' | 'size' | 'docCount') {
   emit('sort', field);
 }
 
@@ -79,6 +86,17 @@ function formatSize(bytes: number) {
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function splitFileName(fullName: string) {
+  const index = fullName.lastIndexOf('.');
+  if (index <= 0) {
+    return { name: fullName, ext: '' };
+  }
+  return {
+    name: fullName.slice(0, index),
+    ext: fullName.slice(index + 1)
+  };
 }
 
 function isImage(name: string) {
