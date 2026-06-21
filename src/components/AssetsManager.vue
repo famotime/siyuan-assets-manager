@@ -18,7 +18,10 @@
           <option value="unreferenced">未引用 (孤儿资源)</option>
           <option value="large">大文件 (>1MB)</option>
         </select>
-        <button class="b3-button" @click="loadData">
+        <button class="b3-button b3-button--error" @click="handleCleanupUnreferenced" style="margin-right: 4px;" title="清理所有未引用的资源">
+          清理
+        </button>
+        <button class="b3-button" @click="loadData" title="刷新资源列表">
           <svg v-if="loading" class="icon spinning" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
           <span v-else>刷新</span>
         </button>
@@ -33,6 +36,7 @@
         @sort="handleSortChange"
         @open-docs="handleOpenDocs"
         @edit="handleEdit"
+        @rename="handleRename"
         @delete="handleDelete"
         @show-preview="handleShowPreview"
         @update-preview="handleUpdatePreview"
@@ -54,6 +58,35 @@
     <div v-if="previewUrl" class="image-hover-preview" :style="previewStyle">
       <img :src="previewUrl" />
     </div>
+
+    <!-- 自定义重命名弹窗 -->
+    <div v-if="renameDialogVisible && currentRenameAsset" class="rename-dialog-overlay">
+      <div class="rename-dialog-content">
+        <div class="rename-dialog-header">
+          <h3>重命名资源</h3>
+          <button class="close-btn" @click="closeRenameDialog">×</button>
+        </div>
+        <div class="rename-dialog-body">
+          <div style="margin-bottom: 12px; color: var(--b3-theme-on-surface-light); word-break: break-all; font-size: 13px;">
+            原文件名: <strong>{{ currentRenameAsset.name }}</strong>
+          </div>
+          <div class="form-item">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; font-size: 13px;">新文件名 (需保留相同的后缀名):</label>
+            <input 
+              v-model="renameNewName" 
+              type="text" 
+              class="b3-text-field" 
+              style="width: 100%; box-sizing: border-box;"
+              @keyup.enter="submitRename"
+            />
+          </div>
+        </div>
+        <div class="rename-dialog-footer">
+          <button class="b3-button b3-button--cancel" @click="closeRenameDialog">取消</button>
+          <button class="b3-button b3-button--primary" @click="submitRename">确认修改</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -62,7 +95,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
 import { replaceAssetInBlocks, removeAssetFromBlocks } from '../utils/siyuan-block';
-import { saveAssetFile } from '../utils/file-system';
+import { saveAssetFile, renameAssetFile } from '../utils/file-system';
 import { pushMsg } from '../api';
 import { usePlugin } from '../main';
 import VirtualAssetList from './VirtualAssetList.vue';
@@ -72,6 +105,11 @@ const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
 const searchQuery = ref('');
 const filterType = ref('all');
+
+// 重命名相关状态
+const renameDialogVisible = ref(false);
+const currentRenameAsset = ref<AssetInfo | null>(null);
+const renameNewName = ref('');
 
 // 排序状态
 const sortField = ref<'name' | 'ext' | 'size' | 'docCount'>('size');
@@ -307,6 +345,140 @@ async function handleSaveEdited(payload: { oldName: string, dataUrl: string }) {
   pushMsg("编辑已成功保存并同步到所有引用文档！");
   loadData();
 }
+
+function closeRenameDialog() {
+  renameDialogVisible.value = false;
+  currentRenameAsset.value = null;
+  renameNewName.value = '';
+}
+
+function handleRename(asset: AssetInfo) {
+  currentRenameAsset.value = asset;
+  renameNewName.value = asset.name;
+  renameDialogVisible.value = true;
+}
+
+async function submitRename() {
+  if (!currentRenameAsset.value) return;
+  const asset = currentRenameAsset.value;
+  const oldName = asset.name;
+  const oldExtIdx = oldName.lastIndexOf('.');
+  const oldExt = oldExtIdx <= 0 ? '' : oldName.slice(oldExtIdx);
+  
+  let newName = renameNewName.value.trim();
+  if (newName === oldName) {
+    closeRenameDialog();
+    return;
+  }
+  if (!newName) {
+    pushMsg("文件名不能为空");
+    return;
+  }
+
+  // 非法字符校验 \ / : * ? " < > |
+  const invalidChars = /[\\/:*?"<>|]/;
+  if (invalidChars.test(newName)) {
+    pushMsg("文件名不能包含字符: \\ / : * ? \" < > |");
+    return;
+  }
+
+  // 后缀名验证
+  const newExtIdx = newName.lastIndexOf('.');
+  const newExt = newExtIdx <= 0 ? '' : newName.slice(newExtIdx);
+  
+  if (newExt !== oldExt) {
+    if (newExt) {
+      const confirmExt = window.confirm(`检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`);
+      if (!confirmExt) return;
+    } else {
+      // 自动补齐后缀
+      newName = newName + oldExt;
+    }
+  }
+
+  closeRenameDialog();
+  loading.value = true;
+  try {
+    // 1. 重命名物理文件
+    const success = await renameAssetFile(oldName, newName);
+    if (!success) {
+      pushMsg("重命名物理文件失败");
+      return;
+    }
+
+    // 2. 联动更新文档中该资源的引用并同步修改内存数据，规避 SQL 索引延迟
+    if (asset.references && asset.references.length > 0) {
+      await replaceAssetInBlocks(asset.references, oldName, newName);
+      
+      const regex = new RegExp(`assets/${oldName}`, "g");
+      const newPath = `assets/${newName}`;
+      asset.references.forEach(ref => {
+        if (ref.markdown) {
+          ref.markdown = ref.markdown.replace(regex, newPath);
+        }
+      });
+    }
+
+    // 3. 就地更新内存中该 asset 的名字，触发 Vue 响应式 UI 刷新
+    asset.name = newName;
+
+    if (asset.references && asset.references.length > 0) {
+      pushMsg(`重命名成功！已自动更新 ${asset.references.length} 个文档引用`);
+    } else {
+      pushMsg("重命名成功！");
+    }
+  } catch (e) {
+    console.error("Failed to rename asset", e);
+    pushMsg("重命名操作失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
+function formatSize(bytes: number) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+async function handleCleanupUnreferenced() {
+  const unreferenced = assets.value.filter(a => a.docCount === 0);
+  if (unreferenced.length === 0) {
+    pushMsg("当前没有未引用的资源，无需清理。");
+    return;
+  }
+
+  const totalSize = unreferenced.reduce((sum, a) => sum + a.size, 0);
+  const sizeText = formatSize(totalSize);
+
+  const confirmCleanup = window.confirm(
+    `【警告】此操作将永久清理所有未被文档引用的资源文件（孤儿资源）。\n\n` +
+    `统计信息：\n` +
+    `• 待清理资源数量：${unreferenced.length} 个\n` +
+    `• 预计释放空间：${sizeText}\n\n` +
+    `该操作直接删除物理文件，无法撤销！确定要执行清理吗？`
+  );
+
+  if (!confirmCleanup) return;
+
+  loading.value = true;
+  try {
+    let deletedCount = 0;
+    for (const asset of unreferenced) {
+      await deleteAssetFile(asset.name);
+      deletedCount++;
+    }
+    pushMsg(`清理完成！已成功删除 ${deletedCount} 个未引用资源。`);
+    await loadData();
+  } catch (e) {
+    console.error("Failed to cleanup unreferenced assets", e);
+    pushMsg("清理失败");
+  } finally {
+    loading.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -361,6 +533,73 @@ async function handleSaveEdited(payload: { oldName: string, dataUrl: string }) {
   align-items: center;
   justify-content: center;
   font-size: 14px;
+}
+.b3-button--error {
+  background-color: var(--b3-theme-error);
+  color: var(--b3-theme-on-error);
+}
+
+/* 自定义重命名弹窗样式 */
+.rename-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1001;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.rename-dialog-content {
+  background: var(--b3-theme-background);
+  color: var(--b3-theme-on-background);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  width: 400px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rename-dialog-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--b3-theme-surface-lighter);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.rename-dialog-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--b3-theme-on-surface);
+  line-height: 1;
+}
+.rename-dialog-body {
+  padding: 16px;
+}
+.rename-dialog-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--b3-theme-surface-lighter);
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.b3-button--cancel {
+  background-color: transparent;
+  border-color: var(--b3-theme-on-surface-light);
+  color: var(--b3-theme-on-surface);
+}
+.b3-button--primary {
+  background-color: var(--b3-theme-primary);
+  color: var(--b3-theme-on-primary);
 }
 .spinning {
   animation: spin 1s linear infinite;

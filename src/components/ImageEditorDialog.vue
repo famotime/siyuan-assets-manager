@@ -47,8 +47,9 @@
         <span v-if="annotationMode" style="margin-right: auto; color: var(--b3-theme-primary); font-size: 14px; font-weight: bold;">
           📍 序号标注模式进行中 (点击画面添加序号: {{ annotationStep }})
         </span>
-        <button class="b3-button b3-button--cancel" @click="close">取消</button>
-        <button class="b3-button b3-button--primary" @click="save">保存并更新引用</button>
+        <button class="b3-button b3-button--outline" @click="downloadLocal" style="margin-right: 8px;" title="下载当前编辑的图片到本地电脑">下载到本地</button>
+        <button class="b3-button b3-button--cancel" @click="close" title="取消编辑并关闭窗口">取消</button>
+        <button class="b3-button b3-button--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存并更新引用</button>
       </div>
     </div>
   </div>
@@ -364,6 +365,21 @@ function close() {
   emit('update:visible', false);
 }
 
+function downloadLocal() {
+  if (!editorInstance) return;
+  try {
+    const dataUrl = editorInstance.toDataURL();
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = props.assetName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (e) {
+    console.error("Failed to download image", e);
+  }
+}
+
 function save() {
   if (!editorInstance) return;
   const dataUrl = editorInstance.toDataURL();
@@ -537,6 +553,11 @@ function save() {
 }
 .color-picker-input::-webkit-color-swatch-wrapper {
   padding: 0;
+}
+
+/* 隐藏 TUI Image Editor 原生的 Header 按钮（Load 和 Download） */
+:deep(.tui-image-editor-header-buttons) {
+  display: none !important;
 }
 
 /* 隐藏 TUI Image Editor 左上角的 LOGO / 标题 */

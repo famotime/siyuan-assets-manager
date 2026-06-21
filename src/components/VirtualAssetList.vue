@@ -14,7 +14,7 @@
       <div style="width: 100px; cursor: pointer; user-select: none;" @click="handleSort('docCount')">
         引用文档数 <span v-if="sortField === 'docCount'">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
-      <div style="width: 180px; text-align: right;">操作</div>
+      <div style="width: 220px; text-align: right;">操作</div>
     </div>
 
     <div class="virtual-asset-list-container" v-bind="containerProps" style="flex: 1; overflow-y: auto;">
@@ -52,10 +52,11 @@
             {{ item.data.docCount }}
           </div>
 
-          <div class="asset-actions" style="width: 180px; display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0;">
-            <button v-if="item.data.docCount > 0" class="b3-button b3-button--outline" @click="$emit('open-docs', item.data)">打开</button>
-            <button v-if="isImage(item.data.name)" class="b3-button" @click="$emit('edit', item.data)">编辑</button>
-            <button class="b3-button b3-button--error" @click="$emit('delete', item.data)">删除</button>
+          <div class="asset-actions" style="width: 220px; display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0;">
+            <button v-if="item.data.docCount > 0" class="b3-button b3-button--outline" @click="$emit('open-docs', item.data)" title="在后台打开并定位到所有引用此资源的文档">打开</button>
+            <button v-if="isImage(item.data.name)" class="b3-button" @click="$emit('edit', item.data)" title="编辑此图片">编辑</button>
+            <button class="b3-button b3-button--outline" @click="$emit('rename', item.data)" title="重命名此资源，并自动更新所有文档引用">重命名</button>
+            <button class="b3-button b3-button--error" @click="$emit('delete', item.data)" title="删除此资源及所有引用它的文档块">删除</button>
           </div>
         </div>
       </div>
@@ -81,7 +82,7 @@ const { list, containerProps, wrapperProps } = useVirtualList(assets, {
   itemHeight: 61, // 60px height + 1px border
 });
 
-const emit = defineEmits(['open-docs', 'edit', 'delete', 'sort', 'show-preview', 'update-preview', 'hide-preview']);
+const emit = defineEmits(['open-docs', 'edit', 'rename', 'delete', 'sort', 'show-preview', 'update-preview', 'hide-preview']);
 
 function handleSort(field: 'name' | 'ext' | 'size' | 'docCount') {
   emit('sort', field);
