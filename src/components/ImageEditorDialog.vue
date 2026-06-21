@@ -47,7 +47,7 @@
         <span v-if="annotationMode" style="margin-right: auto; color: var(--b3-theme-primary); font-size: 14px; font-weight: bold;">
           📍 序号标注模式进行中 (点击画面添加序号: {{ annotationStep }})
         </span>
-        <button class="b3-button b3-button--outline" @click="downloadLocal" style="margin-right: 8px;" title="下载当前编辑的图片到本地电脑">下载</button>
+        <button class="b3-button b3-button--outline" @click="downloadLocal" style="margin-right: 8px;" title="当前编辑的图片另存到本地">另存</button>
         <button class="b3-button b3-button--cancel" @click="close" title="取消编辑并关闭窗口">取消</button>
         <button class="b3-button b3-button--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存</button>
       </div>
@@ -60,6 +60,7 @@ import { ref, watch, nextTick } from 'vue';
 import ImageEditor from 'tui-image-editor';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
+import localeZhCN from '../i18n/tui-locale-zh';
 import { calculateAnnotationShapeSize, calculateAnnotationTextTop, calculateDialogSize, type AnnotationShape } from '../utils/image-editor';
 
 const props = defineProps<{
@@ -135,6 +136,7 @@ function initEditor(url: string) {
         'common.bisize.width': '0px',
         'common.bisize.height': '0px'
       },
+      locale: localeZhCN,
       menu: ['crop', 'draw', 'shape', 'icon', 'text', 'filter'],
       initMenu: 'filter',
       uiSize: {
