@@ -1,0 +1,131 @@
+import { sql, readDir, removeFile, sql as sqlQuery } from "../api";
+
+export interface BlockRef {
+  id: string;
+  root_id: string;
+  box: string;
+  content: string;
+  markdown: string;
+  path: string; // document path
+}
+
+export interface AssetInfo {
+  name: string;
+  size: number;
+  updated: number;
+  isDir: boolean;
+  references: BlockRef[];
+  refCount: number;
+}
+
+/**
+ * 解析单个 Block 中的 assets 引用
+ */
+function extractAssetsFromMarkdown(markdown: string): string[] {
+  const assets: string[] = [];
+  // 匹配形如 assets/xxxx.png 的模式
+  const regex = /assets\/([^\s"'()\]]+)/g;
+  let match;
+  while ((match = regex.exec(markdown)) !== null) {
+    assets.push(match[1]); // 仅保存文件名
+  }
+  return [...new Set(assets)]; // 去重
+}
+
+/**
+ * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用
+ */
+export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
+  // 1. 获取 /data/assets 下的所有物理文件
+  const files: any[] = await readDir("/data/assets");
+  if (!files) return [];
+
+  const assetsMap = new Map<string, AssetInfo>();
+
+  for (const file of files) {
+    if (!file.isDir) {
+      let fileSize = file.size || 0;
+      assetsMap.set(file.name, {
+        name: file.name,
+        size: fileSize, // bytes
+        updated: file.updated || 0,
+        isDir: false,
+        references: [],
+        refCount: 0,
+      });
+    }
+  }
+
+  // 尝试通过 Node fs 或者 HEAD 请求补全 file size (针对部分 Siyuan 版本 readDir 不返回 size 的情况)
+  let fs: any;
+  let pathLib: any;
+  let dataDir = "";
+  try {
+    fs = (window as any).require("fs");
+    pathLib = (window as any).require("path");
+    dataDir = (window as any).siyuan?.config?.system?.dataDir;
+  } catch (e) {}
+
+  if (fs && pathLib && dataDir) {
+    // 桌面端 Electron 环境
+    for (const [name, asset] of assetsMap.entries()) {
+      if (asset.size === 0) {
+        try {
+          const absolutePath = pathLib.join(dataDir, "assets", name);
+          const stat = fs.statSync(absolutePath);
+          asset.size = stat.size;
+        } catch (e) {}
+      }
+    }
+  } else {
+    // 浏览器或移动端环境，并发批量获取大小 (由于可能几千个文件，这里控制并发防止阻塞)
+    const assetsToFetch = Array.from(assetsMap.values()).filter(a => a.size === 0);
+    const limit = 50; // 并发数
+    for (let i = 0; i < assetsToFetch.length; i += limit) {
+      const batch = assetsToFetch.slice(i, i + limit);
+      await Promise.all(batch.map(async (asset) => {
+        try {
+          const response = await fetch(`/assets/${asset.name}`, { method: 'HEAD' });
+          const contentLength = response.headers.get('content-length');
+          if (contentLength) {
+            asset.size = parseInt(contentLength, 10);
+          }
+        } catch (e) {}
+      }));
+    }
+  }
+
+  // 2. 查询所有可能引用了 assets 的 blocks
+  const blocks: any[] = await sqlQuery(
+    `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
+  );
+
+  if (blocks && blocks.length > 0) {
+    for (const block of blocks) {
+      const referencedAssets = extractAssetsFromMarkdown(block.markdown || "");
+      for (const assetName of referencedAssets) {
+        if (assetsMap.has(assetName)) {
+          const asset = assetsMap.get(assetName)!;
+          asset.references.push({
+            id: block.id,
+            root_id: block.root_id,
+            box: block.box,
+            content: block.content,
+            markdown: block.markdown,
+            path: block.path,
+          });
+          asset.refCount++;
+        }
+      }
+    }
+  }
+
+  return Array.from(assetsMap.values());
+}
+
+/**
+ * 删除资产文件
+ */
+export async function deleteAssetFile(fileName: string): Promise<void> {
+  await removeFile("/data/assets/" + fileName);
+}
