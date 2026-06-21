@@ -1,6 +1,6 @@
 <template>
   <ConfirmDialog />
-  <div class="am-dialog-overlay" v-if="visible">
+  <div class="am-dialog-overlay" v-if="visible" @click.self="closeManager">
     <div class="am-dialog manager-dialog">
       <button class="am-dialog__close" style="position: absolute; top: 16px; right: 16px; z-index: 10;" @click="closeManager" aria-label="关闭">
         <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
