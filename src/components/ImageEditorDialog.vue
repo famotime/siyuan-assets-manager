@@ -153,113 +153,195 @@ function initEditor(url: string) {
     cssMaxWidth: window.innerWidth * 0.9,
     cssMaxHeight: window.innerHeight * 0.9,
     selectionStyle: {
-      cornerSize: 20,
-      rotatingPointOffset: 70
+      cornerSize: 8,
+      rotatingPointOffset: 30
     }
   });
 
-  // 绑定 mousedown 事件实现点击添加序号
-  editorInstance.on('mousedown', async (event: any, originPointer: any) => {
-    if (!annotationMode.value) return;
+  // 绑定 Fabric Canvas 事件实现拖拽与点击添加序号的分离
+  if (editorInstance._graphics) {
+    const canvas = editorInstance._graphics.getCanvas();
     
-    // 如果没有获取到有效坐标，直接返回
-    if (!originPointer || typeof originPointer.x !== 'number') return;
-    
-    const x = originPointer.x;
-    const y = originPointer.y;
-    const currentStep = annotationStep.value;
-    
-    // 立即增加步数，防止双击触发相同序号
-    annotationStep.value++;
-    
-    try {
-      let shapeObj: any = null;
-      const shape = annotationShape.value as AnnotationShape;
-      const fontSize = Number(annotationFontSize.value);
-      const shapeSize = calculateAnnotationShapeSize(shape, fontSize);
+    let startX = 0;
+    let startY = 0;
+    let isMouseDown = false;
 
-      // 1. 添加背景形状
-      if (shape === 'circle') {
-        shapeObj = await editorInstance.addShape('circle', {
-          fill: annotationColor.value,
-          strokeWidth: 0,
-          rx: shapeSize / 2, // TUI Editor 画圆需要 rx 和 ry
-          ry: shapeSize / 2,
-          isRegular: true
-        });
-      } else if (shape === 'rect') {
-        shapeObj = await editorInstance.addShape('rect', {
-          fill: annotationColor.value,
-          strokeWidth: 0,
-          width: shapeSize,
-          height: shapeSize,
-          isRegular: true
-        });
-      } else if (shape === 'triangle') {
-        shapeObj = await editorInstance.addShape('triangle', {
-          fill: annotationColor.value,
-          strokeWidth: 0,
-          width: shapeSize,
-          height: shapeSize,
-          isRegular: true
-        });
-      }
-
-      const textTop = calculateAnnotationTextTop(shape, y, shapeSize, fontSize);
+    canvas.on('mouse:down', (options: any) => {
+      if (!annotationMode.value) return;
       
-      // 2. 添加文字序号
-      const textObj = await editorInstance.addText(String(currentStep), {
-        styles: {
-          fill: annotationTextColor.value,
-          fontSize,
-          fontWeight: 'bold',
-          textAlign: 'center'
-        }
-      });
+      isMouseDown = true;
+      const pointer = canvas.getPointer(options.e);
+      startX = pointer.x;
+      startY = pointer.y;
 
-      // 3. 强行使用 Fabric.js 底层 API 进行绝对居中对齐，绕过 TUI Editor 的位置 Bug
-      if (editorInstance._graphics) {
-        const canvas = editorInstance._graphics.getCanvas();
-        
-        // 修正背景形状中心
-        if (shapeObj) {
-          const fabricShape = editorInstance._graphics.getObject(shapeObj.id);
-          if (fabricShape) {
-            fabricShape.set({
-              originX: 'center',
-              originY: 'center',
-              left: x,
-              top: y
-            });
-            fabricShape.setCoords();
-          }
+      // 记录起始坐标，用于联动移动
+      const activeObject = canvas.getActiveObject();
+      if (activeObject) {
+        activeObject.lastLeft = activeObject.left;
+        activeObject.lastTop = activeObject.top;
+        if (activeObject.relatedObj) {
+          activeObject.relatedObj.lastLeft = activeObject.relatedObj.left;
+          activeObject.relatedObj.lastTop = activeObject.relatedObj.top;
         }
-        
-        // 修正文字中心
-        if (textObj) {
-          const fabricText = editorInstance._graphics.getObject(textObj.id);
-          if (fabricText) {
-            fabricText.set({
-              originX: 'center',
-              originY: 'center',
-              left: x,
-              // 数字没有下沉字母(如g,y)，Fabric 默认居中会稍微偏上，这里给个微小的视觉补偿 (约字号的 8%)
-              top: textTop
-            });
-            fabricText.setCoords();
-          }
-        }
-        
-        canvas.renderAll();
+      }
+    });
+
+    canvas.on('mouse:up', async (options: any) => {
+      if (!annotationMode.value || !isMouseDown) return;
+      isMouseDown = false;
+
+      const pointer = canvas.getPointer(options.e);
+      const endX = pointer.x;
+      const endY = pointer.y;
+
+      // 计算移动位移
+      const dist = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+
+      // 1. 如果点击到了物体（options.target 不为空），说明想选择或拖拽它
+      // 2. 如果发生了移动（dist > 5 像素），说明是拖动/选择框选行为
+      // 这两种情况下都不生成新序号
+      if (options.target || dist > 5) {
+        return;
       }
 
-    } catch (e) {
-      console.error('Failed to add annotation', e);
-    }
-  });
+      // 在空白处单纯点击，则在该位置添加新序号
+      await addAnnotationAt(endX, endY);
+    });
+
+    canvas.on('object:moving', (e: any) => {
+      const activeObject = e.target;
+      if (!activeObject) return;
+
+      if (activeObject.relatedObj) {
+        const related = activeObject.relatedObj;
+        if (activeObject.lastLeft !== undefined && activeObject.lastTop !== undefined) {
+          const dx = activeObject.left - activeObject.lastLeft;
+          const dy = activeObject.top - activeObject.lastTop;
+          related.set({
+            left: related.left + dx,
+            top: related.top + dy
+          });
+          related.setCoords();
+        }
+      }
+      activeObject.lastLeft = activeObject.left;
+      activeObject.lastTop = activeObject.top;
+    });
+  }
 
   // 把自定义按钮注入到 TUI 原生菜单 DOM 中
   injectCustomMenu();
+}
+
+// 在空白处点击添加序号的具体实现
+async function addAnnotationAt(x: number, y: number) {
+  if (!editorInstance) return;
+  const currentStep = annotationStep.value;
+  
+  // 立即增加步数，防止双击触发相同序号
+  annotationStep.value++;
+  
+  try {
+    let shapeObj: any = null;
+    const shape = annotationShape.value as AnnotationShape;
+    const fontSize = Number(annotationFontSize.value);
+    const shapeSize = calculateAnnotationShapeSize(shape, fontSize);
+
+    // 1. 添加背景形状
+    if (shape === 'circle') {
+      shapeObj = await editorInstance.addShape('circle', {
+        fill: annotationColor.value,
+        strokeWidth: 0,
+        rx: shapeSize / 2,
+        ry: shapeSize / 2,
+        isRegular: true
+      });
+    } else if (shape === 'rect') {
+      shapeObj = await editorInstance.addShape('rect', {
+        fill: annotationColor.value,
+        strokeWidth: 0,
+        width: shapeSize,
+        height: shapeSize,
+        isRegular: true
+      });
+    } else if (shape === 'triangle') {
+      shapeObj = await editorInstance.addShape('triangle', {
+        fill: annotationColor.value,
+        strokeWidth: 0,
+        width: shapeSize,
+        height: shapeSize,
+        isRegular: true
+      });
+    }
+
+    const textTop = calculateAnnotationTextTop(shape, y, shapeSize, fontSize);
+    
+    // 2. 添加文字序号
+    const textObj = await editorInstance.addText(String(currentStep), {
+      styles: {
+        fill: annotationTextColor.value,
+        fontSize,
+        fontWeight: 'bold',
+        textAlign: 'center'
+      }
+    });
+
+    // 3. 强行使用 Fabric.js 底层 API 进行绝对居中对齐，绕过 TUI Editor 的位置 Bug
+    if (editorInstance._graphics) {
+      const canvas = editorInstance._graphics.getCanvas();
+      
+      const fabricShape = shapeObj ? editorInstance._graphics.getObject(shapeObj.id) : null;
+      const fabricText = textObj ? editorInstance._graphics.getObject(textObj.id) : null;
+
+      // 优化边框手柄样式，避免太粗覆盖操作对象，并禁用旋转
+      const setHandleStyle = (obj: any) => {
+        obj.set({
+          cornerSize: 8,           // 细化为 8px 的手柄大小
+          borderScaleFactor: 1,    // 细化边框线宽为 1
+          borderColor: '#007aff',  // 选中框边框颜色
+          cornerColor: '#007aff',  // 手柄控制点填充色
+          cornerStrokeColor: '#ffffff', // 手柄控制点描边颜色
+          transparentCorners: false,    // 实心方块手柄
+          hasRotatingPoint: false       // 禁用旋转点，避免操作序号时误旋转
+        });
+      };
+
+      // 修正背景形状中心
+      if (fabricShape) {
+        fabricShape.set({
+          originX: 'center',
+          originY: 'center',
+          left: x,
+          top: y
+        });
+        setHandleStyle(fabricShape);
+        fabricShape.setCoords();
+      }
+      
+      // 修正文字中心
+      if (fabricText) {
+        fabricText.set({
+          originX: 'center',
+          originY: 'center',
+          left: x,
+          top: textTop
+        });
+        setHandleStyle(fabricText);
+        fabricText.setCoords();
+      }
+
+      // 建立两者的双向联动关联
+      if (fabricShape && fabricText) {
+        fabricShape.relatedObj = fabricText;
+        fabricText.relatedObj = fabricShape;
+      }
+      
+      canvas.renderAll();
+    }
+
+  } catch (e) {
+    console.error('Failed to add annotation', e);
+  }
 }
 
 function injectCustomMenu() {
@@ -345,20 +427,25 @@ function injectCustomMenu() {
 
 function toggleAnnotationMode() {
   annotationMode.value = !annotationMode.value;
-  if (annotationMode.value) {
-    // 开启模式
-    if (editorInstance) {
-      editorInstance.stopDrawingMode();
-      editorInstance.deactivateAll();
-      editorInstance.changeCursor('crosshair');
-    }
-  } else {
-    // 关闭模式
-    if (editorInstance) {
-      editorInstance.changeCursor('default');
-    }
-  }
 }
+
+// 监听序号标注模式的开关，动态调整鼠标光标模式
+watch(annotationMode, (newVal) => {
+  if (!editorInstance || !editorInstance._graphics) return;
+  const canvas = editorInstance._graphics.getCanvas();
+  if (newVal) {
+    editorInstance.stopDrawingMode();
+    editorInstance.deactivateAll();
+    
+    // 空白处为十字光标，悬浮在已有对象上时自动变为拖拽移动图标
+    canvas.defaultCursor = 'crosshair';
+    canvas.hoverCursor = 'move';
+  } else {
+    canvas.defaultCursor = 'default';
+    canvas.hoverCursor = 'default';
+  }
+  canvas.requestRenderAll();
+});
 
 function close() {
   emit('update:visible', false);
