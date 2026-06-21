@@ -6,6 +6,7 @@ import {
 import "@/index.scss";
 import PluginInfoString from '@/../plugin.json'
 import { destroy, init } from '@/main'
+import { getAssetNameFromElement } from '@/utils/plugin-entry'
 
 let PluginInfo = {
   version: '',
@@ -19,7 +20,7 @@ const {
   version,
 } = PluginInfo
 
-export default class PluginSample extends Plugin {
+export default class AssetsManagerPlugin extends Plugin {
   // Run as mobile
   public isMobile: boolean
   // Run in browser
@@ -67,7 +68,7 @@ export default class PluginSample extends Plugin {
 
     this.eventBus.on("open-menu-image", (event: CustomEvent<IMenuBaseDetail>) => {
       const detail = event.detail;
-      const assetName = this.getAssetNameFromElement(detail.element);
+      const assetName = getAssetNameFromElement(detail.element);
       if (!assetName) return;
 
       detail.menu.addItem({
@@ -96,41 +97,11 @@ export default class PluginSample extends Plugin {
     });
   }
 
-  private getAssetNameFromElement(element: HTMLElement): string | null {
-    if (!element) return null;
-    let src = element.getAttribute("src") || element.getAttribute("data-src");
-    
-    if (!src) {
-      const img = element.querySelector("img");
-      if (img) {
-        src = img.getAttribute("src") || img.getAttribute("data-src");
-      }
-    }
-    
-    if (!src) {
-      src = element.closest("[data-src]")?.getAttribute("data-src") || null;
-    }
-    
-    if (!src) return null;
-    
-    const match = src.match(/assets\/([^\s"'()\]\?#]+)/);
-    if (match) {
-      return match[1];
-    }
-    
-    if (src.includes("assets/")) {
-      const parts = src.split("assets/");
-      return parts[parts.length - 1].split("?")[0].split("#")[0];
-    }
-    
-    return null;
-  }
-
   onunload() {
-    destroy()
+    destroy(this.name)
   }
 
   openSetting() {
-    window._sy_plugin_sample.openSetting()
+    window._siyuan_assets_manager?.openSetting?.()
   }
 }

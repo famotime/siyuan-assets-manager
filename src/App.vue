@@ -56,6 +56,7 @@ import ImageEditorDialog from './components/ImageEditorDialog.vue';
 import { getAssetInfoByName, deleteAssetFile, type AssetInfo } from './utils/siyuan-db';
 import { saveAssetFile, renameAssetFile } from './utils/file-system';
 import { replaceAssetInBlocks } from './utils/siyuan-block';
+import { buildEditedAssetName, resolveRenameAssetName } from './utils/asset-actions';
 import { pushMsg } from './api';
 
 const visible = ref(false);
@@ -117,11 +118,7 @@ function closeManager() {
 // 全局保存编辑逻辑
 async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: string }) {
   const { oldName, dataUrl } = payload;
-  
-  const ext = oldName.split('.').pop();
-  const baseName = oldName.substring(0, oldName.lastIndexOf('.'));
-  const timestamp = Date.now();
-  const newName = `${baseName}_edited_${timestamp}.${ext || 'png'}`;
+  const newName = buildEditedAssetName(oldName);
   
   try {
     const res = await fetch(dataUrl);
@@ -163,39 +160,28 @@ async function submitGlobalRename() {
   if (!globalRenameAsset.value) return;
   const asset = globalRenameAsset.value;
   const oldName = asset.name;
-  const oldExtIdx = oldName.lastIndexOf('.');
-  const oldExt = oldExtIdx <= 0 ? '' : oldName.slice(oldExtIdx);
-  
-  let newName = globalRenameNewName.value.trim();
-  if (newName === oldName) {
+
+  const renameResult = resolveRenameAssetName(oldName, globalRenameNewName.value, (oldExt, newExt) => {
+    return window.confirm(`检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`);
+  });
+
+  if (renameResult.ok && !renameResult.changed) {
     closeGlobalRenameDialog();
     return;
   }
-  if (!newName) {
+  if (!renameResult.ok && renameResult.reason === 'empty') {
     pushMsg("文件名不能为空");
     return;
   }
-
-  // 非法字符校验 \ / : * ? " < > |
-  const invalidChars = /[\\/:*?"<>|]/;
-  if (invalidChars.test(newName)) {
+  if (!renameResult.ok && renameResult.reason === 'invalidChars') {
     pushMsg("文件名不能包含字符: \\ / : * ? \" < > |");
     return;
   }
-
-  // 后缀名验证
-  const newExtIdx = newName.lastIndexOf('.');
-  const newExt = newExtIdx <= 0 ? '' : newName.slice(newExtIdx);
-  
-  if (newExt !== oldExt) {
-    if (newExt) {
-      const confirmExt = window.confirm(`检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`);
-      if (!confirmExt) return;
-    } else {
-      // 自动补齐后缀
-      newName = newName + oldExt;
-    }
+  if (!renameResult.ok) {
+    return;
   }
+  
+  const newName = renameResult.name;
 
   closeGlobalRenameDialog();
   try {
@@ -325,7 +311,7 @@ async function submitGlobalRename() {
 </style>
 
 <style lang="scss">
-.plugin-sample-vite-vue-app {
+.siyuan-assets-manager-app {
   width: 100vw;
   height: 100dvh;
   max-height: 100vh;

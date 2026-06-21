@@ -47,7 +47,7 @@
         <span v-if="annotationMode" style="margin-right: auto; color: var(--b3-theme-primary); font-size: 14px; font-weight: bold;">
           📍 序号标注模式进行中 (点击画面添加序号: {{ annotationStep }})
         </span>
-        <button class="b3-button b3-button--outline" @click="downloadLocal" style="margin-right: 8px;" title="下载当前编辑的图片到本地电脑">下载到本地</button>
+        <button class="b3-button b3-button--outline" @click="downloadLocal" style="margin-right: 8px;" title="下载当前编辑的图片到本地电脑">下载</button>
         <button class="b3-button b3-button--cancel" @click="close" title="取消编辑并关闭窗口">取消</button>
         <button class="b3-button b3-button--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存</button>
       </div>
@@ -60,6 +60,7 @@ import { ref, watch, nextTick } from 'vue';
 import ImageEditor from 'tui-image-editor';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
+import { calculateAnnotationShapeSize, calculateAnnotationTextTop, calculateDialogSize, type AnnotationShape } from '../utils/image-editor';
 
 const props = defineProps<{
   visible: boolean;
@@ -94,14 +95,10 @@ watch(() => props.visible, async (newVal) => {
       
       const img = new Image();
       img.onload = async () => {
-        const targetW = img.width + 60; // 边距等补偿
-        const targetH = img.height + 250; // header, footer, 菜单栏等补偿
+        const dialogSize = calculateDialogSize(img.width, img.height, window.innerWidth, window.innerHeight);
         
-        const finalW = Math.max(700, Math.min(targetW, window.innerWidth * 0.9));
-        const finalH = Math.max(500, Math.min(targetH, window.innerHeight * 0.9));
-        
-        dialogWidth.value = `${finalW}px`;
-        dialogHeight.value = `${finalH}px`;
+        dialogWidth.value = `${dialogSize.width}px`;
+        dialogHeight.value = `${dialogSize.height}px`;
 
         await nextTick();
         initEditor(url);
@@ -170,11 +167,12 @@ function initEditor(url: string) {
     
     try {
       let shapeObj: any = null;
-      let shapeSize = 0;
+      const shape = annotationShape.value as AnnotationShape;
+      const fontSize = Number(annotationFontSize.value);
+      const shapeSize = calculateAnnotationShapeSize(shape, fontSize);
 
       // 1. 添加背景形状
-      if (annotationShape.value === 'circle') {
-        shapeSize = 32 * (annotationFontSize.value / 20); // 直径
+      if (shape === 'circle') {
         shapeObj = await editorInstance.addShape('circle', {
           fill: annotationColor.value,
           strokeWidth: 0,
@@ -182,8 +180,7 @@ function initEditor(url: string) {
           ry: shapeSize / 2,
           isRegular: true
         });
-      } else if (annotationShape.value === 'rect') {
-        shapeSize = 32 * (annotationFontSize.value / 20);
+      } else if (shape === 'rect') {
         shapeObj = await editorInstance.addShape('rect', {
           fill: annotationColor.value,
           strokeWidth: 0,
@@ -191,8 +188,7 @@ function initEditor(url: string) {
           height: shapeSize,
           isRegular: true
         });
-      } else if (annotationShape.value === 'triangle') {
-        shapeSize = 36 * (annotationFontSize.value / 20);
+      } else if (shape === 'triangle') {
         shapeObj = await editorInstance.addShape('triangle', {
           fill: annotationColor.value,
           strokeWidth: 0,
@@ -202,17 +198,13 @@ function initEditor(url: string) {
         });
       }
 
-      // 调整三角形文字的视觉重心：因为正三角形重心偏下，需把文字略微下移
-      let textY = y;
-      if (annotationShape.value === 'triangle') {
-        textY = y + (shapeSize / 6);
-      }
+      const textTop = calculateAnnotationTextTop(shape, y, shapeSize, fontSize);
       
       // 2. 添加文字序号
       const textObj = await editorInstance.addText(String(currentStep), {
         styles: {
           fill: annotationTextColor.value,
-          fontSize: Number(annotationFontSize.value),
+          fontSize,
           fontWeight: 'bold',
           textAlign: 'center'
         }
@@ -245,7 +237,7 @@ function initEditor(url: string) {
               originY: 'center',
               left: x,
               // 数字没有下沉字母(如g,y)，Fabric 默认居中会稍微偏上，这里给个微小的视觉补偿 (约字号的 8%)
-              top: textY + (Number(annotationFontSize.value) * 0.08)
+              top: textTop
             });
             fabricText.setCoords();
           }

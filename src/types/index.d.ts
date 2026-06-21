@@ -122,7 +122,7 @@ interface Window {
     ws: any;
     languages: any;
   };
-  _sy_plugin_sample: {
+  _siyuan_assets_manager: {
     [key: string]: any;
   };
 }

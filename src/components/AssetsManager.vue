@@ -60,6 +60,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
+import { calculateUnreferencedCleanup, filterAssets, formatAssetSize, isImageAsset, sortAssets } from '../utils/asset-list';
 import { pushMsg } from '../api';
 import { usePlugin } from '../main';
 import VirtualAssetList from './VirtualAssetList.vue';
@@ -87,7 +88,7 @@ let previewTimeout: number | null = null;
 
 function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo }) {
   const { event, asset } = payload;
-  if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(asset.name)) return;
+  if (!isImageAsset(asset.name)) return;
   
   handleHidePreview();
   
@@ -175,49 +176,14 @@ onMounted(() => {
 });
 
 const filteredAssets = computed(() => {
-  return assets.value.filter(asset => {
-    if (searchQuery.value && !asset.name.toLowerCase().includes(searchQuery.value.toLowerCase())) {
-      return false;
-    }
-    if (filterType.value === 'image' && !/\.(png|jpe?g|gif|webp|svg)$/i.test(asset.name)) {
-      return false;
-    }
-    if (filterType.value === 'unreferenced' && asset.docCount > 0) {
-      return false;
-    }
-    if (filterType.value === 'large' && asset.size < 1024 * 1024) {
-      return false;
-    }
-    return true;
+  return filterAssets(assets.value, {
+    searchQuery: searchQuery.value,
+    filterType: filterType.value as 'all' | 'image' | 'unreferenced' | 'large',
   });
 });
 
 const sortedAssets = computed(() => {
-  const result = [...filteredAssets.value];
-  result.sort((a, b) => {
-    let valA: string | number;
-    let valB: string | number;
-    
-    if (sortField.value === 'ext') {
-      const idxA = a.name.lastIndexOf('.');
-      valA = idxA <= 0 ? '' : a.name.slice(idxA + 1).toLowerCase();
-      const idxB = b.name.lastIndexOf('.');
-      valB = idxB <= 0 ? '' : b.name.slice(idxB + 1).toLowerCase();
-    } else {
-      valA = a[sortField.value];
-      valB = b[sortField.value];
-    }
-    
-    if (typeof valA === 'string' && typeof valB === 'string') {
-      const cmp = valA.localeCompare(valB);
-      return sortOrder.value === 'asc' ? cmp : -cmp;
-    } else {
-      const numA = valA as number;
-      const numB = valB as number;
-      return sortOrder.value === 'asc' ? numA - numB : numB - numA;
-    }
-  });
-  return result;
+  return sortAssets(filteredAssets.value, sortField.value, sortOrder.value);
 });
 
 function handleSortChange(field: 'name' | 'ext' | 'size' | 'docCount') {
@@ -287,29 +253,18 @@ function handleRename(asset: AssetInfo) {
   }
 }
 
-function formatSize(bytes: number) {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
 async function handleCleanupUnreferenced() {
-  const unreferenced = assets.value.filter(a => a.docCount === 0);
-  if (unreferenced.length === 0) {
+  const cleanup = calculateUnreferencedCleanup(assets.value);
+  if (cleanup.count === 0) {
     pushMsg("当前没有未引用的资源，无需清理。");
     return;
   }
 
-  const totalSize = unreferenced.reduce((sum, a) => sum + a.size, 0);
-  const sizeText = formatSize(totalSize);
-
   const confirmCleanup = window.confirm(
     `【警告】此操作将永久清理所有未被文档引用的资源文件（孤儿资源）。\n\n` +
     `统计信息：\n` +
-    `• 待清理资源数量：${unreferenced.length} 个\n` +
-    `• 预计释放空间：${sizeText}\n\n` +
+    `• 待清理资源数量：${cleanup.count} 个\n` +
+    `• 预计释放空间：${cleanup.sizeText}\n\n` +
     `该操作直接删除物理文件，无法撤销！确定要执行清理吗？`
   );
 
@@ -318,7 +273,7 @@ async function handleCleanupUnreferenced() {
   loading.value = true;
   try {
     let deletedCount = 0;
-    for (const asset of unreferenced) {
+    for (const asset of cleanup.assets) {
       await deleteAssetFile(asset.name);
       deletedCount++;
     }
@@ -500,4 +455,3 @@ async function handleCleanupUnreferenced() {
   border-radius: 4px;
 }
 </style>
-

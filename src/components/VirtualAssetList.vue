@@ -69,6 +69,7 @@
 import { useVirtualList } from '@vueuse/core';
 import { toRefs } from 'vue';
 import type { AssetInfo } from '../utils/siyuan-db';
+import { formatAssetSize, isImageAsset, splitFileName } from '../utils/asset-list';
 
 const props = defineProps<{
   assets: AssetInfo[];
@@ -88,28 +89,8 @@ function handleSort(field: 'name' | 'ext' | 'size' | 'docCount') {
   emit('sort', field);
 }
 
-function formatSize(bytes: number) {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function splitFileName(fullName: string) {
-  const index = fullName.lastIndexOf('.');
-  if (index <= 0) {
-    return { name: fullName, ext: '' };
-  }
-  return {
-    name: fullName.slice(0, index),
-    ext: fullName.slice(index + 1)
-  };
-}
-
-function isImage(name: string) {
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
-}
+const formatSize = formatAssetSize;
+const isImage = isImageAsset;
 </script>
 
 <style scoped>

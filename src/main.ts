@@ -3,6 +3,7 @@ import {
 } from "siyuan";
 import { createApp } from 'vue'
 import App from './App.vue'
+import { getPluginAppElementId } from './utils/plugin-entry'
 
 let plugin = null
 export function usePlugin(pluginProps?: Plugin): Plugin {
@@ -23,15 +24,17 @@ export function init(plugin: Plugin) {
   usePlugin(plugin);
 
   const div = document.createElement('div')
-  div.classList.toggle('plugin-sample-vite-vue-app')
-  div.id = this.name
+  div.classList.toggle('siyuan-assets-manager-app')
+  div.id = getPluginAppElementId(plugin.name)
   app = createApp(App)
   app.mount(div)
   document.body.appendChild(div)
 }
 
-export function destroy() {
-  app.unmount()
-  const div = document.getElementById(this.name)
-  document.body.removeChild(div)
+export function destroy(pluginName?: string) {
+  app?.unmount()
+  const div = pluginName ? document.getElementById(getPluginAppElementId(pluginName)) : null
+  if (div) {
+    document.body.removeChild(div)
+  }
 }

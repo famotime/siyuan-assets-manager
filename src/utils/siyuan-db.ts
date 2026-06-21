@@ -1,4 +1,5 @@
 import { sql, readDir, removeFile, sql as sqlQuery } from "../api";
+import { extractAssetNamesFromMarkdown } from "./asset-markdown";
 
 export interface BlockRef {
   id: string;
@@ -19,28 +20,7 @@ export interface AssetInfo {
   docCount: number; // 引用文档数
 }
 
-/**
- * 解析单个 Block 中的 assets 引用
- */
-function extractAssetsFromMarkdown(markdown: string): string[] {
-  const assets: string[] = [];
-  // 匹配形如 assets/xxxx.png 的模式
-  const regex = /assets\/([^\s"'()\]]+)/g;
-  let match;
-  while ((match = regex.exec(markdown)) !== null) {
-    assets.push(match[1]); // 仅保存文件名
-  }
-  return [...new Set(assets)]; // 去重
-}
-
-/**
- * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用
- */
-export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
-  // 1. 获取 /data/assets 下的所有物理文件
-  const files: any[] = await readDir("/data/assets");
-  if (!files) return [];
-
+export function createAssetInfoMap(files: any[]): Map<string, AssetInfo> {
   const assetsMap = new Map<string, AssetInfo>();
 
   for (const file of files) {
@@ -57,6 +37,46 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
       });
     }
   }
+
+  return assetsMap;
+}
+
+export function attachBlockReferences(assetsMap: Map<string, AssetInfo>, blocks: any[] = []): void {
+  for (const block of blocks) {
+    const referencedAssets = extractAssetNamesFromMarkdown(block.markdown || "");
+    for (const assetName of referencedAssets) {
+      if (assetsMap.has(assetName)) {
+        const asset = assetsMap.get(assetName)!;
+        asset.references.push({
+          id: block.id,
+          root_id: block.root_id,
+          box: block.box,
+          content: block.content,
+          markdown: block.markdown,
+          path: block.path,
+        });
+        asset.refCount++;
+      }
+    }
+  }
+}
+
+export function updateAssetDocCounts(assets: Iterable<AssetInfo>): void {
+  for (const asset of assets) {
+    const docIds = new Set(asset.references.map(r => r.root_id));
+    asset.docCount = docIds.size;
+  }
+}
+
+/**
+ * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用
+ */
+export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
+  // 1. 获取 /data/assets 下的所有物理文件
+  const files: any[] = await readDir("/data/assets");
+  if (!files) return [];
+
+  const assetsMap = createAssetInfoMap(files);
 
   // 尝试通过 Node fs 或者 HEAD 请求补全 file size (针对部分 Siyuan 版本 readDir 不返回 size 的情况)
   let fs: any;
@@ -103,29 +123,10 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
   );
 
   if (blocks && blocks.length > 0) {
-    for (const block of blocks) {
-      const referencedAssets = extractAssetsFromMarkdown(block.markdown || "");
-      for (const assetName of referencedAssets) {
-        if (assetsMap.has(assetName)) {
-          const asset = assetsMap.get(assetName)!;
-          asset.references.push({
-            id: block.id,
-            root_id: block.root_id,
-            box: block.box,
-            content: block.content,
-            markdown: block.markdown,
-            path: block.path,
-          });
-          asset.refCount++;
-        }
-      }
-    }
+    attachBlockReferences(assetsMap, blocks);
   }
 
-  for (const asset of assetsMap.values()) {
-    const docIds = new Set(asset.references.map(r => r.root_id));
-    asset.docCount = docIds.size;
-  }
+  updateAssetDocCounts(assetsMap.values());
 
   return Array.from(assetsMap.values());
 }
@@ -183,7 +184,7 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
   const references: BlockRef[] = [];
   if (blocks && blocks.length > 0) {
     for (const block of blocks) {
-      const referencedAssets = extractAssetsFromMarkdown(block.markdown || "");
+      const referencedAssets = extractAssetNamesFromMarkdown(block.markdown || "");
       if (referencedAssets.includes(fileName)) {
         references.push({
           id: block.id,
@@ -209,4 +210,3 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
     docCount: docIds.size
   };
 }
-
