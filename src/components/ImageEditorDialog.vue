@@ -165,13 +165,14 @@ function initEditor(url: string) {
     let startX = 0;
     let startY = 0;
     let isMouseDown = false;
-    let hadActiveObject = false;
+    let lastClearedTime = 0; // 记录上次清除选中的时间戳
+
+    canvas.on('selection:cleared', () => {
+      lastClearedTime = Date.now();
+    });
 
     canvas.on('mouse:down', (options: any) => {
       if (!annotationMode.value) return;
-      
-      // 记录点击前是否有处于选中状态的对象
-      hadActiveObject = !!canvas.getActiveObject();
       
       isMouseDown = true;
       const pointer = canvas.getPointer(options.e);
@@ -201,10 +202,13 @@ function initEditor(url: string) {
       // 计算移动位移
       const dist = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
 
+      // 判断此次点击是否伴随着“取消选择”动作 (时间差在 300ms 以内)
+      const hasJustCleared = (Date.now() - lastClearedTime) < 300;
+
       // 1. 如果点击到了物体（options.target 不为空），说明想选择或拖拽它
       // 2. 如果发生了移动（dist > 5 像素），说明是拖动/选择框选行为
-      // 3. 如果点击前已经有选中的对象，则此次点击为“取消选择”行为，不新增序号
-      if (options.target || dist > 5 || hadActiveObject) {
+      // 3. 如果点击时触发了取消选择，则此行为只取消选择，不新增序号
+      if (options.target || dist > 5 || hasJustCleared) {
         return;
       }
 
