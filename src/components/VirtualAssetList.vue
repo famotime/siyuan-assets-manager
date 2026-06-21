@@ -33,7 +33,6 @@
           <div
             class="asset-name"
             style="flex: 1; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 16px;"
-            :title="item.data.name"
             @mouseenter="showPreview($event, item.data)"
             @mousemove="updatePreviewPos($event)"
             @mouseleave="hidePreview"
@@ -153,14 +152,13 @@ function positionPreview(clientX: number, clientY: number) {
   let x = clientX + offsetX;
   let y = clientY + offsetY;
   
-  const previewWidth = 240;
-  const previewHeight = 240;
+  const safeBound = 260; // 包含 padding/border 的最大安全边界
   
-  if (x + previewWidth > window.innerWidth) {
-    x = clientX - previewWidth - offsetX;
+  if (x + safeBound > window.innerWidth) {
+    x = clientX - safeBound - offsetX;
   }
-  if (y + previewHeight > window.innerHeight) {
-    y = clientY - previewHeight - offsetY;
+  if (y + safeBound > window.innerHeight) {
+    y = clientY - safeBound - offsetY;
   }
   
   previewStyle.value = {
@@ -213,12 +211,8 @@ onUnmounted(() => {
   border: 1px solid var(--b3-theme-surface-lighter);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  padding: 8px;
-  max-width: 240px;
-  max-height: 240px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  padding: 6px;
+  display: block;
   overflow: hidden;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -226,9 +220,11 @@ onUnmounted(() => {
 }
 
 .image-hover-preview img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  display: block;
+  max-width: 240px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
   border-radius: 4px;
 }
 </style>
