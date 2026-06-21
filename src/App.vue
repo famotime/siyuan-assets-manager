@@ -24,7 +24,7 @@ const plugin = usePlugin();
 onMounted(() => {
   // 注册顶栏按钮，点击时打开资源管家
   plugin.addTopBar({
-    icon: 'iconInbox',
+    icon: 'iconAssetsManager',
     title: '资源管家',
     callback: () => {
       visible.value = !visible.value;
