@@ -138,7 +138,7 @@ function initEditor(url: string) {
       },
       locale: localeZhCN,
       menu: ['crop', 'draw', 'shape', 'icon', 'text', 'filter'],
-      initMenu: 'filter',
+      initMenu: 'crop',
       uiSize: {
         width: '100%',
         height: '100%'
