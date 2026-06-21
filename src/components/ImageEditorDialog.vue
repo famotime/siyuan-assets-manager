@@ -165,9 +165,13 @@ function initEditor(url: string) {
     let startX = 0;
     let startY = 0;
     let isMouseDown = false;
+    let hadActiveObject = false;
 
     canvas.on('mouse:down', (options: any) => {
       if (!annotationMode.value) return;
+      
+      // 记录点击前是否有处于选中状态的对象
+      hadActiveObject = !!canvas.getActiveObject();
       
       isMouseDown = true;
       const pointer = canvas.getPointer(options.e);
@@ -199,8 +203,8 @@ function initEditor(url: string) {
 
       // 1. 如果点击到了物体（options.target 不为空），说明想选择或拖拽它
       // 2. 如果发生了移动（dist > 5 像素），说明是拖动/选择框选行为
-      // 这两种情况下都不生成新序号
-      if (options.target || dist > 5) {
+      // 3. 如果点击前已经有选中的对象，则此次点击为“取消选择”行为，不新增序号
+      if (options.target || dist > 5 || hadActiveObject) {
         return;
       }
 
