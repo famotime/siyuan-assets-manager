@@ -9,3 +9,6 @@ build
 tmp
 .env
 /tmp/
+/.agent/
+/.claude/
+/.codex/
