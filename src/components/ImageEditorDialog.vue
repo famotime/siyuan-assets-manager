@@ -16,48 +16,138 @@
       <div class="am-dialog__body" style="position: relative; background: #282828; padding: 16px; display: flex;" :class="{ 'annotation-mode-active': annotationMode }">
         <div ref="tuiEditorContainer" style="width: 100%; height: 100%;"></div>
         
-        <!-- 自定义序号标注子菜单（悬浮在底部原生菜单上方） -->
-        <div v-if="annotationMode" class="custom-submenu-overlay">
-          <div class="submenu-item">
-            <span class="submenu-label">形状</span>
-            <select v-model="annotationShape" class="b3-select">
-              <option value="circle">● 圆形</option>
-              <option value="rect">■ 方形</option>
-              <option value="triangle">▲ 三角形</option>
-            </select>
+        <!-- 序号标注子菜单（通过 Teleport 挂载到 TUI 原生子菜单容器中） -->
+        <teleport v-if="isEditorReady" to=".tui-image-editor-submenu">
+          <div v-show="annotationMode" class="tui-image-editor-menu-annotation">
+            <ul class="tui-image-editor-submenu-item">
+              <!-- 形状选择 -->
+              <li class="custom-annotation-shape-button">
+                <div class="tui-image-editor-button circle" :class="annotationShape === 'circle' ? 'active' : 'normal'" @click="annotationShape = 'circle'" title="圆形">
+                  <div>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="8" />
+                    </svg>
+                  </div>
+                  <label>圆形</label>
+                </div>
+                <div class="tui-image-editor-button rect" :class="annotationShape === 'rect' ? 'active' : 'normal'" @click="annotationShape = 'rect'" title="矩形">
+                  <div>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="5" y="5" width="14" height="14" rx="2" />
+                    </svg>
+                  </div>
+                  <label>矩形</label>
+                </div>
+                <div class="tui-image-editor-button triangle" :class="annotationShape === 'triangle' ? 'active' : 'normal'" @click="annotationShape = 'triangle'" title="三角形">
+                  <div>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polygon points="12 5 5 19 19 19" />
+                    </svg>
+                  </div>
+                  <label>三角形</label>
+                </div>
+              </li>
+              
+              <li class="tui-image-editor-partition"><div></div></li>
+              
+              <!-- 颜色选择：文字色与背景色（调换位置，标签在下方，高度中线对齐） -->
+              <li class="custom-annotation-color-button">
+                <div class="color-item-wrapper">
+                  <div class="color-preview-container">
+                    <div class="color-preview-circle" :style="{ backgroundColor: annotationTextColor }" @click="toggleColorPicker('text', $event)" title="文字颜色">
+                      <div class="color-preview-inner"></div>
+                    </div>
+                  </div>
+                  <label class="custom-label">文字色</label>
+                  
+                  <!-- 预设颜色弹出卡片 -->
+                  <div v-show="activePicker === 'text'" class="preset-colors-popup">
+                    <div class="preset-grid">
+                      <div v-for="color in presetColors" :key="color" class="preset-color-dot" :style="{ backgroundColor: color }" @click="selectColor('text', color)" :title="color"></div>
+                      <div class="preset-color-custom" @click="triggerCustomColor('text')" title="自定义颜色">🎨</div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="color-item-wrapper" style="margin-left: 16px;">
+                  <div class="color-preview-container">
+                    <div class="color-preview-circle" :style="{ backgroundColor: annotationColor }" @click="toggleColorPicker('bg', $event)" title="背景填充色">
+                      <div class="color-preview-inner"></div>
+                    </div>
+                  </div>
+                  <label class="custom-label">背景色</label>
+                  
+                  <!-- 预设颜色弹出卡片 -->
+                  <div v-show="activePicker === 'bg'" class="preset-colors-popup">
+                    <div class="preset-grid">
+                      <div v-for="color in presetColors" :key="color" class="preset-color-dot" :style="{ backgroundColor: color }" @click="selectColor('bg', color)" :title="color"></div>
+                      <div class="preset-color-custom" @click="triggerCustomColor('bg')" title="自定义颜色">🎨</div>
+                    </div>
+                  </div>
+                </div>
+                
+                <input type="color" ref="bgColorInput" v-model="annotationColor" style="display: none;" />
+                <input type="color" ref="textColorInput" v-model="annotationTextColor" style="display: none;" />
+              </li>
+              
+              <li class="tui-image-editor-partition"><div></div></li>
+              
+              <!-- 下次序号与重置（标签在下方，中线对齐） -->
+              <li class="custom-annotation-step-wrap">
+                <div class="step-control-wrapper">
+                  <div class="step-control-row">
+                    <input class="tui-image-editor-range-value step-value-input" v-model="annotationStep" type="number" min="1" />
+                    <span class="custom-reset-btn" @click="annotationStep = 1">重置为 1</span>
+                  </div>
+                  <label class="custom-label">下次序号</label>
+                </div>
+              </li>
+              
+              <!-- 字体大小滑块（另起一行，全宽延伸，符合原生布局） -->
+              <li class="tui-image-editor-newline tui-image-editor-range-wrap">
+                <label class="range">字号</label>
+                <div class="custom-slider-container">
+                  <input type="range" min="12" max="60" v-model="annotationFontSize" class="custom-tui-slider" />
+                </div>
+                <input class="tui-image-editor-range-value" v-model="annotationFontSize" type="number" min="12" max="60" />
+              </li>
+            </ul>
           </div>
-          <div class="submenu-item">
-            <span class="submenu-label">背景色</span>
-            <input type="color" v-model="annotationColor" class="color-picker-input" />
-          </div>
-          <div class="submenu-item">
-            <span class="submenu-label">文字色</span>
-            <input type="color" v-model="annotationTextColor" class="color-picker-input" />
-          </div>
-          <div class="submenu-item">
-            <span class="submenu-label">文字大小</span>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <input type="range" v-model="annotationFontSize" min="12" max="60" />
-              <span style="width: 16px; text-align: right;">{{ annotationFontSize }}</span>
-            </div>
-          </div>
-          <div class="submenu-item">
-            <span class="submenu-label">下次序号</span>
-            <input type="number" v-model="annotationStep" class="am-input" style="width: 50px; text-align: center; font-size: 12px; padding: 2px;" min="1" />
-          </div>
-        </div>
+        </teleport>
 
-        <!-- 自定义画笔工具箭头选项（悬浮在左上角） -->
-        <div v-if="drawSubmenuActive" class="custom-draw-overlay">
-          <div class="submenu-item" style="flex-direction: row; gap: 8px;">
-            <span class="submenu-label">画笔箭头:</span>
-            <select v-model="drawArrowType" class="b3-select" style="border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 2px 8px; background: #1f1f1f; color: #fff;">
-              <option value="none">无箭头</option>
-              <option value="single">→ 单向箭头</option>
-              <option value="double">↔ 双向箭头</option>
-            </select>
-          </div>
-        </div>
+        <!-- 画笔工具栏箭头选项（通过 Teleport 挂载到 TUI 原生画笔子菜单中） -->
+        <teleport v-if="isEditorReady" to=".tui-image-editor-menu-draw .tui-image-editor-submenu-item">
+          <li class="tui-image-editor-partition"><div></div></li>
+          <li class="custom-arrow-select-button">
+            <div class="tui-image-editor-button" :class="drawArrowType === 'none' ? 'active' : 'normal'" @click="drawArrowType = 'none'" title="无箭头">
+              <div>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </div>
+              <label>无箭头</label>
+            </div>
+            <div class="tui-image-editor-button" :class="drawArrowType === 'single' ? 'active' : 'normal'" @click="drawArrowType = 'single'" title="单向箭头">
+              <div>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <polyline points="12 5 19 12 12 19" />
+                </svg>
+              </div>
+              <label>单箭头</label>
+            </div>
+            <div class="tui-image-editor-button" :class="drawArrowType === 'double' ? 'active' : 'normal'" @click="drawArrowType = 'double'" title="双向箭头">
+              <div>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <polyline points="12 5 19 12 12 19" />
+                  <polyline points="12 5 5 12 12 19" />
+                </svg>
+              </div>
+              <label>双箭头</label>
+            </div>
+          </li>
+        </teleport>
 
       </div>
       <div class="am-dialog__footer">
@@ -73,7 +163,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import ImageEditor from 'tui-image-editor';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
@@ -93,6 +183,9 @@ let editorInstance: any = null;
 const dialogWidth = ref('900px');
 const dialogHeight = ref('600px');
 
+// 编辑器初始化就绪状态，用于 Teleport 挂载
+const isEditorReady = ref(false);
+
 // 序号标注相关状态
 const annotationMode = ref(false);
 const annotationStep = ref(1);
@@ -102,16 +195,83 @@ const annotationTextColor = ref('#ffffff');
 const annotationFontSize = ref(20);
 let customMenuEl: HTMLElement | null = null;
 
+// 预设颜色与选择器相关状态
+const presetColors = [
+  '#ff4d4f', // 红色
+  '#ff9c6e', // 橙色
+  '#fadb14', // 黄色
+  '#52c41a', // 绿色
+  '#13c2c2', // 青色
+  '#1890ff', // 蓝色
+  '#722ed1', // 紫色
+  '#000000', // 黑色
+  '#ffffff', // 白色
+  '#8c8c8c'  // 灰色
+];
+const activePicker = ref<'bg' | 'text' | null>(null);
+const bgColorInput = ref<HTMLInputElement | null>(null);
+const textColorInput = ref<HTMLInputElement | null>(null);
+
 // 画笔箭头相关状态
 const drawArrowType = ref<'none' | 'single' | 'double'>('none');
-const drawSubmenuActive = ref(false);
+
+// 切换颜色选择弹窗
+function toggleColorPicker(type: 'bg' | 'text', event?: Event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  if (activePicker.value === type) {
+    activePicker.value = null;
+  } else {
+    activePicker.value = type;
+  }
+}
+
+// 选择预设颜色
+function selectColor(type: 'bg' | 'text', color: string) {
+  if (type === 'bg') {
+    annotationColor.value = color;
+  } else {
+    annotationTextColor.value = color;
+  }
+  activePicker.value = null;
+}
+
+// 唤起自定义系统调色盘
+function triggerCustomColor(type: 'bg' | 'text') {
+  if (type === 'bg') {
+    bgColorInput.value?.click();
+  } else {
+    textColorInput.value?.click();
+  }
+  activePicker.value = null;
+}
+
+// 监听全局点击以关闭颜色弹窗
+function handleGlobalClick(e: MouseEvent) {
+  if (activePicker.value) {
+    const target = e.target as HTMLElement;
+    if (!target.closest('.color-item-wrapper')) {
+      activePicker.value = null;
+    }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('click', handleGlobalClick);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('click', handleGlobalClick);
+});
 
 watch(() => props.visible, async (newVal) => {
   if (newVal && props.assetName) {
     annotationMode.value = false;
     annotationStep.value = 1;
     drawArrowType.value = 'none';
-    drawSubmenuActive.value = false;
+    activePicker.value = null;
+    isEditorReady.value = false;
     
     const blob = await readAssetFile(props.assetName);
     if (blob) {
@@ -133,6 +293,8 @@ watch(() => props.visible, async (newVal) => {
       initEditor(`/assets/${props.assetName}`);
     }
   } else {
+    isEditorReady.value = false;
+    activePicker.value = null;
     if (editorInstance) {
       editorInstance.destroy();
       editorInstance = null;
@@ -313,7 +475,7 @@ function initEditor(url: string) {
       const obj = options.target;
       if (!obj) return;
 
-      if (drawArrowType.value !== 'none' && drawSubmenuActive.value) {
+      if (drawArrowType.value !== 'none') {
         if (obj.type === 'line' && !obj.arrowProcessed) {
           obj.arrowProcessed = true;
 
@@ -387,6 +549,9 @@ function initEditor(url: string) {
 
   // 把自定义按钮注入到 TUI 原生菜单 DOM 中
   injectCustomMenu();
+
+  // 设置 ready 状态以激活 Teleport
+  isEditorReady.value = true;
 }
 
 // 在空白处点击添加序号的具体实现
@@ -546,7 +711,6 @@ function injectCustomMenu() {
       li.addEventListener('click', (e) => {
         e.stopPropagation(); // 防止冒泡触发其他逻辑
         toggleAnnotationMode();
-        drawSubmenuActive.value = false; // 关闭画笔箭头子菜单
         
         // 样式控制：移除其他菜单的激活状态
         const allItems = menuContainer.querySelectorAll('.tui-image-editor-item');
@@ -567,13 +731,7 @@ function injectCustomMenu() {
         }
       });
 
-      const isDrawButton = (el: HTMLElement) => {
-        const html = el.innerHTML.toLowerCase();
-        const title = el.getAttribute('title') || '';
-        return html.includes('draw') || title.includes('画笔') || title.includes('draw');
-      };
-
-      // 监听其他原生按钮的点击，自动退出我们的标注模式，并控制画笔子菜单状态
+      // 监听其他原生按钮的点击，自动退出我们的标注模式
       const nativeItems = menuContainer.querySelectorAll('.tui-image-editor-item:not(.custom-annotation-menu)');
       nativeItems.forEach(item => {
         item.addEventListener('click', () => {
@@ -584,12 +742,6 @@ function injectCustomMenu() {
             li.classList.add('normal');
             li.style.backgroundColor = 'transparent';
             (li.querySelector('div') as HTMLElement).style.color = '#fff';
-          }
-
-          if (isDrawButton(item as HTMLElement)) {
-            drawSubmenuActive.value = true;
-          } else {
-            drawSubmenuActive.value = false;
           }
         });
       });
@@ -738,90 +890,263 @@ function getStartDirection(pathData: any[][]): { dx: number; dy: number } | null
   float: left !important;
 }
 
-/* 序号标注的自定义子菜单 */
-.annotation-mode-active :deep(.tui-image-editor-submenu) {
+/* 序号标注的自定义子菜单容器样式与定位 */
+.annotation-mode-active :deep(.tui-image-editor-submenu > div:not(.tui-image-editor-menu-annotation):not(.tui-image-editor-submenu-style)) {
   display: none !important;
 }
 
-.custom-submenu-overlay {
-  position: absolute;
-  bottom: 80px; /* 与底部主菜单的距离 */
-  left: 0;
-  right: 0;
-  height: 80px; /* 增加高度，留出更多的上下空白间距 */
-  background-color: rgba(21, 21, 21, 0.95); /* 统一暗色背景 */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 40px; /* 选项之间的水平间距 */
-  z-index: 100;
-  pointer-events: auto;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+/* 当序号标注激活时，强制子菜单面板显示 */
+.annotation-mode-active :deep(.tui-image-editor-submenu) {
+  display: table !important;
+  overflow: visible !important;
 }
-.submenu-item {
+
+:deep(.tui-image-editor-submenu) {
+  overflow: visible !important;
+}
+
+/* 强制自定义子菜单容器显示并像原生一样作为 table-cell 垂直对齐 */
+.annotation-mode-active :deep(.tui-image-editor-menu-annotation) {
+  display: table-cell !important;
+  vertical-align: bottom;
+  text-align: center;
+}
+
+/* 按钮的通用状态修饰与 SVG 一致性过渡 */
+:deep(.tui-image-editor-button) {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+:deep(.tui-image-editor-button svg) {
+  stroke: #8c8c8c;
+  fill: none;
+  transition: stroke 0.2s;
+}
+
+:deep(.tui-image-editor-button.active svg) {
+  stroke: #fff;
+}
+
+:deep(.tui-image-editor-button:hover svg) {
+  stroke: #fff;
+}
+
+/* 颜色选择 li 容器 */
+.custom-annotation-color-button {
+  display: inline-flex !important;
+  align-items: center;
+  height: 48px;
+  vertical-align: top;
+}
+
+/* 颜色选择项包裹，采用垂直布局，以和形状按钮对齐 */
+.color-item-wrapper {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  color: #fff;
-  font-size: 11px;
-}
-.submenu-label {
-  color: #aaa;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.b3-select {
-  background: transparent;
-  color: #fff;
-  border: none;
-  cursor: pointer;
-  outline: none;
-  font-size: 12px;
-}
-.b3-select option {
-  background: #333;
-}
-.color-picker-input {
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  background: transparent;
-}
-.color-picker-input::-webkit-color-swatch {
-  border: 1px solid #fff;
-  border-radius: 50%;
-}
-.color-picker-input::-webkit-color-swatch-wrapper {
-  padding: 0;
+  justify-content: center;
 }
 
-/* 隐藏 TUI Image Editor 原生的 Header 按钮（Load 和 Download） */
-:deep(.tui-image-editor-header-buttons) {
-  display: none !important;
-}
-
-/* 隐藏 TUI Image Editor 左上角的 LOGO / 标题 */
-:deep(.tui-image-editor-header-logo) {
-  display: none !important;
-}
-
-/* 自定义画笔工具箭头浮动选项栏 */
-.custom-draw-overlay {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  background-color: rgba(21, 21, 21, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  padding: 8px 12px;
-  z-index: 100;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+/* 颜色预览框的定位容器，用于统一中线高度为 24px */
+.color-preview-container {
+  height: 24px;
   display: flex;
   align-items: center;
+  justify-content: center;
+}
+
+.color-preview-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.color-preview-circle:hover {
+  transform: scale(1.15);
+  border-color: #fff;
+}
+
+.color-preview-inner {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background-color: transparent;
+}
+
+/* 预设色板弹窗 */
+.preset-colors-popup {
+  position: absolute;
+  bottom: 56px; /* 偏高位置，配合文字在下的布局，防止遮挡标签 */
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  width: 110px;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  justify-items: center;
+  align-items: center;
+}
+
+.preset-color-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 1px solid #555;
+  box-sizing: border-box;
+  transition: transform 0.15s;
+}
+
+.preset-color-dot:hover {
+  transform: scale(1.2);
+}
+
+.preset-color-custom {
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s;
+  width: 16px;
+  height: 16px;
+}
+
+.preset-color-custom:hover {
+  transform: scale(1.2);
+}
+
+/* 自定义滑块轨道与手柄，适配 TUI 原生视觉样式 */
+.custom-slider-container {
+  display: inline-block;
+  width: 100px;
+  margin: 0 10px;
+  vertical-align: middle;
+}
+
+.custom-tui-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  background: #444;
+  border-radius: 1px;
+  outline: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.custom-tui-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #151515;
+  border: 2px solid #007aff;
+  cursor: pointer;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.15s;
+}
+
+.custom-tui-slider::-webkit-slider-thumb:hover {
+  border-color: #0099ff;
+}
+
+.custom-tui-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #151515;
+  border: 2px solid #007aff;
+  cursor: pointer;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.15s;
+}
+
+.custom-tui-slider::-moz-range-thumb:hover {
+  border-color: #0099ff;
+}
+
+/* 下次序号外部包裹项 */
+.custom-annotation-step-wrap {
+  display: inline-flex !important;
+  align-items: center;
+  height: 48px;
+  vertical-align: top;
+}
+
+/* 下次序号组件包裹，采用垂直布局，以和形状按钮对齐 */
+.step-control-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 下次序号的控件行容器，用于统一中线高度为 24px */
+.step-control-row {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.step-value-input {
+  width: 40px !important;
+  text-align: center;
+}
+
+.custom-reset-btn {
+  margin-left: 8px;
+  color: var(--b3-theme-primary);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 3px 8px;
+  border: 1px solid #3c3c3c;
+  border-radius: 3px;
+  background: #252525;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+  white-space: nowrap;
+}
+
+.custom-reset-btn:hover {
+  background: #303030;
+  border-color: var(--b3-theme-primary);
+  color: #fff;
+}
+
+/* 下方说明标签统一规范，继承 TUI 原生 label 风格 */
+.custom-label {
+  display: block;
+  font-size: 11px;
+  color: #8c8c8c;
+  margin-top: 6px;
+  cursor: default;
+  user-select: none;
+  font-family: "Noto Sans", sans-serif;
+  text-align: center;
 }
 </style>
