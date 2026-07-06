@@ -20,7 +20,7 @@
   "dependencies": {
     "@vueuse/core": "^14.3.0",
     "lucide-vue-next": "^0.577.0",
-    "tui-image-editor": "^3.15.3",
+    "tui-image-editor": "file:../tui.image-editor/apps/image-editor",
     "vue": "^3.3.8"
   },
   "devDependencies": {

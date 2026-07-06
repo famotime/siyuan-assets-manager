@@ -104,6 +104,13 @@ const localeZhCN: Record<string, string> = {
 
   // 历史
   'History': '历史记录',
+
+  // 序号标注
+  'Annotation': '序号标注',
+  'TextColor': '文字色',
+  'BgColor': '背景色',
+  'NextStep': '下次序号',
+  'ResetStep': '重置为 1',
 };
 
 export default localeZhCN;

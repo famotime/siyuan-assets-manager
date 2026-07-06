@@ -16,105 +16,6 @@
       <div class="am-dialog__body" style="position: relative; background: #282828; padding: 16px; display: flex;" :class="{ 'annotation-mode-active': annotationMode }">
         <div ref="tuiEditorContainer" style="width: 100%; height: 100%;"></div>
         
-        <!-- 序号标注子菜单（通过 Teleport 挂载到 TUI 原生子菜单容器中） -->
-        <teleport v-if="isEditorReady" to=".tui-image-editor-submenu">
-          <div v-show="annotationMode" class="tui-image-editor-menu-annotation">
-            <ul class="tui-image-editor-submenu-item">
-              <!-- 形状选择 -->
-              <li class="custom-annotation-shape-button">
-                <div class="tui-image-editor-button circle" :class="annotationShape === 'circle' ? 'active' : 'normal'" @click="annotationShape = 'circle'" title="圆形">
-                  <div>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <circle cx="12" cy="12" r="8" />
-                    </svg>
-                  </div>
-                  <label>圆形</label>
-                </div>
-                <div class="tui-image-editor-button rect" :class="annotationShape === 'rect' ? 'active' : 'normal'" @click="annotationShape = 'rect'" title="矩形">
-                  <div>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <rect x="5" y="5" width="14" height="14" rx="2" />
-                    </svg>
-                  </div>
-                  <label>矩形</label>
-                </div>
-                <div class="tui-image-editor-button triangle" :class="annotationShape === 'triangle' ? 'active' : 'normal'" @click="annotationShape = 'triangle'" title="三角形">
-                  <div>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polygon points="12 5 5 19 19 19" />
-                    </svg>
-                  </div>
-                  <label>三角形</label>
-                </div>
-              </li>
-              
-              <li class="tui-image-editor-partition"><div></div></li>
-              
-              <!-- 颜色选择：文字色与背景色（调换位置，标签在下方，高度中线对齐） -->
-              <li class="custom-annotation-color-button">
-                <div class="color-item-wrapper">
-                  <div class="color-preview-container">
-                    <div class="color-preview-circle" :style="{ backgroundColor: annotationTextColor }" @click="toggleColorPicker('text', $event)" title="文字颜色">
-                      <div class="color-preview-inner"></div>
-                    </div>
-                  </div>
-                  <label class="custom-label">文字色</label>
-                  
-                  <!-- 预设颜色弹出卡片 -->
-                  <div v-show="activePicker === 'text'" class="preset-colors-popup">
-                    <div class="preset-grid">
-                      <div v-for="color in presetColors" :key="color" class="preset-color-dot" :style="{ backgroundColor: color }" @click="selectColor('text', color)" :title="color"></div>
-                      <div class="preset-color-custom" @click="triggerCustomColor('text')" title="自定义颜色">🎨</div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div class="color-item-wrapper" style="margin-left: 16px;">
-                  <div class="color-preview-container">
-                    <div class="color-preview-circle" :style="{ backgroundColor: annotationColor }" @click="toggleColorPicker('bg', $event)" title="背景填充色">
-                      <div class="color-preview-inner"></div>
-                    </div>
-                  </div>
-                  <label class="custom-label">背景色</label>
-                  
-                  <!-- 预设颜色弹出卡片 -->
-                  <div v-show="activePicker === 'bg'" class="preset-colors-popup">
-                    <div class="preset-grid">
-                      <div v-for="color in presetColors" :key="color" class="preset-color-dot" :style="{ backgroundColor: color }" @click="selectColor('bg', color)" :title="color"></div>
-                      <div class="preset-color-custom" @click="triggerCustomColor('bg')" title="自定义颜色">🎨</div>
-                    </div>
-                  </div>
-                </div>
-                
-                <input type="color" ref="bgColorInput" v-model="annotationColor" style="display: none;" />
-                <input type="color" ref="textColorInput" v-model="annotationTextColor" style="display: none;" />
-              </li>
-              
-              <li class="tui-image-editor-partition"><div></div></li>
-              
-              <!-- 下次序号与重置（标签在下方，中线对齐） -->
-              <li class="custom-annotation-step-wrap">
-                <div class="step-control-wrapper">
-                  <div class="step-control-row">
-                    <input class="tui-image-editor-range-value step-value-input" v-model="annotationStep" type="number" min="1" />
-                    <span class="custom-reset-btn" @click="annotationStep = 1">重置为 1</span>
-                  </div>
-                  <label class="custom-label">下次序号</label>
-                </div>
-              </li>
-              
-              <!-- 字体大小滑块（另起一行，全宽延伸，符合原生布局） -->
-              <li class="tui-image-editor-newline tui-image-editor-range-wrap">
-                <label class="range">字号</label>
-                <div class="custom-slider-container">
-                  <input type="range" min="12" max="60" v-model="annotationFontSize" class="custom-tui-slider" />
-                </div>
-                <input class="tui-image-editor-range-value" v-model="annotationFontSize" type="number" min="12" max="60" />
-              </li>
-            </ul>
-          </div>
-        </teleport>
-
         <!-- 画笔工具栏箭头选项（通过 Teleport 挂载到 TUI 原生画笔子菜单中） -->
         <teleport v-if="isEditorReady" to=".tui-image-editor-menu-draw .tui-image-editor-submenu-item">
           <li class="tui-image-editor-partition"><div></div></li>
@@ -164,7 +65,8 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import ImageEditor from 'tui-image-editor';
+import * as tuiImageEditorModule from 'tui-image-editor';
+const ImageEditor = (tuiImageEditorModule as any).default || tuiImageEditorModule;
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
 import localeZhCN from '../i18n/tui-locale-zh';
@@ -189,80 +91,26 @@ const isEditorReady = ref(false);
 // 序号标注相关状态
 const annotationMode = ref(false);
 const annotationStep = ref(1);
-const annotationShape = ref('circle');
-const annotationColor = ref('#ff4d4f');
-const annotationTextColor = ref('#ffffff');
-const annotationFontSize = ref(20);
-let customMenuEl: HTMLElement | null = null;
-
-// 预设颜色与选择器相关状态
-const presetColors = [
-  '#ff4d4f', // 红色
-  '#ff9c6e', // 橙色
-  '#fadb14', // 黄色
-  '#52c41a', // 绿色
-  '#13c2c2', // 青色
-  '#1890ff', // 蓝色
-  '#722ed1', // 紫色
-  '#000000', // 黑色
-  '#ffffff', // 白色
-  '#8c8c8c'  // 灰色
-];
-const activePicker = ref<'bg' | 'text' | null>(null);
-const bgColorInput = ref<HTMLInputElement | null>(null);
-const textColorInput = ref<HTMLInputElement | null>(null);
 
 // 画笔箭头相关状态
 const drawArrowType = ref<'none' | 'single' | 'double'>('none');
 
-// 切换颜色选择弹窗
-function toggleColorPicker(type: 'bg' | 'text', event?: Event) {
-  if (event) {
-    event.stopPropagation();
-  }
-  if (activePicker.value === type) {
-    activePicker.value = null;
-  } else {
-    activePicker.value = type;
-  }
-}
-
-// 选择预设颜色
-function selectColor(type: 'bg' | 'text', color: string) {
-  if (type === 'bg') {
-    annotationColor.value = color;
-  } else {
-    annotationTextColor.value = color;
-  }
-  activePicker.value = null;
-}
-
-// 唤起自定义系统调色盘
-function triggerCustomColor(type: 'bg' | 'text') {
-  if (type === 'bg') {
-    bgColorInput.value?.click();
-  } else {
-    textColorInput.value?.click();
-  }
-  activePicker.value = null;
-}
-
-// 监听全局点击以关闭颜色弹窗
-function handleGlobalClick(e: MouseEvent) {
-  if (activePicker.value) {
-    const target = e.target as HTMLElement;
-    if (!target.closest('.color-item-wrapper')) {
-      activePicker.value = null;
-    }
-  }
-}
+let modeSyncTimer: any = null;
 
 onMounted(() => {
-  window.addEventListener('click', handleGlobalClick);
+  modeSyncTimer = setInterval(() => {
+    if (editorInstance) {
+      annotationMode.value = (editorInstance.getDrawingMode() === 'ANNOTATION');
+    } else {
+      annotationMode.value = false;
+    }
+  }, 200);
 });
 
 onUnmounted(() => {
-  window.removeEventListener('click', handleGlobalClick);
+  if (modeSyncTimer) {
+    clearInterval(modeSyncTimer);
+  }
 });
 
 watch(() => props.visible, async (newVal) => {
@@ -270,7 +118,6 @@ watch(() => props.visible, async (newVal) => {
     annotationMode.value = false;
     annotationStep.value = 1;
     drawArrowType.value = 'none';
-    activePicker.value = null;
     isEditorReady.value = false;
     
     const blob = await readAssetFile(props.assetName);
@@ -294,7 +141,6 @@ watch(() => props.visible, async (newVal) => {
     }
   } else {
     isEditorReady.value = false;
-    activePicker.value = null;
     if (editorInstance) {
       editorInstance.destroy();
       editorInstance = null;
@@ -338,83 +184,13 @@ function initEditor(url: string) {
     }
   });
 
-  // 绑定 Fabric Canvas 事件实现拖拽与点击添加序号的分离
+  // 同步步数自增
+  editorInstance.on('annotationStepChanged', (newStep: number) => {
+    annotationStep.value = newStep;
+  });
+
   if (editorInstance._graphics) {
     const canvas = editorInstance._graphics.getCanvas();
-    
-    let startX = 0;
-    let startY = 0;
-    let isMouseDown = false;
-    let lastClearedTime = 0; // 记录上次清除选中的时间戳
-
-    canvas.on('selection:cleared', () => {
-      lastClearedTime = Date.now();
-    });
-
-    canvas.on('mouse:down', (options: any) => {
-      if (!annotationMode.value) return;
-      
-      isMouseDown = true;
-      const pointer = canvas.getPointer(options.e);
-      startX = pointer.x;
-      startY = pointer.y;
-
-      // 记录起始坐标，用于联动移动
-      const activeObject = canvas.getActiveObject();
-      if (activeObject) {
-        activeObject.lastLeft = activeObject.left;
-        activeObject.lastTop = activeObject.top;
-        if (activeObject.relatedObj) {
-          activeObject.relatedObj.lastLeft = activeObject.relatedObj.left;
-          activeObject.relatedObj.lastTop = activeObject.relatedObj.top;
-        }
-      }
-    });
-
-    canvas.on('mouse:up', async (options: any) => {
-      if (!annotationMode.value || !isMouseDown) return;
-      isMouseDown = false;
-
-      const pointer = canvas.getPointer(options.e);
-      const endX = pointer.x;
-      const endY = pointer.y;
-
-      // 计算移动位移
-      const dist = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
-
-      // 判断此次点击是否伴随着“取消选择”动作 (时间差在 300ms 以内)
-      const hasJustCleared = (Date.now() - lastClearedTime) < 300;
-
-      // 1. 如果点击到了物体（options.target 不为空），说明想选择或拖拽它
-      // 2. 如果发生了移动（dist > 5 像素），说明是拖动/选择框选行为
-      // 3. 如果点击时触发了取消选择，则此行为只取消选择，不新增序号
-      if (options.target || dist > 5 || hasJustCleared) {
-        return;
-      }
-
-      // 在空白处单纯点击，则在该位置添加新序号
-      await addAnnotationAt(endX, endY);
-    });
-
-    canvas.on('object:moving', (e: any) => {
-      const activeObject = e.target;
-      if (!activeObject) return;
-
-      if (activeObject.relatedObj) {
-        const related = activeObject.relatedObj;
-        if (activeObject.lastLeft !== undefined && activeObject.lastTop !== undefined) {
-          const dx = activeObject.left - activeObject.lastLeft;
-          const dy = activeObject.top - activeObject.lastTop;
-          related.set({
-            left: related.left + dx,
-            top: related.top + dy
-          });
-          related.setCoords();
-        }
-      }
-      activeObject.lastLeft = activeObject.left;
-      activeObject.lastTop = activeObject.top;
-    });
 
     // 监听画笔自由绘制路径
     canvas.on('path:created', (options: any) => {
@@ -547,234 +323,10 @@ function initEditor(url: string) {
     });
   }
 
-  // 把自定义按钮注入到 TUI 原生菜单 DOM 中
-  injectCustomMenu();
-
   // 设置 ready 状态以激活 Teleport
   isEditorReady.value = true;
 }
 
-// 在空白处点击添加序号的具体实现
-async function addAnnotationAt(x: number, y: number) {
-  if (!editorInstance) return;
-  const currentStep = annotationStep.value;
-  
-  // 立即增加步数，防止双击触发相同序号
-  annotationStep.value++;
-  
-  try {
-    let shapeObj: any = null;
-    const shape = annotationShape.value as AnnotationShape;
-    const fontSize = Number(annotationFontSize.value);
-    const shapeSize = calculateAnnotationShapeSize(shape, fontSize);
-
-    // 1. 添加背景形状
-    if (shape === 'circle') {
-      shapeObj = await editorInstance.addShape('circle', {
-        fill: annotationColor.value,
-        strokeWidth: 0,
-        rx: shapeSize / 2,
-        ry: shapeSize / 2,
-        isRegular: true
-      });
-    } else if (shape === 'rect') {
-      shapeObj = await editorInstance.addShape('rect', {
-        fill: annotationColor.value,
-        strokeWidth: 0,
-        width: shapeSize,
-        height: shapeSize,
-        isRegular: true
-      });
-    } else if (shape === 'triangle') {
-      shapeObj = await editorInstance.addShape('triangle', {
-        fill: annotationColor.value,
-        strokeWidth: 0,
-        width: shapeSize,
-        height: shapeSize,
-        isRegular: true
-      });
-    }
-
-    const textTop = calculateAnnotationTextTop(shape, y, shapeSize, fontSize);
-    
-    // 2. 添加文字序号
-    const textObj = await editorInstance.addText(String(currentStep), {
-      styles: {
-        fill: annotationTextColor.value,
-        fontSize,
-        fontWeight: 'bold',
-        textAlign: 'center'
-      }
-    });
-
-    // 3. 强行使用 Fabric.js 底层 API 进行绝对居中对齐，绕过 TUI Editor 的位置 Bug
-    if (editorInstance._graphics) {
-      const canvas = editorInstance._graphics.getCanvas();
-      
-      const fabricShape = shapeObj ? editorInstance._graphics.getObject(shapeObj.id) : null;
-      const fabricText = textObj ? editorInstance._graphics.getObject(textObj.id) : null;
-
-      // 优化边框手柄样式，避免太粗覆盖操作对象，并禁用旋转
-      const setHandleStyle = (obj: any) => {
-        obj.set({
-          cornerSize: 8,           // 细化为 8px 的手柄大小
-          borderScaleFactor: 1,    // 细化边框线宽为 1
-          borderColor: '#007aff',  // 选中框边框颜色
-          cornerColor: '#007aff',  // 手柄控制点填充色
-          cornerStrokeColor: '#ffffff', // 手柄控制点描边颜色
-          transparentCorners: false,    // 实心方块手柄
-          hasRotatingPoint: false       // 禁用旋转点，避免操作序号时误旋转
-        });
-      };
-
-      // 修正背景形状中心
-      if (fabricShape) {
-        fabricShape.set({
-          originX: 'center',
-          originY: 'center',
-          left: x,
-          top: y
-        });
-        setHandleStyle(fabricShape);
-        fabricShape.setCoords();
-      }
-      
-      // 修正文字中心
-      if (fabricText) {
-        fabricText.set({
-          originX: 'center',
-          originY: 'center',
-          left: x,
-          top: textTop
-        });
-        setHandleStyle(fabricText);
-        fabricText.setCoords();
-      }
-
-      // 建立两者的双向联动关联
-      if (fabricShape && fabricText) {
-        fabricShape.relatedObj = fabricText;
-        fabricText.relatedObj = fabricShape;
-      }
-      
-      // 生成后不选中新建的序号对象，以便于连续点击画布快速生成序列
-      canvas.discardActiveObject();
-      canvas.renderAll();
-
-      // 在 TUI Image Editor 的异步更新执行后，再次确保取消选中状态
-      setTimeout(() => {
-        canvas.discardActiveObject();
-        canvas.renderAll();
-      }, 50);
-    }
-
-  } catch (e) {
-    console.error('Failed to add annotation', e);
-  }
-}
-
-function injectCustomMenu() {
-  if (!tuiEditorContainer.value) return;
-  
-  let attempts = 0;
-  const timer = setInterval(() => {
-    attempts++;
-    // TUI Editor 的主菜单本身通常就是一个 ul 或者是包含了 .tui-image-editor-item 的容器
-    const menuContainer = tuiEditorContainer.value?.querySelector('.tui-image-editor-menu');
-    
-    if (menuContainer) {
-      clearInterval(timer);
-      
-      // 防止重复注入
-      if (menuContainer.querySelector('.custom-annotation-menu')) return;
-
-      // 创建自定义 li
-      const li = document.createElement('li');
-      li.className = 'tui-image-editor-item normal custom-annotation-menu';
-      li.style.cursor = 'pointer';
-      li.title = '序号标注'; // 使用 tooltip 提示
-      // 替换为用户提供的 SVG 图标，将 #333 改为 currentColor 以适配暗色/亮色激活状态
-      li.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #fff;">
-          <svg width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M20 9H42" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M20 19H42" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M20 29H42" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M20 39H42" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M6 29H12V32L6 38V39H12" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M7 11L9 9V19M9 19H7M9 19H11" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-      `;
-
-      // 点击事件
-      li.addEventListener('click', (e) => {
-        e.stopPropagation(); // 防止冒泡触发其他逻辑
-        toggleAnnotationMode();
-        
-        // 样式控制：移除其他菜单的激活状态
-        const allItems = menuContainer.querySelectorAll('.tui-image-editor-item');
-        allItems.forEach(item => {
-          item.classList.remove('active');
-          item.classList.add('normal');
-        });
-        
-        if (annotationMode.value) {
-          li.classList.remove('normal');
-          li.classList.add('active');
-          // 手动高亮自定义按钮，为了符合 TUI 暗黑主题的 active 态，可以加背景
-          li.style.backgroundColor = '#fff';
-          (li.querySelector('div') as HTMLElement).style.color = '#222';
-        } else {
-          li.style.backgroundColor = 'transparent';
-          (li.querySelector('div') as HTMLElement).style.color = '#fff';
-        }
-      });
-
-      // 监听其他原生按钮的点击，自动退出我们的标注模式
-      const nativeItems = menuContainer.querySelectorAll('.tui-image-editor-item:not(.custom-annotation-menu)');
-      nativeItems.forEach(item => {
-        item.addEventListener('click', () => {
-          if (annotationMode.value) {
-            annotationMode.value = false;
-            annotationStep.value = 1;
-            li.classList.remove('active');
-            li.classList.add('normal');
-            li.style.backgroundColor = 'transparent';
-            (li.querySelector('div') as HTMLElement).style.color = '#fff';
-          }
-        });
-      });
-
-      menuContainer.appendChild(li);
-      customMenuEl = li;
-    } else if (attempts > 20) {
-      clearInterval(timer); // 超过2秒放弃
-    }
-  }, 100);
-}
-
-function toggleAnnotationMode() {
-  annotationMode.value = !annotationMode.value;
-}
-
-// 监听序号标注模式的开关，动态调整鼠标光标模式
-watch(annotationMode, (newVal) => {
-  if (!editorInstance || !editorInstance._graphics) return;
-  const canvas = editorInstance._graphics.getCanvas();
-  if (newVal) {
-    editorInstance.stopDrawingMode();
-    editorInstance.deactivateAll();
-    
-    // 空白处为十字光标，悬浮在已有对象上时自动变为拖拽移动图标
-    canvas.defaultCursor = 'crosshair';
-    canvas.hoverCursor = 'move';
-  } else {
-    canvas.defaultCursor = 'default';
-    canvas.hoverCursor = 'default';
-  }
-  canvas.requestRenderAll();
-});
 
 function close() {
   emit('update:visible', false);
