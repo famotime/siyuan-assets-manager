@@ -65,8 +65,9 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import * as tuiImageEditorModule from 'tui-image-editor';
-const ImageEditor = (tuiImageEditorModule as any).default || tuiImageEditorModule;
+import ImageEditorModule from 'tui-image-editor';
+// 从默认导入的模块命名空间中提取真正的 default 构造函数
+const ImageEditor = (ImageEditorModule as any).default || ImageEditorModule;
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
 import localeZhCN from '../i18n/tui-locale-zh';
