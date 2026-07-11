@@ -8,6 +8,7 @@ import "@/index.scss";
 import PluginInfoString from '@/../plugin.json'
 import { destroy, init } from '@/main'
 import { getAssetNameFromElement } from '@/utils/plugin-entry'
+import { log } from '@/utils/logger'
 
 let PluginInfo = {
   version: '',
@@ -15,7 +16,7 @@ let PluginInfo = {
 try {
   PluginInfo = PluginInfoString
 } catch (err) {
-  console.log('Plugin info parse error: ', err)
+  log('Plugin info parse error: ', err)
 }
 const {
   version,
@@ -35,7 +36,8 @@ export default class AssetsManagerPlugin extends Plugin {
   public platform: SyFrontendTypes
   public readonly version = version
   public settings = {
-    promptOnDeleteOriginal: true
+    promptOnDeleteOriginal: true,
+    enableLogging: false
   }
 
   async onload() {
@@ -66,7 +68,7 @@ export default class AssetsManagerPlugin extends Plugin {
       this.isElectron = false
     }
 
-    console.log('Plugin loaded, the plugin is ', this)
+    log('Plugin loaded, the plugin is ', this)
 
     // 加载设置项
     const loaded = await this.loadData("config.json");
@@ -128,6 +130,21 @@ export default class AssetsManagerPlugin extends Plugin {
         checkbox.checked = this.settings.promptOnDeleteOriginal;
         checkbox.addEventListener("change", (e) => {
           this.settings.promptOnDeleteOriginal = (e.target as HTMLInputElement).checked;
+        });
+        return checkbox;
+      }
+    });
+
+    setting.addItem({
+      title: this.i18n.enableLoggingTitle || "开启日志打印",
+      description: this.i18n.enableLoggingDesc || "是否在控制台打印插件运行日志",
+      createActionElement: () => {
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "b3-switch";
+        checkbox.checked = this.settings.enableLogging;
+        checkbox.addEventListener("change", (e) => {
+          this.settings.enableLogging = (e.target as HTMLInputElement).checked;
         });
         return checkbox;
       }

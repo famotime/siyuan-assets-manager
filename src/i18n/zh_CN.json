@@ -1,5 +1,7 @@
 {
   "addTopBarIcon": "资源管家",
   "promptOnDeleteOriginalTitle": "删除原文件提示",
-  "promptOnDeleteOriginalDesc": "重命名和修改文件保存后，是否弹窗提示将原文件放入回收站"
+  "promptOnDeleteOriginalDesc": "重命名和修改文件保存后，是否弹窗提示将原文件放入回收站",
+  "enableLoggingTitle": "开启日志打印",
+  "enableLoggingDesc": "是否在控制台打印插件运行日志"
 }

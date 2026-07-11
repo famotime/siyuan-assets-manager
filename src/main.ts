@@ -4,10 +4,11 @@ import {
 import { createApp } from 'vue'
 import App from './App.vue'
 import { getPluginAppElementId } from './utils/plugin-entry'
+import { log } from './utils/logger'
 
 let plugin = null
 export function usePlugin(pluginProps?: Plugin): Plugin {
-  console.log('usePlugin', pluginProps, plugin)
+  log('usePlugin', pluginProps, plugin)
   if (pluginProps) {
     plugin = pluginProps
   }

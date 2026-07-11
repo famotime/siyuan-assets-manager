@@ -32,6 +32,7 @@ import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
 import localeZhCN from '../i18n/tui-locale-zh';
 import { calculateDialogSize } from '../utils/image-editor';
+import { log } from '../utils/logger';
 
 const props = defineProps<{
   visible: boolean;
@@ -89,7 +90,7 @@ function initEditor(url: string) {
   }
 
   const ImageEditorConstructor = getImageEditor();
-  console.log('[AssetsManager] Resolved constructor dynamically:', ImageEditorConstructor);
+  log('Resolved constructor dynamically:', ImageEditorConstructor);
   editorInstance = new ImageEditorConstructor(tuiEditorContainer.value, {
     includeUI: {
       loadImage: {
