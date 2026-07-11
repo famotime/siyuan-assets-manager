@@ -142,12 +142,16 @@ async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: strin
     }
     
     // 3. 询问是否删除旧图片
-    const delOld = await showConfirm({
-      title: '删除原文件',
-      message: `图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`,
-      confirmText: '放入回收站',
-      danger: true
-    });
+    let delOld = true;
+    const plugin = usePlugin() as any;
+    if (plugin?.settings?.promptOnDeleteOriginal) {
+      delOld = await showConfirm({
+        title: '删除原文件',
+        message: `图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`,
+        confirmText: '放入回收站',
+        danger: true
+      });
+    }
     if (delOld) {
       await deleteAssetFile(oldName);
     }
@@ -203,8 +207,19 @@ async function submitGlobalRename() {
 
   closeGlobalRenameDialog();
   try {
+    let deleteOld = true;
+    const plugin = usePlugin() as any;
+    if (plugin?.settings?.promptOnDeleteOriginal) {
+      deleteOld = await showConfirm({
+        title: '删除原文件',
+        message: `文件已重命名为 ${newName}。\n是否将原文件 ${oldName} 放入回收站？`,
+        confirmText: '放入回收站',
+        danger: true
+      });
+    }
+
     // 1. 重命名物理文件
-    const success = await renameAssetFile(oldName, newName);
+    const success = await renameAssetFile(oldName, newName, deleteOld);
     if (!success) {
       pushMsg("重命名物理文件失败");
       return;

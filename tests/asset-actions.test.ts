@@ -10,36 +10,36 @@ describe('asset action helpers', () => {
     expect(buildEditedAssetName('noext', 123)).toBe('_edited_123.noext')
   })
 
-  it('rejects empty and invalid rename values', () => {
-    expect(resolveRenameAssetName('old.png', '   ', () => true)).toEqual({
+  it('rejects empty and invalid rename values', async () => {
+    expect(await resolveRenameAssetName('old.png', '   ', async () => true)).toEqual({
       ok: false,
       reason: 'empty',
     })
-    expect(resolveRenameAssetName('old.png', 'bad/name.png', () => true)).toEqual({
+    expect(await resolveRenameAssetName('old.png', 'bad/name.png', async () => true)).toEqual({
       ok: false,
       reason: 'invalidChars',
     })
   })
 
-  it('keeps unchanged names and appends the old extension when omitted', () => {
-    expect(resolveRenameAssetName('old.png', 'old.png', () => true)).toEqual({
+  it('keeps unchanged names and appends the old extension when omitted', async () => {
+    expect(await resolveRenameAssetName('old.png', 'old.png', async () => true)).toEqual({
       ok: true,
       changed: false,
       name: 'old.png',
     })
-    expect(resolveRenameAssetName('old.png', 'new', () => true)).toEqual({
+    expect(await resolveRenameAssetName('old.png', 'new', async () => true)).toEqual({
       ok: true,
       changed: true,
       name: 'new.png',
     })
   })
 
-  it('requires confirmation when changing an existing extension', () => {
-    expect(resolveRenameAssetName('old.png', 'new.jpg', () => false)).toEqual({
+  it('requires confirmation when changing an existing extension', async () => {
+    expect(await resolveRenameAssetName('old.png', 'new.jpg', async () => false)).toEqual({
       ok: false,
       reason: 'extensionChangeCanceled',
     })
-    expect(resolveRenameAssetName('old.png', 'new.jpg', () => true)).toEqual({
+    expect(await resolveRenameAssetName('old.png', 'new.jpg', async () => true)).toEqual({
       ok: true,
       changed: true,
       name: 'new.jpg',

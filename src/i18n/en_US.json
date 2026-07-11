@@ -1,3 +1,5 @@
 {
-  "addTopBarIcon": "Assets Manager"
+  "addTopBarIcon": "Assets Manager",
+  "promptOnDeleteOriginalTitle": "Prompt before deleting original file",
+  "promptOnDeleteOriginalDesc": "Whether to prompt to put the original file into the recycle bin after renaming or saving modified files"
 }

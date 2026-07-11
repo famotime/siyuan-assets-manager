@@ -2,6 +2,7 @@ import {
   Plugin,
   getFrontend,
   IMenuBaseDetail,
+  Setting,
 } from "siyuan";
 import "@/index.scss";
 import PluginInfoString from '@/../plugin.json'
@@ -33,6 +34,9 @@ export default class AssetsManagerPlugin extends Plugin {
   public isInWindow: boolean
   public platform: SyFrontendTypes
   public readonly version = version
+  public settings = {
+    promptOnDeleteOriginal: true
+  }
 
   async onload() {
     this.addIcons(`
@@ -63,6 +67,12 @@ export default class AssetsManagerPlugin extends Plugin {
     }
 
     console.log('Plugin loaded, the plugin is ', this)
+
+    // 加载设置项
+    const loaded = await this.loadData("config.json");
+    if (loaded) {
+      this.settings = Object.assign({}, this.settings, loaded);
+    }
 
     init(this)
 
@@ -102,6 +112,27 @@ export default class AssetsManagerPlugin extends Plugin {
   }
 
   openSetting() {
-    window._siyuan_assets_manager?.openSetting?.()
+    const setting = new Setting({
+      confirmCallback: () => {
+        this.saveData("config.json", this.settings);
+      }
+    });
+
+    setting.addItem({
+      title: this.i18n.promptOnDeleteOriginalTitle || "删除原文件提示",
+      description: this.i18n.promptOnDeleteOriginalDesc || "重命名和修改文件保存后，是否弹窗提示将原文件放入回收站",
+      createActionElement: () => {
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "b3-switch";
+        checkbox.checked = this.settings.promptOnDeleteOriginal;
+        checkbox.addEventListener("change", (e) => {
+          this.settings.promptOnDeleteOriginal = (e.target as HTMLInputElement).checked;
+        });
+        return checkbox;
+      }
+    });
+
+    setting.open(this.name);
   }
 }

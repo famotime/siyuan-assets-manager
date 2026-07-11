@@ -44,8 +44,9 @@ export async function readAssetFile(fileName: string): Promise<Blob | null> {
  * 重命名物理资源文件
  * @param oldName 旧文件名
  * @param newName 新文件名
+ * @param deleteOld 是否删除旧文件
  */
-export async function renameAssetFile(oldName: string, newName: string): Promise<boolean> {
+export async function renameAssetFile(oldName: string, newName: string, deleteOld: boolean = true): Promise<boolean> {
   try {
     const blob = await readAssetFile(oldName);
     if (!blob) {
@@ -53,7 +54,9 @@ export async function renameAssetFile(oldName: string, newName: string): Promise
       return false;
     }
     await saveAssetFile(blob, newName);
-    await removeFile(`/data/assets/${oldName}`);
+    if (deleteOld) {
+      await removeFile(`/data/assets/${oldName}`);
+    }
     return true;
   } catch (e) {
     console.error("[file-system] 重命名物理文件失败:", e);
