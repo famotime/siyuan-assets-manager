@@ -209,7 +209,8 @@ async function handleOpenDocs(asset: AssetInfo) {
         app: plugin.app,
         doc: {
           id: ref.id,
-          action: ["cb-get-hl", "cb-get-focus"]
+          // 添加 "cb-get-context" 动作以显示文档全文，同时通过 "cb-get-hl" 和 "cb-get-focus" 定位并高亮该图片
+          action: ["cb-get-hl", "cb-get-focus", "cb-get-context"]
         },
         keepCursor: true
       });

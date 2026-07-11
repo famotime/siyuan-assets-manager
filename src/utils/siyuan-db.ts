@@ -17,7 +17,7 @@ export interface AssetInfo {
   isDir: boolean;
   references: BlockRef[];
   refCount: number;
-  docCount: number; // 引用文档数
+  docCount: number; // 引用数
 }
 
 export function createAssetInfoMap(files: any[]): Map<string, AssetInfo> {

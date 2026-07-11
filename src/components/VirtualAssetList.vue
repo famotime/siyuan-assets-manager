@@ -12,7 +12,7 @@
         大小 <span v-if="sortField === 'size'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
       <div class="col-refs sortable" :class="{ active: sortField === 'docCount' }" @click="handleSort('docCount')">
-        引用文档数 <span v-if="sortField === 'docCount'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+        引用数 <span v-if="sortField === 'docCount'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
       <div class="col-actions">操作</div>
     </div>
