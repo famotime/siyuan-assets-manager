@@ -3,16 +3,16 @@
     <div class="list-header">
       <div class="col-preview"></div>
       <div class="col-name sortable" :class="{ active: sortField === 'name' }" @click="handleSort('name')">
-        文件名 <span class="sort-icon">{{ sortField === 'name' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
+        文件名 <span v-if="sortField === 'name'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
       <div class="col-ext sortable" :class="{ active: sortField === 'ext' }" @click="handleSort('ext')">
-        后缀名 <span class="sort-icon">{{ sortField === 'ext' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
+        后缀名 <span v-if="sortField === 'ext'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
       <div class="col-size sortable" :class="{ active: sortField === 'size' }" @click="handleSort('size')">
-        大小 <span class="sort-icon">{{ sortField === 'size' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
+        大小 <span v-if="sortField === 'size'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
       <div class="col-refs sortable" :class="{ active: sortField === 'docCount' }" @click="handleSort('docCount')">
-        引用文档数 <span class="sort-icon">{{ sortField === 'docCount' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
+        引用文档数 <span v-if="sortField === 'docCount'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
       </div>
       <div class="col-actions">操作</div>
     </div>

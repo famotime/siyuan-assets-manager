@@ -88,6 +88,10 @@ export default defineConfig(({
     },
 
     build: {
+      commonjsOptions: {
+        include: [/node_modules/, /tui\.image-editor/],
+      },
+
       // 输出路径
       outDir: distDir,
       emptyOutDir: !isWatch,

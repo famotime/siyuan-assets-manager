@@ -95,7 +95,10 @@ $transition-slow: 0.3s ease;
     background-color: var(--b3-theme-primary);
     color: var(--b3-theme-on-primary);
 
-    &:hover { filter: brightness(1.1); }
+    &:hover {
+      background-color: var(--b3-theme-primary);
+      filter: brightness(1.1);
+    }
     &:active { filter: brightness(0.95); transform: scale(0.98); }
   }
 
@@ -114,7 +117,10 @@ $transition-slow: 0.3s ease;
     background-color: var(--b3-theme-error);
     color: var(--b3-theme-on-error);
 
-    &:hover { filter: brightness(1.1); }
+    &:hover {
+      background-color: var(--b3-theme-error);
+      filter: brightness(1.1);
+    }
     &:active { filter: brightness(0.95); transform: scale(0.98); }
   }
 

@@ -13,48 +13,10 @@
           </button>
         </div>
       </div>
-      <div class="am-dialog__body" style="position: relative; background: #282828; padding: 16px; display: flex;" :class="{ 'annotation-mode-active': annotationMode }">
+      <div class="am-dialog__body" style="position: relative; background: #282828; padding: 16px; display: flex;">
         <div ref="tuiEditorContainer" style="width: 100%; height: 100%;"></div>
-        
-        <!-- 画笔工具栏箭头选项（通过 Teleport 挂载到 TUI 原生画笔子菜单中） -->
-        <teleport v-if="isEditorReady" to=".tui-image-editor-menu-draw .tui-image-editor-submenu-item">
-          <li class="tui-image-editor-partition"><div></div></li>
-          <li class="custom-arrow-select-button">
-            <div class="tui-image-editor-button" :class="drawArrowType === 'none' ? 'active' : 'normal'" @click="drawArrowType = 'none'" title="无箭头">
-              <div>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-              </div>
-              <label>无箭头</label>
-            </div>
-            <div class="tui-image-editor-button" :class="drawArrowType === 'single' ? 'active' : 'normal'" @click="drawArrowType = 'single'" title="单向箭头">
-              <div>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                  <polyline points="12 5 19 12 12 19" />
-                </svg>
-              </div>
-              <label>单箭头</label>
-            </div>
-            <div class="tui-image-editor-button" :class="drawArrowType === 'double' ? 'active' : 'normal'" @click="drawArrowType = 'double'" title="双向箭头">
-              <div>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                  <polyline points="12 5 19 12 12 19" />
-                  <polyline points="12 5 5 12 12 19" />
-                </svg>
-              </div>
-              <label>双箭头</label>
-            </div>
-          </li>
-        </teleport>
-
       </div>
       <div class="am-dialog__footer">
-        <span v-if="annotationMode" style="margin-right: auto; color: var(--b3-theme-primary); font-size: 14px; font-weight: bold;">
-          📍 序号标注模式进行中 (点击画面添加序号: {{ annotationStep }})
-        </span>
         <button class="am-btn am-btn--outline" @click="downloadLocal" style="margin-right: 8px;" title="当前编辑的图片另存到本地">另存</button>
         <button class="am-btn am-btn--ghost" @click="close" title="取消编辑并关闭窗口">取消</button>
         <button class="am-btn am-btn--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存</button>
@@ -64,14 +26,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import ImageEditorModule from 'tui-image-editor';
-// 从默认导入的模块命名空间中提取真正的 default 构造函数
-const ImageEditor = (ImageEditorModule as any).default || ImageEditorModule;
+import { ref, watch, nextTick } from 'vue';
+import { getImageEditor } from '../utils/tui-image-editor-bridge';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
 import localeZhCN from '../i18n/tui-locale-zh';
-import { calculateAnnotationShapeSize, calculateAnnotationTextTop, calculateDialogSize, type AnnotationShape } from '../utils/image-editor';
+import { calculateDialogSize } from '../utils/image-editor';
 
 const props = defineProps<{
   visible: boolean;
@@ -89,36 +49,8 @@ const dialogHeight = ref('600px');
 // 编辑器初始化就绪状态，用于 Teleport 挂载
 const isEditorReady = ref(false);
 
-// 序号标注相关状态
-const annotationMode = ref(false);
-const annotationStep = ref(1);
-
-// 画笔箭头相关状态
-const drawArrowType = ref<'none' | 'single' | 'double'>('none');
-
-let modeSyncTimer: any = null;
-
-onMounted(() => {
-  modeSyncTimer = setInterval(() => {
-    if (editorInstance) {
-      annotationMode.value = (editorInstance.getDrawingMode() === 'ANNOTATION');
-    } else {
-      annotationMode.value = false;
-    }
-  }, 200);
-});
-
-onUnmounted(() => {
-  if (modeSyncTimer) {
-    clearInterval(modeSyncTimer);
-  }
-});
-
 watch(() => props.visible, async (newVal) => {
   if (newVal && props.assetName) {
-    annotationMode.value = false;
-    annotationStep.value = 1;
-    drawArrowType.value = 'none';
     isEditorReady.value = false;
     
     const blob = await readAssetFile(props.assetName);
@@ -156,7 +88,9 @@ function initEditor(url: string) {
     editorInstance.destroy();
   }
 
-  editorInstance = new ImageEditor(tuiEditorContainer.value, {
+  const ImageEditorConstructor = getImageEditor();
+  console.log('[AssetsManager] Resolved constructor dynamically:', ImageEditorConstructor);
+  editorInstance = new ImageEditorConstructor(tuiEditorContainer.value, {
     includeUI: {
       loadImage: {
         path: url,
@@ -169,7 +103,7 @@ function initEditor(url: string) {
         'common.bisize.height': '0px'
       },
       locale: localeZhCN,
-      menu: ['crop', 'draw', 'shape', 'icon', 'text', 'filter'],
+      menu: ['crop', 'draw', 'shape', 'icon', 'text', 'filter', 'annotation'],
       initMenu: 'crop',
       uiSize: {
         width: '100%',
@@ -185,144 +119,6 @@ function initEditor(url: string) {
     }
   });
 
-  // 同步步数自增
-  editorInstance.on('annotationStepChanged', (newStep: number) => {
-    annotationStep.value = newStep;
-  });
-
-  if (editorInstance._graphics) {
-    const canvas = editorInstance._graphics.getCanvas();
-
-    // 监听画笔自由绘制路径
-    canvas.on('path:created', (options: any) => {
-      const originalPath = options.path;
-      if (!originalPath || drawArrowType.value === 'none') return;
-
-      const pathData = originalPath.path;
-      if (!pathData || pathData.length < 2) return;
-
-      const strokeWidth = originalPath.strokeWidth || 1;
-      const len = Math.max(12, strokeWidth * 3);
-      const arrowAngle = Math.PI * 5 / 6;
-
-      const newPathData = [...pathData];
-
-      // 添加尾部箭头 (单向或双向时都需要在尾部生成)
-      if (drawArrowType.value === 'single' || drawArrowType.value === 'double') {
-        const endPt = getSegmentEndPoint(pathData[pathData.length - 1]);
-        const endDir = getEndDirection(pathData);
-        if (endPt && endDir) {
-          const angle = Math.atan2(endDir.dy, endDir.dx);
-          const x1 = endPt.x + len * Math.cos(angle + arrowAngle);
-          const y1 = endPt.y + len * Math.sin(angle + arrowAngle);
-          const x2 = endPt.x + len * Math.cos(angle - arrowAngle);
-          const y2 = endPt.y + len * Math.sin(angle - arrowAngle);
-
-          newPathData.push(['M', x1, y1]);
-          newPathData.push(['L', endPt.x, endPt.y]);
-          newPathData.push(['L', x2, y2]);
-        }
-      }
-
-      // 添加头部箭头 (仅在双向时生成)
-      if (drawArrowType.value === 'double') {
-        const startPt = { x: pathData[0][1], y: pathData[0][2] };
-        const startDir = getStartDirection(pathData);
-        if (startPt && startDir) {
-          const angle = Math.atan2(startDir.dy, startDir.dx);
-          const x1 = startPt.x + len * Math.cos(angle + arrowAngle);
-          const y1 = startPt.y + len * Math.sin(angle + arrowAngle);
-          const x2 = startPt.x + len * Math.cos(angle - arrowAngle);
-          const y2 = startPt.y + len * Math.sin(angle - arrowAngle);
-
-          newPathData.push(['M', x1, y1]);
-          newPathData.push(['L', startPt.x, startPt.y]);
-          newPathData.push(['L', x2, y2]);
-        }
-      }
-
-      // 原地更新路径数据
-      originalPath._setPath(newPathData);
-      originalPath.setCoords();
-      canvas.renderAll();
-    });
-
-    // 监听直线工具绘制（TUI直线工具添加的是fabric.Line）
-    canvas.on('object:added', (options: any) => {
-      const obj = options.target;
-      if (!obj) return;
-
-      if (drawArrowType.value !== 'none') {
-        if (obj.type === 'line' && !obj.arrowProcessed) {
-          obj.arrowProcessed = true;
-
-          const arrowType = drawArrowType.value;
-          const strokeWidth = obj.strokeWidth || 1;
-          const len = Math.max(12, strokeWidth * 3);
-          const arrowAngle = Math.PI * 5 / 6;
-
-          const originalRender = obj._render;
-
-          obj._render = function(this: any, ctx: CanvasRenderingContext2D) {
-            // 1. 绘制原本的直线
-            originalRender.call(this, ctx);
-
-            // 2. 绘制箭头
-            ctx.save();
-
-            // 计算相对于直线中心点的局部坐标
-            const cx = (this.x1 + this.x2) / 2;
-            const cy = (this.y1 + this.y2) / 2;
-            const startPt = { x: this.x1 - cx, y: this.y1 - cy };
-            const endPt = { x: this.x2 - cx, y: this.y2 - cy };
-
-            ctx.strokeStyle = this.stroke;
-            ctx.lineWidth = this.strokeWidth;
-            ctx.lineCap = this.strokeLineCap;
-            ctx.lineJoin = this.strokeLineJoin;
-
-            // 绘制尾部箭头
-            if (arrowType === 'single' || arrowType === 'double') {
-              const dx = endPt.x - startPt.x;
-              const dy = endPt.y - startPt.y;
-              const angle = Math.atan2(dy, dx);
-
-              const x1 = endPt.x + len * Math.cos(angle + arrowAngle);
-              const y1 = endPt.y + len * Math.sin(angle + arrowAngle);
-              const x2 = endPt.x + len * Math.cos(angle - arrowAngle);
-              const y2 = endPt.y + len * Math.sin(angle - arrowAngle);
-
-              ctx.beginPath();
-              ctx.moveTo(x1, y1);
-              ctx.lineTo(endPt.x, endPt.y);
-              ctx.lineTo(x2, y2);
-              ctx.stroke();
-            }
-
-            // 绘制头部箭头
-            if (arrowType === 'double') {
-              const dx = startPt.x - endPt.x;
-              const dy = startPt.y - endPt.y;
-              const angle = Math.atan2(dy, dx);
-
-              const x1 = startPt.x + len * Math.cos(angle + arrowAngle);
-              const y1 = startPt.y + len * Math.sin(angle + arrowAngle);
-              const x2 = startPt.x + len * Math.cos(angle - arrowAngle);
-              const y2 = startPt.y + len * Math.sin(angle - arrowAngle);
-
-              ctx.beginPath();
-              ctx.moveTo(x1, y1);
-              ctx.lineTo(startPt.x, startPt.y);
-              ctx.lineTo(x2, y2);
-              ctx.stroke();
-            }
-
-            ctx.restore();
-          };
-        }
-      }
-    });
-  }
 
   // 设置 ready 状态以激活 Teleport
   isEditorReady.value = true;
@@ -358,57 +154,7 @@ function save() {
   close();
 }
 
-// 路径与箭头方向辅助计算函数
-function getSegmentEndPoint(segment: any[]): { x: number; y: number } | null {
-  if (!segment || segment.length < 3) return null;
-  const type = segment[0];
-  if (type === 'M' || type === 'L') {
-    return { x: segment[1], y: segment[2] };
-  } else if (type === 'Q') {
-    return { x: segment[3], y: segment[4] };
-  } else if (type === 'C') {
-    return { x: segment[5], y: segment[6] };
-  }
-  return null;
-}
 
-function getEndDirection(pathData: any[][]): { dx: number; dy: number } | null {
-  if (pathData.length < 2) return null;
-  const lastSeg = pathData[pathData.length - 1];
-  const endPt = getSegmentEndPoint(lastSeg);
-  if (!endPt) return null;
-
-  for (let i = pathData.length - 2; i >= 0; i--) {
-    const prevSeg = pathData[i];
-    const prevPt = getSegmentEndPoint(prevSeg) || (i === 0 ? { x: pathData[0][1], y: pathData[0][2] } : null);
-    if (prevPt) {
-      const dx = endPt.x - prevPt.x;
-      const dy = endPt.y - prevPt.y;
-      if (dx !== 0 || dy !== 0) {
-        return { dx, dy };
-      }
-    }
-  }
-  return null;
-}
-
-function getStartDirection(pathData: any[][]): { dx: number; dy: number } | null {
-  if (pathData.length < 2) return null;
-  const startPt = { x: pathData[0][1], y: pathData[0][2] };
-
-  for (let i = 1; i < pathData.length; i++) {
-    const nextSeg = pathData[i];
-    const nextPt = getSegmentEndPoint(nextSeg);
-    if (nextPt) {
-      const dx = startPt.x - nextPt.x;
-      const dy = startPt.y - nextPt.y;
-      if (dx !== 0 || dy !== 0) {
-        return { dx, dy };
-      }
-    }
-  }
-  return null;
-}
 </script>
 
 <style scoped>
@@ -443,26 +189,8 @@ function getStartDirection(pathData: any[][]): { dx: number; dy: number } | null
   float: left !important;
 }
 
-/* 序号标注的自定义子菜单容器样式与定位 */
-.annotation-mode-active :deep(.tui-image-editor-submenu > div:not(.tui-image-editor-menu-annotation):not(.tui-image-editor-submenu-style)) {
-  display: none !important;
-}
-
-/* 当序号标注激活时，强制子菜单面板显示 */
-.annotation-mode-active :deep(.tui-image-editor-submenu) {
-  display: table !important;
-  overflow: visible !important;
-}
-
 :deep(.tui-image-editor-submenu) {
   overflow: visible !important;
-}
-
-/* 强制自定义子菜单容器显示并像原生一样作为 table-cell 垂直对齐 */
-.annotation-mode-active :deep(.tui-image-editor-menu-annotation) {
-  display: table-cell !important;
-  vertical-align: bottom;
-  text-align: center;
 }
 
 /* 按钮的通用状态修饰与 SVG 一致性过渡 */

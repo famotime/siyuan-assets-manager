@@ -39,6 +39,9 @@ const localeZhCN: Record<string, string> = {
   'Straight': '直线',
   'Color': '颜色',
   'Range': '粗细',
+  'NoArrow': '无箭头',
+  'SingleArrow': '单箭头',
+  'DoubleArrow': '双箭头',
 
   // 形状
   'Rectangle': '矩形',

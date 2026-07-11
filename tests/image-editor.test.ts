@@ -4,6 +4,7 @@ import {
   calculateDialogSize,
   calculateAnnotationTextTop,
 } from '../src/utils/image-editor'
+import { resolveImageEditorConstructor } from '../src/utils/tui-image-editor-bridge'
 
 describe('image editor helpers', () => {
   it('calculates dialog size within viewport bounds', () => {
@@ -26,5 +27,13 @@ describe('image editor helpers', () => {
   it('applies triangle text center compensation and font baseline compensation', () => {
     expect(calculateAnnotationTextTop('circle', 100, 32, 20)).toBe(101.6)
     expect(calculateAnnotationTextTop('triangle', 100, 36, 20)).toBe(107.6)
+  })
+
+  it('resolves image editor constructor from default interop shapes', () => {
+    class ImageEditorMock {}
+
+    expect(resolveImageEditorConstructor(ImageEditorMock)).toBe(ImageEditorMock)
+    expect(resolveImageEditorConstructor({ default: ImageEditorMock })).toBe(ImageEditorMock)
+    expect(resolveImageEditorConstructor({ default: { default: ImageEditorMock } })).toBe(ImageEditorMock)
   })
 })
