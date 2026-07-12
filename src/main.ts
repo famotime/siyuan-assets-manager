@@ -8,13 +8,11 @@ import { log } from './utils/logger'
 
 let plugin = null
 export function usePlugin(pluginProps?: Plugin): Plugin {
-  log('usePlugin', pluginProps, plugin)
   if (pluginProps) {
     plugin = pluginProps
   }
-  if (!plugin && !pluginProps) {
-    console.error('need bind plugin')
-  }
+  // 先完成绑定再记录日志，避免 log 函数内部间接调用 usePlugin() 导致循环调用以及提示 "need bind plugin" 错误
+  log('usePlugin', pluginProps, plugin)
   return plugin;
 }
 

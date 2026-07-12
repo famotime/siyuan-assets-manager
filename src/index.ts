@@ -6,7 +6,7 @@ import {
 } from "siyuan";
 import "@/index.scss";
 import PluginInfoString from '@/../plugin.json'
-import { destroy, init } from '@/main'
+import { destroy, init, usePlugin } from '@/main'
 import { getAssetNameFromElement } from '@/utils/plugin-entry'
 import { log } from '@/utils/logger'
 
@@ -41,6 +41,7 @@ export default class AssetsManagerPlugin extends Plugin {
   }
 
   async onload() {
+    usePlugin(this);
     this.addIcons(`
 <symbol id="iconAssetsManager" viewBox="0 0 24 24">
   <g fill="none" stroke="currentColor" stroke-width="1.5">
