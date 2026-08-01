@@ -245,7 +245,7 @@ export function exportEditorCanvasDataUrl(
       }
 
       const allObjects = fabricCanvas.getObjects ? fabricCanvas.getObjects() : []
-      const annotationObjects = allObjects.filter((obj: any) => obj !== bgImage)
+      const annotationObjects = allObjects.filter((obj: any) => obj !== bgImage && obj?.type !== 'cropzone')
       const objectBounds: BoundingBox[] = annotationObjects.map((obj: any) => {
         if (typeof obj.getBoundingRect === 'function') {
           return obj.getBoundingRect(true, true)

@@ -6,6 +6,7 @@ import {
   calculateTargetResolution,
   calculateCanvasExportBounds,
   getNonTransparentBoundingBox,
+  exportEditorCanvasDataUrl,
 } from '../src/utils/image-editor'
 import { resolveImageEditorConstructor } from '../src/utils/tui-image-editor-bridge'
 
@@ -145,6 +146,46 @@ describe('image editor helpers', () => {
         top: 10,
         width: 10,
         height: 10,
+      })
+    })
+  })
+
+  describe('exportEditorCanvasDataUrl', () => {
+    it('filters out unapplied cropzone objects when exporting canvas', () => {
+      const bgImage = { left: 0, top: 0, width: 800, height: 600, scaleX: 1, scaleY: 1 }
+      const cropzoneObj = {
+        type: 'cropzone',
+        left: 50,
+        top: 50,
+        width: 200,
+        height: 200,
+        getBoundingRect: () => ({ left: 50, top: 50, width: 200, height: 200 }),
+      }
+      let passedOptions: any = null
+
+      const mockEditorInstance = {
+        _graphics: {
+          getCanvas: () => ({
+            backgroundImage: bgImage,
+            getObjects: () => [bgImage, cropzoneObj],
+            toDataURL: (opts: any) => {
+              passedOptions = opts
+              return 'data:image/png;base64,mock'
+            },
+          }),
+        },
+      }
+
+      const res = exportEditorCanvasDataUrl(mockEditorInstance, { width: 800, height: 600 })
+      expect(res).toBe('data:image/png;base64,mock')
+      expect(passedOptions).toEqual({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+        multiplier: 1,
+        format: 'png',
+        quality: 1,
       })
     })
   })

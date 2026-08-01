@@ -149,6 +149,11 @@ function close() {
 async function downloadLocal() {
   if (!editorInstance) return;
   try {
+    // 若当前处于裁剪或绘制模式（裁剪框未应用），保存前先停止绘制模式，清除画布上的裁剪预览框
+    if (typeof editorInstance.stopDrawingMode === 'function') {
+      editorInstance.stopDrawingMode();
+    }
+
     let dataUrl = exportEditorCanvasDataUrl(editorInstance, originalSize.value);
     if (!dataUrl) {
       const rawDataUrl = editorInstance.toDataURL();
@@ -180,6 +185,11 @@ async function save() {
   }
   log("save clicked, export starting...");
   try {
+    // 若当前处于裁剪或绘制模式（裁剪框未应用），保存前先停止绘制模式，清除画布上的裁剪预览框
+    if (typeof editorInstance.stopDrawingMode === 'function') {
+      editorInstance.stopDrawingMode();
+    }
+
     let dataUrl = exportEditorCanvasDataUrl(editorInstance, originalSize.value);
     if (!dataUrl) {
       log("exportEditorCanvasDataUrl returned null, using fallback resolution adjustment");
@@ -203,6 +213,10 @@ async function save() {
   } catch (e) {
     error("Failed during save resolution adjustment", e);
     try {
+      // 容错时也要先尝试 stopDrawingMode
+      if (typeof editorInstance.stopDrawingMode === 'function') {
+        editorInstance.stopDrawingMode();
+      }
       let rawDataUrl = editorInstance.toDataURL();
       rawDataUrl = await trimAndScaleDataUrl(rawDataUrl, originalSize.value);
       emit('save-edited', {
