@@ -31,8 +31,8 @@ import { getImageEditor } from '../utils/tui-image-editor-bridge';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
 import localeZhCN from '../i18n/tui-locale-zh';
-import { calculateDialogSize } from '../utils/image-editor';
-import { log, error } from '../utils/logger';
+import { calculateDialogSize, adjustDataUrlResolution, exportEditorCanvasDataUrl, trimAndScaleDataUrl } from '../utils/image-editor';
+import { log, warn, error } from '../utils/logger';
 
 const props = defineProps<{
   visible: boolean;
@@ -46,6 +46,7 @@ let editorInstance: any = null;
 
 const dialogWidth = ref('900px');
 const dialogHeight = ref('600px');
+const originalSize = ref<{ width: number; height: number }>({ width: 0, height: 0 });
 
 // 编辑器初始化就绪状态，用于 Teleport 挂载
 const isEditorReady = ref(false);
@@ -60,6 +61,7 @@ watch(() => props.visible, async (newVal) => {
       
       const img = new Image();
       img.onload = async () => {
+        originalSize.value = { width: img.width, height: img.height };
         const dialogSize = calculateDialogSize(img.width, img.height, window.innerWidth, window.innerHeight);
         
         dialogWidth.value = `${dialogSize.width}px`;
@@ -70,8 +72,22 @@ watch(() => props.visible, async (newVal) => {
       };
       img.src = url;
     } else {
-      await nextTick();
-      initEditor(`/assets/${props.assetName}`);
+      const assetUrl = `/assets/${props.assetName}`;
+      const img = new Image();
+      img.onload = async () => {
+        originalSize.value = { width: img.width, height: img.height };
+        const dialogSize = calculateDialogSize(img.width, img.height, window.innerWidth, window.innerHeight);
+        dialogWidth.value = `${dialogSize.width}px`;
+        dialogHeight.value = `${dialogSize.height}px`;
+
+        await nextTick();
+        initEditor(assetUrl);
+      };
+      img.onerror = async () => {
+        await nextTick();
+        initEditor(assetUrl);
+      };
+      img.src = assetUrl;
     }
   } else {
     isEditorReady.value = false;
@@ -130,10 +146,22 @@ function close() {
   emit('update:visible', false);
 }
 
-function downloadLocal() {
+async function downloadLocal() {
   if (!editorInstance) return;
   try {
-    const dataUrl = editorInstance.toDataURL();
+    let dataUrl = exportEditorCanvasDataUrl(editorInstance, originalSize.value);
+    if (!dataUrl) {
+      const rawDataUrl = editorInstance.toDataURL();
+      let currentImgSize = null;
+      try {
+        currentImgSize = editorInstance.getImageSize();
+      } catch (e) {}
+      dataUrl = await adjustDataUrlResolution(rawDataUrl, originalSize.value, currentImgSize);
+    }
+
+    // 终极 Alpha 像素切边与 100% 原始比例重采样
+    dataUrl = await trimAndScaleDataUrl(dataUrl, originalSize.value);
+
     const a = document.createElement('a');
     a.href = dataUrl;
     a.download = props.assetName;
@@ -145,15 +173,49 @@ function downloadLocal() {
   }
 }
 
-function save() {
-  if (!editorInstance) return;
-  const dataUrl = editorInstance.toDataURL();
-  emit('save-edited', {
-    oldName: props.assetName,
-    dataUrl: dataUrl
-  });
-  close();
+async function save() {
+  if (!editorInstance) {
+    warn("save clicked but editorInstance is null");
+    return;
+  }
+  log("save clicked, export starting...");
+  try {
+    let dataUrl = exportEditorCanvasDataUrl(editorInstance, originalSize.value);
+    if (!dataUrl) {
+      log("exportEditorCanvasDataUrl returned null, using fallback resolution adjustment");
+      const rawDataUrl = editorInstance.toDataURL();
+      let currentImgSize = null;
+      try {
+        currentImgSize = editorInstance.getImageSize();
+      } catch (e) {}
+      dataUrl = await adjustDataUrlResolution(rawDataUrl, originalSize.value, currentImgSize);
+    }
+
+    // 终极 Alpha 像素切边与 100% 原始比例重采样
+    dataUrl = await trimAndScaleDataUrl(dataUrl, originalSize.value);
+    log("trimAndScaleDataUrl completed, emitting save-edited event...");
+
+    emit('save-edited', {
+      oldName: props.assetName,
+      dataUrl: dataUrl
+    });
+    close();
+  } catch (e) {
+    error("Failed during save resolution adjustment", e);
+    try {
+      let rawDataUrl = editorInstance.toDataURL();
+      rawDataUrl = await trimAndScaleDataUrl(rawDataUrl, originalSize.value);
+      emit('save-edited', {
+        oldName: props.assetName,
+        dataUrl: rawDataUrl
+      });
+      close();
+    } catch (err) {
+      error("Fatal error saving image", err);
+    }
+  }
 }
+
 
 
 </script>

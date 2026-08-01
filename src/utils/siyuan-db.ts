@@ -158,13 +158,23 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
 
   if (fs && pathLib && dataDir) {
     try {
-      const absolutePath = pathLib.join(dataDir, "assets", fileName);
-      const stat = fs.statSync(absolutePath);
-      size = stat.size;
-      updated = stat.mtimeMs || Date.now();
-    } catch (e) {
-      warn("FS stat failed for", fileName, e);
-    }
+      let absolutePath = pathLib.join(dataDir, "assets", fileName);
+      if (!fs.existsSync(absolutePath)) {
+        try {
+          const decoded = decodeURIComponent(fileName);
+          const decodedPath = pathLib.join(dataDir, "assets", decoded);
+          if (fs.existsSync(decodedPath)) {
+            absolutePath = decodedPath;
+          }
+        } catch (decErr) {}
+      }
+
+      if (fs.existsSync(absolutePath)) {
+        const stat = fs.statSync(absolutePath);
+        size = stat.size;
+        updated = stat.mtimeMs || Date.now();
+      }
+    } catch (e) {}
   } else {
     try {
       const response = await fetch(`/assets/${fileName}`, { method: 'HEAD' });

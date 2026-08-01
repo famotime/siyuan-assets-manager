@@ -4,15 +4,11 @@ import {
 import { createApp } from 'vue'
 import App from './App.vue'
 import { getPluginAppElementId } from './utils/plugin-entry'
-import { log } from './utils/logger'
-
 let plugin = null
 export function usePlugin(pluginProps?: Plugin): Plugin {
   if (pluginProps) {
     plugin = pluginProps
   }
-  // 先完成绑定再记录日志，避免 log 函数内部间接调用 usePlugin() 导致循环调用以及提示 "need bind plugin" 错误
-  log('usePlugin', pluginProps, plugin)
   return plugin;
 }
 

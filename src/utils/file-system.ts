@@ -1,5 +1,21 @@
-import { putFile, removeFile, getFile } from "../api";
-import { error } from "./logger";
+import { putFile, removeFile } from "../api";
+import { log, error } from "./logger";
+
+/**
+ * 将 DataURL 安全转换为 Blob，避免大型 DataURL 调用 fetch 失败
+ */
+export function dataURLToBlob(dataUrl: string): Blob {
+  const arr = dataUrl.split(',')
+  const mimeMatch = arr[0].match(/:(.*?);/)
+  const mime = mimeMatch ? mimeMatch[1] : 'image/png'
+  const bstr = atob(arr[1])
+  let n = bstr.length
+  const u8arr = new Uint8Array(n)
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n)
+  }
+  return new Blob([u8arr], { type: mime })
+}
 
 /**
  * 将 Blob 保存为 Siyuan 资源文件
@@ -7,8 +23,51 @@ import { error } from "./logger";
  * @param fileName 文件名（不包含 assets/ 前缀）
  */
 export async function saveAssetFile(blob: Blob, fileName: string): Promise<void> {
-  const file = new File([blob], fileName, { type: blob.type });
-  await putFile(`/data/assets/${fileName}`, false, file);
+  // 1. 优先在桌面端 Electron 环境下直接使用 Node.js FS 秒写，避免大文件上传限制
+  let fs: any
+  let pathLib: any
+  let dataDir = ''
+  try {
+    fs = (window as any).require('fs')
+    pathLib = (window as any).require('path')
+    dataDir = (window as any).siyuan?.config?.system?.dataDir
+  } catch (e) {}
+
+  if (fs && pathLib && dataDir) {
+    try {
+      const destPath = pathLib.join(dataDir, 'assets', fileName)
+      const arrayBuffer = await blob.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      fs.writeFileSync(destPath, buffer)
+      log(`[saveAssetFile] FS writeFileSync succeeded for ${fileName}`)
+      return
+    } catch (fsErr) {
+      error(`[saveAssetFile] FS writeFileSync failed, fallback to API:`, fsErr)
+    }
+  }
+
+  // 2. Web 环境保底：使用原生 fetch 提交 FormData，避免 SDK 将 FormData 错误转为 JSON
+  const form = new FormData()
+  form.append('path', `/data/assets/${fileName}`)
+  form.append('isDir', 'false')
+  form.append('modTime', Math.floor(Date.now() / 1000).toString())
+  const file = new File([blob], fileName, { type: blob.type || 'image/png' })
+  form.append('file', file)
+
+  try {
+    const res = await fetch('/api/file/putFile', {
+      method: 'POST',
+      body: form,
+    })
+    const json = await res.json()
+    if (json.code !== 0) {
+      throw new Error(json.msg || `putFile returned code ${json.code}`)
+    }
+    log(`[saveAssetFile] fetch putFile succeeded for ${fileName}`)
+  } catch (apiErr) {
+    error(`[saveAssetFile] fetch putFile failed:`, apiErr)
+    await putFile(`/data/assets/${fileName}`, false, file)
+  }
 }
 
 /**

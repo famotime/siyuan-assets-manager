@@ -61,7 +61,7 @@ import AssetsManager from './components/AssetsManager.vue';
 import ImageEditorDialog from './components/ImageEditorDialog.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import { getAssetInfoByName, deleteAssetFile, type AssetInfo } from './utils/siyuan-db';
-import { saveAssetFile, renameAssetFile } from './utils/file-system';
+import { saveAssetFile, renameAssetFile, dataURLToBlob } from './utils/file-system';
 import { replaceAssetInBlocks } from './utils/siyuan-block';
 import { buildEditedAssetName, resolveRenameAssetName } from './utils/asset-actions';
 import { showConfirm } from './utils/confirm';
@@ -130,8 +130,7 @@ async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: strin
   const newName = buildEditedAssetName(oldName);
   
   try {
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
+    const blob = dataURLToBlob(dataUrl);
     
     // 1. 物理保存新文件
     await saveAssetFile(blob, newName);
@@ -144,8 +143,8 @@ async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: strin
     
     // 3. 询问是否删除旧图片
     let delOld = true;
-    const plugin = usePlugin() as any;
-    if (plugin?.settings?.promptOnDeleteOriginal) {
+    const pluginInstance = usePlugin() as any;
+    if (pluginInstance?.settings?.promptOnDeleteOriginal) {
       delOld = await showConfirm({
         title: '删除原文件',
         message: `图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`,
