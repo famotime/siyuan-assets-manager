@@ -104,7 +104,7 @@ function initEditor(url: string) {
         'common.bisize.height': '0px'
       },
       locale: localeZhCN,
-      menu: ['crop', 'draw', 'shape', 'icon', 'text', 'filter', 'annotation'],
+      menu: ['resize', 'crop', 'flip', 'rotate', 'draw', 'eraser', 'lasso', 'shape', 'icon', 'text', 'mask', 'filter', 'mosaic', 'annotation'],
       initMenu: 'crop',
       uiSize: {
         width: '100%',
