@@ -32,7 +32,7 @@ import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
 import localeZhCN from '../i18n/tui-locale-zh';
 import { calculateDialogSize } from '../utils/image-editor';
-import { log } from '../utils/logger';
+import { log, error } from '../utils/logger';
 
 const props = defineProps<{
   visible: boolean;
@@ -141,7 +141,7 @@ function downloadLocal() {
     a.click();
     document.body.removeChild(a);
   } catch (e) {
-    console.error("Failed to download image", e);
+    error("Failed to download image", e);
   }
 }
 

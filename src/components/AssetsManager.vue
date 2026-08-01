@@ -64,6 +64,7 @@ import { calculateUnreferencedCleanup, filterAssets, formatAssetSize, isImageAss
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { usePlugin } from '../main';
+import { error } from '../utils/logger';
 import VirtualAssetList from './VirtualAssetList.vue';
 
 const assets = ref<AssetInfo[]>([]);
@@ -161,7 +162,7 @@ async function loadData() {
   try {
     assets.value = await getAllAssetsInfo();
   } catch (e) {
-    console.error("Failed to load assets", e);
+    error("Failed to load assets", e);
   } finally {
     loading.value = false;
   }
@@ -217,7 +218,7 @@ async function handleOpenDocs(asset: AssetInfo) {
     }
     pushMsg(`已在后台打开并定位到 ${asset.references.length} 个引用位置`);
   } catch (e) {
-    console.error("Failed to open documents", e);
+    error("Failed to open documents", e);
     pushMsg("打开文档失败");
   }
 }
@@ -249,7 +250,7 @@ async function handleDelete(asset: AssetInfo) {
     pushMsg(`资源 ${asset.name} 及其文档引用已删除`);
     assets.value = assets.value.filter(a => a.name !== asset.name);
   } catch (e) {
-    console.error(e);
+    error(e);
     pushMsg(`删除失败`);
   }
 }
@@ -290,7 +291,7 @@ async function handleCleanupUnreferenced() {
     pushMsg(`清理完成！已成功删除 ${deletedCount} 个未引用资源。`);
     await loadData();
   } catch (e) {
-    console.error("Failed to cleanup unreferenced assets", e);
+    error("Failed to cleanup unreferenced assets", e);
     pushMsg("清理失败");
   } finally {
     loading.value = false;

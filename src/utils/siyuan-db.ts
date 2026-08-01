@@ -1,5 +1,6 @@
 import { sql, readDir, removeFile, sql as sqlQuery } from "../api";
 import { extractAssetNamesFromMarkdown } from "./asset-markdown";
+import { warn } from "./logger";
 
 export interface BlockRef {
   id: string;
@@ -162,7 +163,7 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
       size = stat.size;
       updated = stat.mtimeMs || Date.now();
     } catch (e) {
-      console.warn("FS stat failed for", fileName, e);
+      warn("FS stat failed for", fileName, e);
     }
   } else {
     try {
@@ -172,7 +173,7 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
         size = parseInt(contentLength, 10);
       }
     } catch (e) {
-      console.warn("HEAD request failed for", fileName, e);
+      warn("HEAD request failed for", fileName, e);
     }
   }
 

@@ -115,11 +115,7 @@ export default class AssetsManagerPlugin extends Plugin {
   }
 
   openSetting() {
-    const setting = new Setting({
-      confirmCallback: () => {
-        this.saveData("config.json", this.settings);
-      }
-    });
+    const setting = new Setting({});
 
     setting.addItem({
       title: this.i18n.promptOnDeleteOriginalTitle || "删除原文件提示",
@@ -131,6 +127,7 @@ export default class AssetsManagerPlugin extends Plugin {
         checkbox.checked = this.settings.promptOnDeleteOriginal;
         checkbox.addEventListener("change", (e) => {
           this.settings.promptOnDeleteOriginal = (e.target as HTMLInputElement).checked;
+          this.saveData("config.json", this.settings);
         });
         return checkbox;
       }
@@ -146,6 +143,7 @@ export default class AssetsManagerPlugin extends Plugin {
         checkbox.checked = this.settings.enableLogging;
         checkbox.addEventListener("change", (e) => {
           this.settings.enableLogging = (e.target as HTMLInputElement).checked;
+          this.saveData("config.json", this.settings);
         });
         return checkbox;
       }

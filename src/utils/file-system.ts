@@ -1,4 +1,5 @@
 import { putFile, removeFile, getFile } from "../api";
+import { error } from "./logger";
 
 /**
  * 将 Blob 保存为 Siyuan 资源文件
@@ -35,7 +36,7 @@ export async function readAssetFile(fileName: string): Promise<Blob | null> {
       return await response.blob();
     }
   } catch (e) {
-    console.error("Failed to read asset", e);
+    error("Failed to read asset", e);
   }
   return null;
 }
@@ -50,7 +51,7 @@ export async function renameAssetFile(oldName: string, newName: string, deleteOl
   try {
     const blob = await readAssetFile(oldName);
     if (!blob) {
-      console.error(`[file-system] 重命名失败，无法读取旧文件: ${oldName}`);
+      error(`[file-system] 重命名失败，无法读取旧文件: ${oldName}`);
       return false;
     }
     await saveAssetFile(blob, newName);
@@ -59,7 +60,7 @@ export async function renameAssetFile(oldName: string, newName: string, deleteOl
     }
     return true;
   } catch (e) {
-    console.error("[file-system] 重命名物理文件失败:", e);
+    error("[file-system] 重命名物理文件失败:", e);
     return false;
   }
 }

@@ -66,6 +66,7 @@ import { replaceAssetInBlocks } from './utils/siyuan-block';
 import { buildEditedAssetName, resolveRenameAssetName } from './utils/asset-actions';
 import { showConfirm } from './utils/confirm';
 import { pushMsg } from './api';
+import { error } from './utils/logger';
 
 const visible = ref(false);
 const plugin = usePlugin();
@@ -113,7 +114,7 @@ onMounted(() => {
         pushMsg("获取资源失败", 3000);
       }
     } catch (e) {
-      console.error(e);
+      error(e);
       pushMsg("获取资源引用失败", 3000);
     }
   };
@@ -161,7 +162,7 @@ async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: strin
     // 4. 通知资源管家刷新数据
     window.dispatchEvent(new CustomEvent('assets-manager-refresh'));
   } catch (e) {
-    console.error("Failed to save edited image:", e);
+    error("Failed to save edited image:", e);
     pushMsg("保存编辑失败");
   }
 }
@@ -239,7 +240,7 @@ async function submitGlobalRename() {
     // 3. 通知资源管家刷新数据
     window.dispatchEvent(new CustomEvent('assets-manager-refresh'));
   } catch (e) {
-    console.error("Failed to rename asset", e);
+    error("Failed to rename asset", e);
     pushMsg("重命名操作失败");
   }
 }
