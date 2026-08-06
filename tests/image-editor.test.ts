@@ -7,6 +7,7 @@ import {
   calculateCanvasExportBounds,
   getNonTransparentBoundingBox,
   exportEditorCanvasDataUrl,
+  getEditorShortcutAction,
 } from '../src/utils/image-editor'
 import { resolveImageEditorConstructor } from '../src/utils/tui-image-editor-bridge'
 
@@ -39,6 +40,24 @@ describe('image editor helpers', () => {
     expect(resolveImageEditorConstructor(ImageEditorMock)).toBe(ImageEditorMock)
     expect(resolveImageEditorConstructor({ default: ImageEditorMock })).toBe(ImageEditorMock)
     expect(resolveImageEditorConstructor({ default: { default: ImageEditorMock } })).toBe(ImageEditorMock)
+  })
+
+  describe('getEditorShortcutAction', () => {
+    it('identifies Ctrl+Z or Cmd+Z as Undo', () => {
+      expect(getEditorShortcutAction({ ctrlKey: true, key: 'z' })).toEqual({ isUndo: true, isRedo: false })
+      expect(getEditorShortcutAction({ metaKey: true, key: 'Z' })).toEqual({ isUndo: true, isRedo: false })
+    })
+
+    it('identifies Ctrl+Shift+Z / Cmd+Shift+Z or Ctrl+Y / Cmd+Y as Redo', () => {
+      expect(getEditorShortcutAction({ ctrlKey: true, shiftKey: true, key: 'z' })).toEqual({ isUndo: false, isRedo: true })
+      expect(getEditorShortcutAction({ metaKey: true, key: 'y' })).toEqual({ isUndo: false, isRedo: true })
+    })
+
+    it('returns null for unrelated keys or non-modifier shortcuts', () => {
+      expect(getEditorShortcutAction({ key: 'z' })).toBeNull()
+      expect(getEditorShortcutAction({ ctrlKey: true, key: 'a' })).toBeNull()
+      expect(getEditorShortcutAction({})).toBeNull()
+    })
   })
 
   describe('calculateTargetResolution', () => {
@@ -190,4 +209,5 @@ describe('image editor helpers', () => {
     })
   })
 })
+
 

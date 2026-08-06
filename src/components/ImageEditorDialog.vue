@@ -26,12 +26,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, onUnmounted } from 'vue';
 import { getImageEditor } from '../utils/tui-image-editor-bridge';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile } from '../utils/file-system';
 import localeZhCN from '../i18n/tui-locale-zh';
-import { calculateDialogSize, adjustDataUrlResolution, exportEditorCanvasDataUrl, trimAndScaleDataUrl } from '../utils/image-editor';
+import { calculateDialogSize, adjustDataUrlResolution, exportEditorCanvasDataUrl, trimAndScaleDataUrl, getEditorShortcutAction } from '../utils/image-editor';
 import { log, warn, error } from '../utils/logger';
 
 const props = defineProps<{
@@ -51,8 +51,33 @@ const originalSize = ref<{ width: number; height: number }>({ width: 0, height: 
 // 编辑器初始化就绪状态，用于 Teleport 挂载
 const isEditorReady = ref(false);
 
+/**
+ * 拦截键盘快捷键，防止事件冒泡至思源笔记触发思源全局撤销/重做
+ */
+function handleKeyDown(e: KeyboardEvent) {
+  if (!props.visible || !editorInstance) return;
+
+  const action = getEditorShortcutAction(e);
+  if (action) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    if (action.isUndo) {
+      if (typeof editorInstance.undo === 'function') {
+        editorInstance.undo().catch(() => {});
+      }
+    } else if (action.isRedo) {
+      if (typeof editorInstance.redo === 'function') {
+        editorInstance.redo().catch(() => {});
+      }
+    }
+  }
+}
+
 watch(() => props.visible, async (newVal) => {
   if (newVal && props.assetName) {
+    window.addEventListener('keydown', handleKeyDown, true);
     isEditorReady.value = false;
     
     const blob = await readAssetFile(props.assetName);
@@ -90,6 +115,7 @@ watch(() => props.visible, async (newVal) => {
       img.src = assetUrl;
     }
   } else {
+    window.removeEventListener('keydown', handleKeyDown, true);
     isEditorReady.value = false;
     if (editorInstance) {
       editorInstance.destroy();
@@ -97,6 +123,11 @@ watch(() => props.visible, async (newVal) => {
     }
   }
 });
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown, true);
+});
+
 
 function initEditor(url: string) {
   if (!tuiEditorContainer.value) return;

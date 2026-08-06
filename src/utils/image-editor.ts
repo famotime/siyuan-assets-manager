@@ -445,3 +445,37 @@ export async function trimAndScaleDataUrl(
   })
 }
 
+export interface ShortcutAction {
+  isUndo: boolean
+  isRedo: boolean
+}
+
+/**
+ * 判断键盘事件是否为图片编辑器的撤销/重做快捷键 (Ctrl+Z / Cmd+Z / Ctrl+Y / Cmd+Y / Ctrl+Shift+Z / Cmd+Shift+Z)
+ */
+export function getEditorShortcutAction(e: {
+  ctrlKey?: boolean
+  metaKey?: boolean
+  shiftKey?: boolean
+  key?: string
+}): ShortcutAction | null {
+  const isCtrlOrCmd = Boolean(e.ctrlKey || e.metaKey)
+  if (!isCtrlOrCmd || !e.key) return null
+
+  const key = e.key.toLowerCase()
+  if (key === 'z') {
+    if (e.shiftKey) {
+      return { isUndo: false, isRedo: true }
+    } else {
+      return { isUndo: true, isRedo: false }
+    }
+  }
+
+  if (key === 'y') {
+    return { isUndo: false, isRedo: true }
+  }
+
+  return null
+}
+
+
