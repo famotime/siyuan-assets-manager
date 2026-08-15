@@ -7,7 +7,7 @@ import {
 import "@/index.scss";
 import PluginInfoString from '@/../plugin.json'
 import { destroy, init, usePlugin } from '@/main'
-import { getAssetNameFromElement } from '@/utils/plugin-entry'
+import { getAssetNameFromElement, getBlockIdFromElement } from '@/utils/plugin-entry'
 import { log } from '@/utils/logger'
 
 let PluginInfo = {
@@ -81,19 +81,42 @@ export default class AssetsManagerPlugin extends Plugin {
 
     this.eventBus.on("open-menu-image", (event: CustomEvent<IMenuBaseDetail>) => {
       const detail = event.detail;
-      const assetName = getAssetNameFromElement(detail.element);
-      if (!assetName) return;
+      if (!detail) return;
 
-      detail.menu.addItem({
+      const assetName = getAssetNameFromElement(detail.element);
+      if (!assetName) {
+        log("[open-menu-image] 忽略无有效资源的图片元素", detail.element);
+        return;
+      }
+
+      let blockId = getBlockIdFromElement(detail.element);
+      if (!blockId && (detail as any).data?.id) {
+        blockId = (detail as any).data.id;
+      }
+      if (!blockId && (detail as any).nodeElement) {
+        blockId = getBlockIdFromElement((detail as any).nodeElement);
+      }
+
+      const menu = detail.menu || (window as any).siyuan?.menus?.menu;
+      if (!menu) return;
+
+      // 同步判断 DOM 属性是否存在二次编辑标记
+      const blockEl = detail.element?.closest('[data-node-id]') || ((detail as any).nodeElement ? (detail as any).nodeElement.closest('[data-node-id]') : null);
+      const hasReEditAttr = Boolean(
+        blockEl?.getAttribute('custom-asset-reedit') ||
+        blockEl?.getAttribute('data-custom-asset-reedit')
+      );
+
+      menu.addItem({
         label: "资源管家",
         icon: "iconAssetsManager",
         type: "submenu",
         submenu: [
           {
-            label: "编辑",
+            label: hasReEditAttr ? "编辑标注（已含历史标注）" : "编辑标注",
             click: () => {
               if ((window as any)._siyuan_assets_manager_open_editor) {
-                (window as any)._siyuan_assets_manager_open_editor(assetName);
+                (window as any)._siyuan_assets_manager_open_editor(assetName, blockId || undefined);
               }
             }
           },

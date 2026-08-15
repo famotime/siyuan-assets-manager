@@ -2,9 +2,27 @@
   <div v-if="visible" class="am-dialog-overlay" style="z-index: 1000;">
     <div class="am-dialog image-editor-dialog-content" :style="{ width: dialogWidth, height: dialogHeight }">
       <div class="am-dialog__header">
-        <h3>编辑图片: {{ assetName }}</h3>
-        <div class="header-actions" style="display: flex; gap: 8px;">
-          <!-- 原本这里的“开启序号标注”按钮被移除，移至 TUI 内部原生菜单栏 -->
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <h3>编辑图片: {{ assetName }}</h3>
+          <span v-if="isReEditMode" class="reedit-badge" title="当前处于二次编辑模式，图层为可交互矢量状态">二次编辑模式</span>
+        </div>
+        <div class="header-actions" style="display: flex; align-items: center; gap: 8px;">
+          <button 
+            v-if="isReEditMode" 
+            class="am-btn am-btn--ghost am-btn--sm" 
+            @click="handleResetOriginal" 
+            title="清空当前所有矢量标注，恢复干净原始底图"
+          >
+            重置为原始底图
+          </button>
+          <button 
+            v-if="isReEditMode" 
+            class="am-btn am-btn--ghost am-btn--sm" 
+            @click="handleFlattenLayers" 
+            title="将图层合并固化为普通图片（移除二次编辑元数据）"
+          >
+            合并固化图层
+          </button>
           <button class="am-dialog__close" @click="close" aria-label="关闭">
             <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
               <line x1="18" y1="6" x2="6" y2="18"/>
@@ -27,16 +45,22 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onUnmounted } from 'vue';
-import { getImageEditor } from '../utils/tui-image-editor-bridge';
+import { getImageEditor, extractVectorDataFromTui, applyVectorDataToTui, getFabricCanvasFromTui } from '../utils/tui-image-editor-bridge';
 import 'tui-image-editor/dist/tui-image-editor.css';
-import { readAssetFile } from '../utils/file-system';
+import { readAssetFile, readOriginalImage } from '../utils/file-system';
+import { getImageBlockReEditData, removeImageBlockReEditData } from '../utils/siyuan-block';
+import { getAssetInfoByName } from '../utils/siyuan-db';
 import localeZhCN from '../i18n/tui-locale-zh';
 import { calculateDialogSize, adjustDataUrlResolution, exportEditorCanvasDataUrl, trimAndScaleDataUrl, getEditorShortcutAction } from '../utils/image-editor';
+import { showConfirm } from '../utils/confirm';
+import { pushMsg } from '../api';
 import { log, warn, error } from '../utils/logger';
+import type { IAssetReEditMetadata } from '../types/reedit';
 
 const props = defineProps<{
   visible: boolean;
   assetName: string;
+  blockId?: string;
 }>();
 
 const emit = defineEmits(['update:visible', 'save-edited']);
@@ -48,6 +72,11 @@ const dialogWidth = ref('900px');
 const dialogHeight = ref('600px');
 const originalSize = ref<{ width: number; height: number }>({ width: 0, height: 0 });
 
+// 二次编辑模式状态
+const isReEditMode = ref(false);
+const reEditMetadata = ref<IAssetReEditMetadata | null>(null);
+const originalStoragePath = ref('');
+
 // 编辑器初始化就绪状态，用于 Teleport 挂载
 const isEditorReady = ref(false);
 
@@ -55,10 +84,10 @@ const isEditorReady = ref(false);
  * 拦截键盘快捷键，防止事件冒泡至思源笔记触发思源全局撤销/重做
  */
 function handleKeyDown(e: KeyboardEvent) {
-  if (!props.visible || !editorInstance) return;
+  if (!editorInstance) return;
 
   const action = getEditorShortcutAction(e);
-  if (action) {
+  if (action && (action.isUndo || action.isRedo)) {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
@@ -79,41 +108,78 @@ watch(() => props.visible, async (newVal) => {
   if (newVal && props.assetName) {
     window.addEventListener('keydown', handleKeyDown, true);
     isEditorReady.value = false;
-    
-    const blob = await readAssetFile(props.assetName);
-    if (blob) {
-      const url = URL.createObjectURL(blob);
-      
-      const img = new Image();
-      img.onload = async () => {
-        originalSize.value = { width: img.width, height: img.height };
-        const dialogSize = calculateDialogSize(img.width, img.height, window.innerWidth, window.innerHeight);
-        
-        dialogWidth.value = `${dialogSize.width}px`;
-        dialogHeight.value = `${dialogSize.height}px`;
+    isReEditMode.value = false;
+    reEditMetadata.value = null;
+    originalStoragePath.value = '';
 
-        await nextTick();
-        initEditor(url);
-      };
-      img.src = url;
-    } else {
-      const assetUrl = `/assets/${props.assetName}`;
-      const img = new Image();
-      img.onload = async () => {
-        originalSize.value = { width: img.width, height: img.height };
-        const dialogSize = calculateDialogSize(img.width, img.height, window.innerWidth, window.innerHeight);
-        dialogWidth.value = `${dialogSize.width}px`;
-        dialogHeight.value = `${dialogSize.height}px`;
+    let imageBlob: Blob | null = null;
+    let initialUrl = '';
 
-        await nextTick();
-        initEditor(assetUrl);
-      };
-      img.onerror = async () => {
-        await nextTick();
-        initEditor(assetUrl);
-      };
-      img.src = assetUrl;
+    // 1. 获取目标 blockId（优先使用传入的 blockId，若无则尝试通过资产名反查）
+    let targetBlockId = props.blockId;
+    if (!targetBlockId) {
+      try {
+        const assetInfo = await getAssetInfoByName(props.assetName);
+        if (assetInfo?.reEditBlockId) {
+          targetBlockId = assetInfo.reEditBlockId;
+        } else if (assetInfo?.references && assetInfo.references.length === 1) {
+          targetBlockId = assetInfo.references[0].id;
+        }
+      } catch (e) {}
     }
+
+    if (targetBlockId) {
+      try {
+        const meta = await getImageBlockReEditData(targetBlockId);
+        if (meta) {
+          isReEditMode.value = true;
+          reEditMetadata.value = meta;
+          originalStoragePath.value = meta.originalStoragePath;
+
+          // 尝试从隔离存储中读取干净原始底图
+          imageBlob = await readOriginalImage(meta.originalStoragePath);
+          if (!imageBlob) {
+            warn(`[ImageEditorDialog] 未能从隔离目录读取底图 ${meta.originalStoragePath}，尝试降级读取当前 assets`);
+          }
+        }
+      } catch (err) {
+        warn('[ImageEditorDialog] 查询二次编辑元数据失败:', err);
+      }
+    }
+
+    // 2. 如果不是二次编辑模式或读取隔离底图失败，读取当前 assets 图片
+    if (!imageBlob) {
+      imageBlob = await readAssetFile(props.assetName);
+    }
+
+    if (imageBlob) {
+      initialUrl = URL.createObjectURL(imageBlob);
+    } else {
+      initialUrl = `/assets/${props.assetName}`;
+    }
+
+    const img = new Image();
+    img.onload = async () => {
+      originalSize.value = { width: img.width, height: img.height };
+      const dialogSize = calculateDialogSize(img.width, img.height, window.innerWidth, window.innerHeight);
+      
+      dialogWidth.value = `${dialogSize.width}px`;
+      dialogHeight.value = `${dialogSize.height}px`;
+
+      await nextTick();
+      initEditor(initialUrl, async () => {
+        // 如果有二次编辑矢量图层，在编辑器底图完全就绪后注入恢复
+        if (isReEditMode.value && reEditMetadata.value?.vectorData) {
+          log('[ImageEditorDialog] 正在还原历史矢量标注图层...');
+          await applyVectorDataToTui(editorInstance, reEditMetadata.value.vectorData);
+        }
+      });
+    };
+    img.onerror = async () => {
+      await nextTick();
+      initEditor(initialUrl);
+    };
+    img.src = initialUrl;
   } else {
     window.removeEventListener('keydown', handleKeyDown, true);
     isEditorReady.value = false;
@@ -128,8 +194,20 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown, true);
 });
 
+async function waitForEditorImageLoaded(editor: any, maxWaitMs = 3000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const canvas = getFabricCanvasFromTui(editor);
+    if (canvas && canvas.backgroundImage && (canvas.backgroundImage.width || 0) > 0) {
+      await new Promise((r) => setTimeout(r, 80));
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
 
-function initEditor(url: string) {
+function initEditor(url: string, onReady?: () => Promise<void>) {
   if (!tuiEditorContainer.value) return;
   
   if (editorInstance) {
@@ -152,7 +230,7 @@ function initEditor(url: string) {
       },
       locale: localeZhCN,
       menu: ['resize', 'crop', 'flip', 'rotate', 'draw', 'eraser', 'lasso', 'shape', 'icon', 'text', 'mask', 'filter', 'mosaic', 'annotation'],
-      initMenu: 'crop',
+      initMenu: '',
       uiSize: {
         width: '100%',
         height: '100%'
@@ -167,20 +245,71 @@ function initEditor(url: string) {
     }
   });
 
-
   // 设置 ready 状态以激活 Teleport
   isEditorReady.value = true;
-}
 
+  if (onReady) {
+    (async () => {
+      await waitForEditorImageLoaded(editorInstance);
+      try {
+        await onReady();
+      } catch (e) {
+        warn('[ImageEditorDialog] onReady callback execution error:', e);
+      }
+    })();
+  }
+}
 
 function close() {
   emit('update:visible', false);
 }
 
+async function handleResetOriginal() {
+  if (!editorInstance) return;
+  const confirmed = await showConfirm({
+    title: '重置为原始底图',
+    message: '确定要清空画布上的所有矢量标注并重置为干净原始底图吗？',
+    confirmText: '确认重置',
+    danger: true,
+  });
+  if (!confirmed) return;
+
+  const canvas = getFabricCanvasFromTui(editorInstance);
+  if (canvas) {
+    const objs = canvas.getObjects ? canvas.getObjects().slice() : [];
+    for (const obj of objs) {
+      if (obj !== canvas.backgroundImage && obj?.type !== 'cropzone') {
+        canvas.remove(obj);
+      }
+    }
+    if (typeof canvas.discardActiveObject === 'function') {
+      canvas.discardActiveObject();
+    }
+    canvas.renderAll();
+    pushMsg('已重置为干净原始底图');
+  }
+}
+
+async function handleFlattenLayers() {
+  const confirmed = await showConfirm({
+    title: '合并固化图层',
+    message: '合并固化后，将移除二次编辑元数据并降级为普通图片，后续保存后将无法再单独调整已有矢量元素。确定要合并固化吗？',
+    confirmText: '合并固化',
+    danger: true,
+  });
+  if (!confirmed) return;
+
+  isReEditMode.value = false;
+  originalStoragePath.value = '';
+  if (props.blockId) {
+    await removeImageBlockReEditData(props.blockId);
+  }
+  pushMsg('已合并固化图层，本次保存将作为普通位图存储');
+}
+
 async function downloadLocal() {
   if (!editorInstance) return;
   try {
-    // 若当前处于裁剪或绘制模式（裁剪框未应用），保存前先停止绘制模式，清除画布上的裁剪预览框
     if (typeof editorInstance.stopDrawingMode === 'function') {
       editorInstance.stopDrawingMode();
     }
@@ -216,11 +345,14 @@ async function save() {
   }
   log("save clicked, export starting...");
   try {
-    // 若当前处于裁剪或绘制模式（裁剪框未应用），保存前先停止绘制模式，清除画布上的裁剪预览框
     if (typeof editorInstance.stopDrawingMode === 'function') {
       editorInstance.stopDrawingMode();
     }
 
+    // 1. 抽取纯矢量标注图层
+    const vectorData = extractVectorDataFromTui(editorInstance);
+
+    // 2. 导出位图
     let dataUrl = exportEditorCanvasDataUrl(editorInstance, originalSize.value);
     if (!dataUrl) {
       log("exportEditorCanvasDataUrl returned null, using fallback resolution adjustment");
@@ -238,21 +370,31 @@ async function save() {
 
     emit('save-edited', {
       oldName: props.assetName,
-      dataUrl: dataUrl
+      dataUrl: dataUrl,
+      blockId: props.blockId,
+      vectorData: vectorData,
+      isReEditMode: isReEditMode.value,
+      originalStoragePath: originalStoragePath.value,
+      originalSize: originalSize.value,
     });
     close();
   } catch (e) {
     error("Failed during save resolution adjustment", e);
     try {
-      // 容错时也要先尝试 stopDrawingMode
       if (typeof editorInstance.stopDrawingMode === 'function') {
         editorInstance.stopDrawingMode();
       }
       let rawDataUrl = editorInstance.toDataURL();
       rawDataUrl = await trimAndScaleDataUrl(rawDataUrl, originalSize.value);
+      const vectorData = extractVectorDataFromTui(editorInstance);
       emit('save-edited', {
         oldName: props.assetName,
-        dataUrl: rawDataUrl
+        dataUrl: rawDataUrl,
+        blockId: props.blockId,
+        vectorData: vectorData,
+        isReEditMode: isReEditMode.value,
+        originalStoragePath: originalStoragePath.value,
+        originalSize: originalSize.value,
       });
       close();
     } catch (err) {
@@ -260,9 +402,6 @@ async function save() {
     }
   }
 }
-
-
-
 </script>
 
 <style scoped>
@@ -272,6 +411,23 @@ async function save() {
   min-height: 400px;
   max-width: 95vw;
   max-height: 95vh;
+}
+
+.reedit-badge {
+  font-size: 11px;
+  background-color: var(--b3-theme-primary);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: normal;
+  line-height: 1.2;
+}
+
+.am-btn--sm {
+  padding: 4px 8px;
+  font-size: 12px;
+  height: 26px;
+  line-height: 1;
 }
 
 /* 修复 tui-color-picker 被思源全局 CSS 覆盖导致色块变成一条线的问题 */
@@ -375,7 +531,7 @@ async function save() {
 /* 预设色板弹窗 */
 .preset-colors-popup {
   position: absolute;
-  bottom: 56px; /* 偏高位置，配合文字在下的布局，防止遮挡标签 */
+  bottom: 56px;
   left: 50%;
   transform: translateX(-50%);
   background: #1e1e1e;

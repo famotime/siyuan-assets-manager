@@ -1,6 +1,9 @@
 import { sql, readDir, removeFile, sql as sqlQuery } from "../api";
 import { extractAssetNamesFromMarkdown } from "./asset-markdown";
-import { warn } from "./logger";
+import { warn, error } from "./logger";
+import { queryAllReEditableBlocks } from "./siyuan-block";
+import { listOriginalImages, deleteOriginalImage, normalizeOriginalStoragePath } from "./file-system";
+import type { IAssetReEditMetadata } from "../types/reedit";
 
 export interface BlockRef {
   id: string;
@@ -19,6 +22,9 @@ export interface AssetInfo {
   references: BlockRef[];
   refCount: number;
   docCount: number; // 引用数
+  isReEditable?: boolean; // 是否包含可二次编辑元数据
+  reEditBlockId?: string; // 关联的二次编辑文档块 ID
+  originalStoragePath?: string; // 关联的隔离原始底图路径
 }
 
 export function createAssetInfoMap(files: any[]): Map<string, AssetInfo> {
@@ -35,6 +41,7 @@ export function createAssetInfoMap(files: any[]): Map<string, AssetInfo> {
         references: [],
         refCount: 0,
         docCount: 0,
+        isReEditable: false,
       });
     }
   }
@@ -70,7 +77,25 @@ export function updateAssetDocCounts(assets: Iterable<AssetInfo>): void {
 }
 
 /**
- * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用
+ * 将二次编辑块元数据绑定到对应的资产对象上
+ */
+export function attachReEditMetadata(
+  assetsMap: Map<string, AssetInfo>,
+  reEditableBlocks: Array<{ blockId: string; rootId: string; metadata: IAssetReEditMetadata }> = []
+): void {
+  for (const item of reEditableBlocks) {
+    const renderedName = item.metadata.renderedAssetName;
+    if (renderedName && assetsMap.has(renderedName)) {
+      const asset = assetsMap.get(renderedName)!;
+      asset.isReEditable = true;
+      asset.reEditBlockId = item.blockId;
+      asset.originalStoragePath = item.metadata.originalStoragePath;
+    }
+  }
+}
+
+/**
+ * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用以及二次编辑状态
  */
 export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
   // 1. 获取 /data/assets 下的所有物理文件
@@ -79,7 +104,7 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
 
   const assetsMap = createAssetInfoMap(files);
 
-  // 尝试通过 Node fs 或者 HEAD 请求补全 file size (针对部分 Siyuan 版本 readDir 不返回 size 的情况)
+  // 尝试通过 Node fs 或者 HEAD 请求补全 file size
   let fs: any;
   let pathLib: any;
   let dataDir = "";
@@ -101,9 +126,9 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
       }
     }
   } else {
-    // 浏览器或移动端环境，并发批量获取大小 (由于可能几千个文件，这里控制并发防止阻塞)
+    // 浏览器或移动端环境，并发批量获取大小
     const assetsToFetch = Array.from(assetsMap.values()).filter(a => a.size === 0);
-    const limit = 50; // 并发数
+    const limit = 50;
     for (let i = 0; i < assetsToFetch.length; i += limit) {
       const batch = assetsToFetch.slice(i, i + limit);
       await Promise.all(batch.map(async (asset) => {
@@ -129,6 +154,14 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
 
   updateAssetDocCounts(assetsMap.values());
 
+  // 3. 关联查询所有具备 custom-asset-reedit 的文档块
+  try {
+    const reEditBlocks = await queryAllReEditableBlocks();
+    attachReEditMetadata(assetsMap, reEditBlocks);
+  } catch (err) {
+    warn("[siyuan-db] 查询二次编辑块元数据失败:", err);
+  }
+
   return Array.from(assetsMap.values());
 }
 
@@ -140,10 +173,9 @@ export async function deleteAssetFile(fileName: string): Promise<void> {
 }
 
 /**
- * 根据资源文件名获取单个 Asset 信息，包括物理文件大小和被哪些 Block 引用
+ * 根据资源文件名获取单个 Asset 信息
  */
 export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | null> {
-  // 1. 尝试获取物理文件大小。如果 Electron 环境可用，用 fs.stat，否则通过 HEAD 请求
   let size = 0;
   let updated = Date.now();
   
@@ -187,7 +219,6 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
     }
   }
 
-  // 2. 查询所有引用了该 asset 的 blocks
   const blocks: any[] = await sqlQuery(
     `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/${fileName}%' LIMIT 1000`
   );
@@ -211,6 +242,21 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
 
   const docIds = new Set(references.map(r => r.root_id));
 
+  // 检查是否具备二次编辑属性
+  let isReEditable = false;
+  let reEditBlockId: string | undefined;
+  let originalStoragePath: string | undefined;
+
+  try {
+    const reEditBlocks = await queryAllReEditableBlocks();
+    const match = reEditBlocks.find((b) => b.metadata.renderedAssetName === fileName);
+    if (match) {
+      isReEditable = true;
+      reEditBlockId = match.blockId;
+      originalStoragePath = match.metadata.originalStoragePath;
+    }
+  } catch (e) {}
+
   return {
     name: fileName,
     size,
@@ -218,6 +264,73 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
     isDir: false,
     references,
     refCount: references.length,
-    docCount: docIds.size
+    docCount: docIds.size,
+    isReEditable,
+    reEditBlockId,
+    originalStoragePath,
   };
+}
+
+export interface OrphanOriginalInfo {
+  name: string;
+  path: string;
+  size: number;
+  updated: number;
+}
+
+/**
+ * 扫描隔离存储目录中所有未被任何现有文档块引用的孤立原始底图
+ */
+export async function getOrphanOriginals(): Promise<{
+  orphans: OrphanOriginalInfo[];
+  totalSize: number;
+  totalCount: number;
+}> {
+  try {
+    const allOriginals = await listOriginalImages();
+    const reEditBlocks = await queryAllReEditableBlocks();
+
+    const activePaths = new Set(
+      reEditBlocks.map((b) => normalizeOriginalStoragePath(b.metadata.originalStoragePath))
+    );
+
+    const orphans: OrphanOriginalInfo[] = [];
+    let totalSize = 0;
+
+    for (const orig of allOriginals) {
+      const normalized = normalizeOriginalStoragePath(orig.path);
+      if (!activePaths.has(normalized)) {
+        orphans.push(orig);
+        totalSize += orig.size;
+      }
+    }
+
+    return {
+      orphans,
+      totalSize,
+      totalCount: orphans.length,
+    };
+  } catch (e) {
+    error("[siyuan-db] 获取孤立原始底图失败:", e);
+    return { orphans: [], totalSize: 0, totalCount: 0 };
+  }
+}
+
+/**
+ * 一键清理所有无主的孤立原始底图
+ */
+export async function cleanupOrphanOriginals(): Promise<{ deletedCount: number; freedSize: number }> {
+  const { orphans } = await getOrphanOriginals();
+  let deletedCount = 0;
+  let freedSize = 0;
+
+  for (const orphan of orphans) {
+    const ok = await deleteOriginalImage(orphan.path);
+    if (ok) {
+      deletedCount++;
+      freedSize += orphan.size;
+    }
+  }
+
+  return { deletedCount, freedSize };
 }

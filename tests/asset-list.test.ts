@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculateUnreferencedCleanup,
+  calculateOrphanCleanup,
   filterAssets,
   formatAssetSize,
   getAssetExtension,
@@ -9,7 +10,7 @@ import {
 } from '../src/utils/asset-list'
 import type { AssetInfo } from '../src/utils/siyuan-db'
 
-function asset(name: string, size: number, docCount: number): AssetInfo {
+function asset(name: string, size: number, docCount: number, isReEditable: boolean = false): AssetInfo {
   return {
     name,
     size,
@@ -18,20 +19,22 @@ function asset(name: string, size: number, docCount: number): AssetInfo {
     references: [],
     refCount: docCount,
     docCount,
+    isReEditable,
   }
 }
 
 describe('asset list helpers', () => {
   const assets = [
-    asset('Beta.PNG', 1024 * 1024 * 2, 2),
-    asset('alpha.txt', 20, 0),
-    asset('noext', 0, 1),
+    asset('Beta.PNG', 1024 * 1024 * 2, 2, true),
+    asset('alpha.txt', 20, 0, false),
+    asset('noext', 0, 1, false),
   ]
 
-  it('filters assets by search text and type', () => {
+  it('filters assets by search text, type, and reeditable flag', () => {
     expect(filterAssets(assets, { searchQuery: 'beta', filterType: 'image' })).toEqual([assets[0]])
     expect(filterAssets(assets, { searchQuery: '', filterType: 'unreferenced' })).toEqual([assets[1]])
     expect(filterAssets(assets, { searchQuery: '', filterType: 'large' })).toEqual([assets[0]])
+    expect(filterAssets(assets, { searchQuery: '', filterType: 'reeditable' })).toEqual([assets[0]])
   })
 
   it('sorts assets by extension, size, and document count', () => {
@@ -67,5 +70,16 @@ describe('asset list helpers', () => {
       totalSize: 20,
       sizeText: '20 B',
     })
+  })
+
+  it('calculates orphan cleanup statistics correctly', () => {
+    const orphans = [
+      { name: '1.png', path: 'storage/.../1.png', size: 1024, updated: 0 },
+      { name: '2.png', path: 'storage/.../2.png', size: 2048, updated: 0 },
+    ]
+    const summary = calculateOrphanCleanup(orphans)
+    expect(summary.count).toBe(2)
+    expect(summary.totalSize).toBe(3072)
+    expect(summary.sizeText).toBe('3 KB')
   })
 })

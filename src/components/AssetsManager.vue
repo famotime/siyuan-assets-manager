@@ -15,9 +15,13 @@
         <select v-model="filterType" class="am-input">
           <option value="all">全部类型</option>
           <option value="image">图片</option>
+          <option value="reeditable">可二次编辑</option>
           <option value="unreferenced">未引用 (孤儿资源)</option>
           <option value="large">大文件 (>1MB)</option>
         </select>
+        <button class="am-btn am-btn--ghost" @click="handleCleanupOrphanOriginals" title="扫描并清理无引用的二次编辑原始底图">
+          清理孤立底图
+        </button>
         <button class="am-btn am-btn--danger" @click="handleCleanupUnreferenced" style="margin-right: 4px;" title="清理所有未引用的资源">
           清理
         </button>
@@ -58,7 +62,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
-import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
+import { getAllAssetsInfo, deleteAssetFile, getOrphanOriginals, cleanupOrphanOriginals, type AssetInfo } from '../utils/siyuan-db';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
 import { calculateUnreferencedCleanup, filterAssets, formatAssetSize, isImageAsset, sortAssets } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
@@ -100,7 +104,7 @@ function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo }) {
   previewTimeout = window.setTimeout(() => {
     previewUrl.value = `/assets/${asset.name}`;
     positionPreview(mouseX.value, mouseY.value);
-  }, 250); // 250ms 防抖，提供高级的 hover 体验
+  }, 250);
 }
 
 function handleUpdatePreview(payload: { event: MouseEvent }) {
@@ -116,7 +120,6 @@ function positionPreview(clientX: number, clientY: number) {
   if (!containerEl.value) return;
   const containerRect = containerEl.value.getBoundingClientRect();
   
-  // 视口坐标转换为相对于 containerEl 的绝对定位坐标
   const relativeX = clientX - containerRect.left;
   const relativeY = clientY - containerRect.top;
   
@@ -125,7 +128,7 @@ function positionPreview(clientX: number, clientY: number) {
   let x = relativeX + offsetX;
   let y = relativeY + offsetY;
   
-  const safeBound = 420; // 包含 padding/border 的最大安全边界 (400px 大图 + 20px 缓冲)
+  const safeBound = 420;
   
   if (x + safeBound > containerRect.width) {
     x = relativeX - safeBound - offsetX;
@@ -134,7 +137,6 @@ function positionPreview(clientX: number, clientY: number) {
     y = relativeY - safeBound - offsetY;
   }
   
-  // 防溢出保护，不超出左边界和上边界
   if (x < 0) x = 10;
   if (y < 0) y = 10;
   
@@ -180,7 +182,7 @@ onMounted(() => {
 const filteredAssets = computed(() => {
   return filterAssets(assets.value, {
     searchQuery: searchQuery.value,
-    filterType: filterType.value as 'all' | 'image' | 'unreferenced' | 'large',
+    filterType: filterType.value as 'all' | 'image' | 'reeditable' | 'unreferenced' | 'large',
   });
 });
 
@@ -193,7 +195,7 @@ function handleSortChange(field: 'name' | 'ext' | 'size' | 'docCount') {
     sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
   } else {
     sortField.value = field;
-    sortOrder.value = 'desc'; // 切换字段时默认降序
+    sortOrder.value = 'desc';
   }
 }
 
@@ -210,7 +212,6 @@ async function handleOpenDocs(asset: AssetInfo) {
         app: plugin.app,
         doc: {
           id: ref.id,
-          // 添加 "cb-get-context" 动作以显示文档全文，同时通过 "cb-get-hl" 和 "cb-get-focus" 定位并高亮该图片
           action: ["cb-get-hl", "cb-get-focus", "cb-get-context"]
         },
         keepCursor: true
@@ -225,7 +226,8 @@ async function handleOpenDocs(asset: AssetInfo) {
 
 function handleEdit(asset: AssetInfo) {
   if ((window as any)._siyuan_assets_manager_open_editor) {
-    (window as any)._siyuan_assets_manager_open_editor(asset.name);
+    const targetBlockId = asset.reEditBlockId || (asset.references && asset.references.length > 0 ? asset.references[0].id : undefined);
+    (window as any)._siyuan_assets_manager_open_editor(asset.name, targetBlockId);
   }
 }
 
@@ -293,6 +295,36 @@ async function handleCleanupUnreferenced() {
   } catch (e) {
     error("Failed to cleanup unreferenced assets", e);
     pushMsg("清理失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleCleanupOrphanOriginals() {
+  loading.value = true;
+  try {
+    const { orphans, totalSize, totalCount } = await getOrphanOriginals();
+    if (totalCount === 0) {
+      pushMsg("当前未发现孤立原始底图，存储空间很干净。");
+      return;
+    }
+
+    const sizeText = formatAssetSize(totalSize);
+    const confirmCleanup = await showConfirm({
+      title: '清理孤立原始底图',
+      message: `扫描到 ${totalCount} 个无主原始底图（对应的文档块已在思源中删除），占用空间 ${sizeText}。\n\n确定要清理这些孤立底图以释放存储空间吗？`,
+      confirmText: '清理底图',
+      danger: true,
+    });
+
+    if (!confirmCleanup) return;
+
+    const { deletedCount, freedSize } = await cleanupOrphanOriginals();
+    pushMsg(`已成功清理 ${deletedCount} 个孤立底图，释放 ${formatAssetSize(freedSize)} 空间！`);
+    await loadData();
+  } catch (e) {
+    error("Failed to cleanup orphan originals:", e);
+    pushMsg("清理孤立底图失败");
   } finally {
     loading.value = false;
   }

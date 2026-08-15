@@ -10,8 +10,11 @@ import { fetchSyncPost, IWebSocketData } from "siyuan";
 
 async function request(url: string, data: any) {
   let response: IWebSocketData = await fetchSyncPost(url, data);
-  let res = response.code === 0 ? response.data : null;
-  return res;
+  if (response.code !== 0) {
+    console.warn(`[API ${url}] 请求返回非 0 状态:`, response.msg, response);
+    return null;
+  }
+  return response.data !== undefined ? response.data : {};
 }
 
 // **************************************** Noteboook ****************************************

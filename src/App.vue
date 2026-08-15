@@ -16,6 +16,7 @@
   <ImageEditorDialog 
     v-model:visible="globalEditorVisible"
     :assetName="globalEditorAssetName"
+    :blockId="globalEditorBlockId"
     @save-edited="handleGlobalSaveEdited"
   />
 
@@ -61,12 +62,13 @@ import AssetsManager from './components/AssetsManager.vue';
 import ImageEditorDialog from './components/ImageEditorDialog.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import { getAssetInfoByName, deleteAssetFile, type AssetInfo } from './utils/siyuan-db';
-import { saveAssetFile, renameAssetFile, dataURLToBlob } from './utils/file-system';
-import { replaceAssetInBlocks } from './utils/siyuan-block';
+import { saveAssetFile, renameAssetFile, dataURLToBlob, saveOriginalImage, readAssetFile } from './utils/file-system';
+import { replaceAssetInBlocks, setImageBlockReEditData } from './utils/siyuan-block';
 import { buildEditedAssetName, resolveRenameAssetName } from './utils/asset-actions';
 import { showConfirm } from './utils/confirm';
 import { pushMsg } from './api';
 import { error } from './utils/logger';
+import type { IAssetReEditMetadata } from './types/reedit';
 
 const visible = ref(false);
 const plugin = usePlugin();
@@ -74,6 +76,7 @@ const plugin = usePlugin();
 // 全局编辑器状态
 const globalEditorVisible = ref(false);
 const globalEditorAssetName = ref('');
+const globalEditorBlockId = ref<string | undefined>(undefined);
 
 // 全局重命名状态
 const globalRenameVisible = ref(false);
@@ -95,9 +98,10 @@ onMounted(() => {
     visible.value = !visible.value;
   };
 
-  // 暴露全局图片编辑方法
-  (window as any)._siyuan_assets_manager_open_editor = (assetName: string) => {
+  // 暴露全局图片编辑方法，支持传入 blockId
+  (window as any)._siyuan_assets_manager_open_editor = (assetName: string, blockId?: string) => {
     globalEditorAssetName.value = assetName;
+    globalEditorBlockId.value = blockId;
     globalEditorVisible.value = true;
   };
 
@@ -125,14 +129,22 @@ function closeManager() {
 }
 
 // 全局保存编辑逻辑
-async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: string }) {
-  const { oldName, dataUrl } = payload;
+async function handleGlobalSaveEdited(payload: {
+  oldName: string;
+  dataUrl: string;
+  blockId?: string;
+  vectorData?: any;
+  isReEditMode?: boolean;
+  originalStoragePath?: string;
+  originalSize?: { width: number; height: number };
+}) {
+  const { oldName, dataUrl, blockId, vectorData, isReEditMode, originalStoragePath, originalSize } = payload;
   const newName = buildEditedAssetName(oldName);
   
   try {
     const blob = dataURLToBlob(dataUrl);
     
-    // 1. 物理保存新文件
+    // 1. 物理保存新渲染的位图文件至 data/assets/
     await saveAssetFile(blob, newName);
     
     // 2. 异步获取旧图片的 AssetInfo 并联动更新引用
@@ -140,8 +152,61 @@ async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: strin
     if (assetRecord && assetRecord.references && assetRecord.references.length > 0) {
       await replaceAssetInBlocks(assetRecord.references, oldName, newName);
     }
+
+    // 3. 收集所有目标 Block ID（包括传入的 blockId 以及所有引用了该图片的 blocks）
+    const targetBlockIds = new Set<string>();
+    if (blockId) {
+      targetBlockIds.add(blockId);
+    }
+    if (assetRecord && assetRecord.references) {
+      for (const ref of assetRecord.references) {
+        if (ref.id) {
+          targetBlockIds.add(ref.id);
+        }
+      }
+    }
+
+    // 4. 处理原始底图持久化与块自定义属性 custom-asset-reedit
+    if (targetBlockIds.size > 0) {
+      let finalOriginalPath = originalStoragePath || '';
+
+      // 如果尚未保存过隔离底图（首次编辑），将原图安全归档到 storage/originals/
+      if (!finalOriginalPath) {
+        try {
+          const originalBlob = await readAssetFile(oldName);
+          if (originalBlob) {
+            finalOriginalPath = await saveOriginalImage(originalBlob, oldName);
+          }
+        } catch (origErr) {
+          error("归档原始底图失败:", origErr);
+        }
+      }
+
+      // 如果有可用的原始底图路径，写入 custom-asset-reedit 块属性
+      if (finalOriginalPath) {
+        const metadata: IAssetReEditMetadata = {
+          version: 1,
+          originalStoragePath: finalOriginalPath,
+          renderedAssetName: newName,
+          canvasSize: {
+            width: originalSize?.width || 800,
+            height: originalSize?.height || 600,
+          },
+          compressed: false,
+          vectorData: vectorData || { objects: [] },
+          updatedAt: Date.now(),
+        };
+
+        // 短暂缓冲 100ms，确保思源内核 updateBlock 事务完全提交后再写入 setBlockAttrs
+        await new Promise((r) => setTimeout(r, 100));
+
+        for (const bId of targetBlockIds) {
+          await setImageBlockReEditData(bId, metadata);
+        }
+      }
+    }
     
-    // 3. 询问是否删除旧图片
+    // 4. 询问是否删除旧图片
     let delOld = true;
     const pluginInstance = usePlugin() as any;
     if (pluginInstance?.settings?.promptOnDeleteOriginal) {
@@ -158,7 +223,7 @@ async function handleGlobalSaveEdited(payload: { oldName: string, dataUrl: strin
     
     pushMsg("编辑已成功保存并同步到所有引用文档！");
     
-    // 4. 通知资源管家刷新数据
+    // 5. 通知资源管家刷新数据
     window.dispatchEvent(new CustomEvent('assets-manager-refresh'));
   } catch (e) {
     error("Failed to save edited image:", e);

@@ -35,7 +35,8 @@
             @mousemove="$emit('update-preview', { event: $event })"
             @mouseleave="$emit('hide-preview')"
           >
-            {{ splitFileName(item.data.name).name }}
+            <span>{{ splitFileName(item.data.name).name }}</span>
+            <span v-if="item.data.isReEditable" class="reedit-tag" title="该图片包含可二次编辑的矢量图层">[可二次编辑]</span>
           </div>
 
           <div class="col-ext asset-ext">
@@ -261,5 +262,18 @@ const isImage = isImageAsset;
     background-color: rgba(var(--b3-theme-error-rgb, 210, 63, 49), 0.1);
     color: var(--b3-theme-error);
   }
+}
+
+.reedit-tag {
+  font-size: 11px;
+  color: var(--b3-theme-primary);
+  background-color: rgba(var(--b3-theme-primary-rgb, 66, 133, 244), 0.12);
+  border: 1px solid rgba(var(--b3-theme-primary-rgb, 66, 133, 244), 0.3);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: normal;
+  display: inline-block;
+  vertical-align: middle;
 }
 </style>

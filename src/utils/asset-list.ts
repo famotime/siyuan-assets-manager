@@ -1,6 +1,6 @@
-import type { AssetInfo } from './siyuan-db'
+import type { AssetInfo, OrphanOriginalInfo } from './siyuan-db'
 
-export type AssetFilterType = 'all' | 'image' | 'unreferenced' | 'large'
+export type AssetFilterType = 'all' | 'image' | 'reeditable' | 'unreferenced' | 'large'
 export type AssetSortField = 'name' | 'ext' | 'size' | 'docCount'
 export type AssetSortOrder = 'asc' | 'desc'
 
@@ -59,6 +59,9 @@ export function filterAssets(assets: AssetInfo[], options: AssetFilterOptions): 
     if (options.filterType === 'image' && !isImageAsset(asset.name)) {
       return false
     }
+    if (options.filterType === 'reeditable' && !asset.isReEditable) {
+      return false
+    }
     if (options.filterType === 'unreferenced' && asset.docCount > 0) {
       return false
     }
@@ -93,6 +96,15 @@ export function calculateUnreferencedCleanup(assets: AssetInfo[]): AssetCleanupS
   return {
     assets: unreferencedAssets,
     count: unreferencedAssets.length,
+    totalSize,
+    sizeText: formatAssetSize(totalSize),
+  }
+}
+
+export function calculateOrphanCleanup(orphans: OrphanOriginalInfo[]): { count: number; totalSize: number; sizeText: string } {
+  const totalSize = orphans.reduce((sum, item) => sum + item.size, 0)
+  return {
+    count: orphans.length,
     totalSize,
     sizeText: formatAssetSize(totalSize),
   }

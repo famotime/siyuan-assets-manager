@@ -4,22 +4,34 @@ vi.mock('../src/api', () => ({
   deleteBlock: vi.fn(),
   sql: vi.fn(),
   updateBlock: vi.fn(),
+  getBlockAttrs: vi.fn(),
+  setBlockAttrs: vi.fn(),
 }))
 
 import {
   deleteBlock,
   sql,
   updateBlock,
+  getBlockAttrs,
+  setBlockAttrs,
 } from '../src/api'
 import {
   removeAssetFromBlocks,
   replaceAssetInBlocks,
+  getImageBlockReEditData,
+  setImageBlockReEditData,
+  removeImageBlockReEditData,
+  queryAllReEditableBlocks,
+  CUSTOM_ATTR_REEDIT,
 } from '../src/utils/siyuan-block'
 import type { BlockRef } from '../src/utils/siyuan-db'
+import type { IAssetReEditMetadata } from '../src/types/reedit'
 
 const sqlMock = vi.mocked(sql)
 const updateBlockMock = vi.mocked(updateBlock)
 const deleteBlockMock = vi.mocked(deleteBlock)
+const getBlockAttrsMock = vi.mocked(getBlockAttrs)
+const setBlockAttrsMock = vi.mocked(setBlockAttrs)
 
 function ref(id: string): BlockRef {
   return {
@@ -77,5 +89,56 @@ describe('siyuan block asset updates', () => {
 
     expect(deleteBlockMock).toHaveBeenCalledWith('block-1')
     expect(updateBlockMock).not.toHaveBeenCalled()
+  })
+
+  it('reads and writes custom-asset-reedit block attributes', async () => {
+    const meta: IAssetReEditMetadata = {
+      version: 1,
+      originalStoragePath: 'storage/petal/siyuan-assets-manager/originals/123_foo.png',
+      renderedAssetName: 'foo-edited.png',
+      canvasSize: { width: 800, height: 600 },
+      compressed: false,
+      vectorData: { objects: [{ type: 'rect', left: 10, top: 10 }] },
+      updatedAt: 1720000000000,
+    }
+
+    setBlockAttrsMock.mockResolvedValue({} as any)
+    const success = await setImageBlockReEditData('block-123', meta)
+    expect(success).toBe(true)
+    expect(setBlockAttrsMock).toHaveBeenCalled()
+    const callArgs = setBlockAttrsMock.mock.calls[0]
+    expect(callArgs[0]).toBe('block-123')
+    expect(callArgs[1][CUSTOM_ATTR_REEDIT]).toBeTypeOf('string')
+
+    // Mock 读取
+    getBlockAttrsMock.mockResolvedValue({
+      [CUSTOM_ATTR_REEDIT]: callArgs[1][CUSTOM_ATTR_REEDIT],
+    })
+
+    const readMeta = await getImageBlockReEditData('block-123')
+    expect(readMeta).not.toBeNull()
+    expect(readMeta?.renderedAssetName).toBe('foo-edited.png')
+    expect(readMeta?.vectorData.objects.length).toBe(1)
+
+    // 清除属性
+    await removeImageBlockReEditData('block-123')
+    expect(setBlockAttrsMock).toHaveBeenCalledWith('block-123', {
+      [CUSTOM_ATTR_REEDIT]: '',
+    })
+  })
+
+  it('queries all blocks with custom-asset-reedit correctly', async () => {
+    sqlMock.mockResolvedValue([
+      {
+        id: 'b-1',
+        root_id: 'doc-1',
+        ial: '{: id="b-1" custom-asset-reedit="{\\"version\\":1,\\"originalStoragePath\\":\\"orig.png\\",\\"renderedAssetName\\":\\"rend.png\\",\\"canvasSize\\":{\\"width\\":100,\\"height\\":100},\\"compressed\\":false,\\"vectorData\\":{\\"objects\\":[]},\\"updatedAt\\":123}"}',
+      },
+    ])
+
+    const results = await queryAllReEditableBlocks()
+    expect(results.length).toBe(1)
+    expect(results[0].blockId).toBe('b-1')
+    expect(results[0].metadata.renderedAssetName).toBe('rend.png')
   })
 })
