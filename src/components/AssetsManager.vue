@@ -4,6 +4,9 @@
       <h2>资源管家</h2>
       <div class="stats">
         <span>总计: {{ sortedAssets.length }} / {{ assets.length }} 个资源</span>
+        <span v-if="selectedNames.size > 0" class="selected-badge">
+          已选 {{ selectedNames.size }} 项 ({{ selectedSummary.sizeText }})
+        </span>
       </div>
       <div class="actions">
         <input 
@@ -20,7 +23,29 @@
           <option value="unreferenced">未引用 (孤儿/孤立)</option>
           <option value="large">大文件 (>1MB)</option>
         </select>
-        <button class="am-btn am-btn--danger" @click="handleUnifiedCleanup" style="margin-right: 4px;" title="综合清理所有未引用的孤儿资源与孤立底图">
+        <template v-if="selectedNames.size > 0">
+          <button
+            class="am-btn am-btn--danger"
+            @click="handleBatchDelete"
+            :title="`批量删除选中的 ${selectedNames.size} 个文件 (支持快捷键 Delete)`"
+          >
+            批量删除 ({{ selectedNames.size }})
+          </button>
+          <button
+            class="am-btn"
+            @click="clearSelection"
+            title="取消当前多选"
+          >
+            取消选择
+          </button>
+        </template>
+        <button
+          v-else
+          class="am-btn am-btn--danger"
+          @click="handleUnifiedCleanup"
+          style="margin-right: 4px;"
+          title="综合清理所有未引用的孤儿资源与孤立底图"
+        >
           清理
         </button>
         <button class="am-btn" @click="loadData" title="刷新资源列表">
@@ -35,6 +60,8 @@
         :assets="sortedAssets"
         :sortField="sortField"
         :sortOrder="sortOrder"
+        :selectedNames="selectedNames"
+        @update:selectedNames="handleSelectionChange"
         @sort="handleSortChange"
         @open-docs="handleOpenDocs"
         @edit="handleEdit"
@@ -63,7 +90,17 @@ import { openTab } from 'siyuan';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
 import { deleteOriginalImage, readOriginalImage } from '../utils/file-system';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
-import { calculateTotalCleanup, filterAssets, formatAssetSize, isImageAsset, sortAssets, type AssetFilterType } from '../utils/asset-list';
+import {
+  calculateBatchDeleteSummary,
+  calculateTotalCleanup,
+  filterAssets,
+  formatAssetSize,
+  isImageAsset,
+  sortAssets,
+  type AssetFilterType,
+  type AssetSortField,
+  type AssetSortOrder,
+} from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { usePlugin } from '../main';
@@ -76,8 +113,12 @@ const searchQuery = ref('');
 const filterType = ref<AssetFilterType>('all');
 
 // 排序状态
-const sortField = ref<'name' | 'ext' | 'size' | 'docCount'>('size');
-const sortOrder = ref<'asc' | 'desc'>('desc');
+const sortField = ref<AssetSortField>('size');
+const sortOrder = ref<AssetSortOrder>('desc');
+
+// 多选状态
+const selectedNames = ref<Set<string>>(new Set());
+const selectedSummary = computed(() => calculateBatchDeleteSummary(assets.value, selectedNames.value));
 
 const containerEl = ref<HTMLElement | null>(null);
 
@@ -91,6 +132,14 @@ const mouseX = ref(0);
 const mouseY = ref(0);
 let previewTimeout: number | null = null;
 let previewBlobUrl: string | null = null;
+
+function handleSelectionChange(nextSet: Set<string>) {
+  selectedNames.value = nextSet;
+}
+
+function clearSelection() {
+  selectedNames.value = new Set<string>();
+}
 
 async function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo, previewSrc?: string }) {
   const { event, asset, previewSrc } = payload;
@@ -172,15 +221,39 @@ function handleHidePreview() {
   previewUrl.value = '';
 }
 
+function handleKeyDown(event: KeyboardEvent) {
+  const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+  if (activeTag === 'input' || activeTag === 'textarea') {
+    return;
+  }
+
+  // Ctrl+A / Cmd+A 全选当前已过滤的全部资源
+  if ((event.ctrlKey || event.metaKey) && (event.key === 'a' || event.key === 'A')) {
+    event.preventDefault();
+    selectedNames.value = new Set(sortedAssets.value.map(a => a.name));
+    return;
+  }
+
+  // Delete / Backspace 快捷触发批量删除
+  if ((event.key === 'Delete' || event.key === 'Backspace') && selectedNames.value.size > 0) {
+    event.preventDefault();
+    handleBatchDelete();
+  }
+}
+
 onUnmounted(() => {
   handleHidePreview();
   window.removeEventListener('assets-manager-refresh', handleGlobalRefresh);
+  window.removeEventListener('keydown', handleKeyDown);
 });
 
 async function loadData() {
   loading.value = true;
   try {
     assets.value = await getAllAssetsInfo();
+    // 过滤掉已不存在的选中项
+    const existingNames = new Set(assets.value.map(a => a.name));
+    selectedNames.value = new Set([...selectedNames.value].filter(name => existingNames.has(name)));
   } catch (e) {
     error("Failed to load assets", e);
   } finally {
@@ -195,6 +268,7 @@ const handleGlobalRefresh = () => {
 onMounted(() => {
   loadData();
   window.addEventListener('assets-manager-refresh', handleGlobalRefresh);
+  window.addEventListener('keydown', handleKeyDown);
 });
 
 const filteredAssets = computed(() => {
@@ -208,7 +282,7 @@ const sortedAssets = computed(() => {
   return sortAssets(filteredAssets.value, sortField.value, sortOrder.value);
 });
 
-function handleSortChange(field: 'name' | 'ext' | 'size' | 'docCount') {
+function handleSortChange(field: AssetSortField) {
   if (sortField.value === field) {
     sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
   } else {
@@ -269,6 +343,7 @@ async function handleDelete(asset: AssetInfo) {
       await deleteOriginalImage(asset.originalStoragePath || asset.name);
       pushMsg(`原始底图 ${asset.name} 已删除`);
       assets.value = assets.value.filter(a => a.name !== asset.name);
+      selectedNames.value.delete(asset.name);
     } catch (e) {
       error("Failed to delete original image:", e);
       pushMsg("删除底图失败");
@@ -295,9 +370,87 @@ async function handleDelete(asset: AssetInfo) {
     
     pushMsg(`资源 ${asset.name} 及其文档引用已删除`);
     assets.value = assets.value.filter(a => a.name !== asset.name);
+    selectedNames.value.delete(asset.name);
   } catch (e) {
     error(e);
     pushMsg(`删除失败`);
+  }
+}
+
+/**
+ * 多选批量删除
+ */
+async function handleBatchDelete() {
+  const summary = selectedSummary.value;
+  if (summary.totalCount === 0) return;
+
+  const messageLines = [
+    `确定要批量删除选中的 ${summary.totalCount} 个文件吗？`,
+    '',
+    '清单概要：',
+    `• 普通资源文件：${summary.regularCount} 个`,
+    `• 隔离原始底图：${summary.originalCount} 个`,
+    `• 预计释放总空间：${summary.sizeText}`,
+  ];
+
+  if (summary.referencedCount > 0) {
+    messageLines.push('');
+    messageLines.push(`【重要提示】所选资源中有 ${summary.referencedCount} 个已被文档引用，删除将自动清理文档中对应的引用块。`);
+  }
+
+  if (summary.referencedOriginalsCount > 0) {
+    messageLines.push('');
+    messageLines.push(`【高风险警告】所选底图中有 ${summary.referencedOriginalsCount} 个正被文档中的二次编辑图片关联，删除后将无法再次进行图层无损还原！`);
+  }
+
+  messageLines.push('');
+  messageLines.push('此操作将永久删除物理文件，确定要执行批量删除吗？');
+
+  const confirmDelete = await showConfirm({
+    title: `批量删除资源 (${summary.totalCount} 个)`,
+    message: messageLines.join('\n'),
+    confirmText: '执行批量删除',
+    danger: true,
+  });
+
+  if (!confirmDelete) return;
+
+  loading.value = true;
+  try {
+    let deletedRegularCount = 0;
+    let deletedOriginalCount = 0;
+
+    // 1. 删除普通资源及其文档引用
+    for (const asset of summary.regularAssets) {
+      try {
+        await deleteAssetFile(asset.name);
+        if (asset.references && asset.references.length > 0) {
+          await removeAssetFromBlocks(asset.references, asset.name);
+        }
+        deletedRegularCount++;
+      } catch (err) {
+        error(`[batch-delete] 删除普通资源失败: ${asset.name}`, err);
+      }
+    }
+
+    // 2. 删除原始底图
+    for (const orig of summary.originalAssets) {
+      try {
+        const ok = await deleteOriginalImage(orig.originalStoragePath || orig.name);
+        if (ok) deletedOriginalCount++;
+      } catch (err) {
+        error(`[batch-delete] 删除原始底图失败: ${orig.name}`, err);
+      }
+    }
+
+    clearSelection();
+    pushMsg(`批量删除完成！已成功删除 ${deletedRegularCount} 个资源与 ${deletedOriginalCount} 个底图，释放 ${summary.sizeText} 空间。`);
+    await loadData();
+  } catch (e) {
+    error("Failed to batch delete assets:", e);
+    pushMsg("批量删除失败");
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -397,10 +550,22 @@ async function handleUnifiedCleanup() {
 .stats {
   font-size: 14px;
   color: var(--b3-theme-on-surface-light);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.selected-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(66, 133, 244, 0.15);
+  color: var(--b3-theme-primary);
+  font-weight: 600;
+  font-size: 12px;
 }
 .actions {
   display: flex;
   gap: 12px;
+  align-items: center;
 }
 .spinning {
   animation: spin 1s linear infinite;

@@ -119,17 +119,20 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
   if (fs && pathLib && dataDir) {
     // 桌面端 Electron 环境
     for (const [name, asset] of assetsMap.entries()) {
-      if (asset.size === 0) {
-        try {
-          const absolutePath = pathLib.join(dataDir, "assets", name);
-          const stat = fs.statSync(absolutePath);
+      try {
+        const absolutePath = pathLib.join(dataDir, "assets", name);
+        const stat = fs.statSync(absolutePath);
+        if (asset.size === 0) {
           asset.size = stat.size;
-        } catch (e) {}
-      }
+        }
+        if (stat.mtimeMs) {
+          asset.updated = stat.mtimeMs;
+        }
+      } catch (e) {}
     }
   } else {
-    // 浏览器或移动端环境，并发批量获取大小
-    const assetsToFetch = Array.from(assetsMap.values()).filter(a => a.size === 0);
+    // 浏览器或移动端环境，并发批量获取大小与时间
+    const assetsToFetch = Array.from(assetsMap.values()).filter(a => a.size === 0 || !a.updated);
     const limit = 50;
     for (let i = 0; i < assetsToFetch.length; i += limit) {
       const batch = assetsToFetch.slice(i, i + limit);
@@ -139,6 +142,13 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
           const contentLength = response.headers.get('content-length');
           if (contentLength) {
             asset.size = parseInt(contentLength, 10);
+          }
+          const lastModified = response.headers.get('last-modified');
+          if (lastModified && !asset.updated) {
+            const time = Date.parse(lastModified);
+            if (!isNaN(time)) {
+              asset.updated = time;
+            }
           }
         } catch (e) {}
       }));
