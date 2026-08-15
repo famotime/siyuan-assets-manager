@@ -299,14 +299,58 @@ export async function listOriginalImages(): Promise<Array<{ name: string; path: 
     const files: any[] = await readDir(ORIGINALS_STORAGE_DIR);
     if (!files || !Array.isArray(files)) return [];
 
-    return files
-      .filter((file) => !file.isDir)
-      .map((file) => ({
+    let fs: any;
+    let pathLib: any;
+    let dataDir = '';
+    try {
+      fs = (window as any).require('fs');
+      pathLib = (window as any).require('path');
+      dataDir = (window as any).siyuan?.config?.system?.dataDir;
+    } catch (e) {}
+
+    const results: Array<{ name: string; path: string; size: number; updated: number }> = [];
+
+    for (const file of files) {
+      if (file.isDir) continue;
+
+      let size = file.size || 0;
+      let updated = file.updated || 0;
+
+      // 1. 在 Electron 桌面端使用 Node.js fs.statSync 精准快速获取真实文件大小
+      if (fs && pathLib && dataDir) {
+        try {
+          const absPath = pathLib.join(dataDir, 'storage', 'petal', 'siyuan-assets-manager', 'originals', file.name);
+          if (fs.existsSync(absPath)) {
+            const stat = fs.statSync(absPath);
+            size = stat.size;
+            updated = stat.mtimeMs || updated;
+          }
+        } catch (err) {}
+      }
+
+      results.push({
         name: file.name,
         path: `${ORIGINALS_STORAGE_RELATIVE}/${file.name}`,
-        size: file.size || 0,
-        updated: file.updated || 0,
-      }));
+        size,
+        updated,
+      });
+    }
+
+    // 2. Web 环境保底：对 size 仍为 0 的文件通过 readOriginalImage 获取 blob 大小
+    if (!fs || !pathLib || !dataDir) {
+      for (const item of results) {
+        if (item.size === 0) {
+          try {
+            const blob = await readOriginalImage(item.path);
+            if (blob) {
+              item.size = blob.size;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+
+    return results;
   } catch (e) {
     error("[file-system] 列出原始底图失败:", e);
     return [];

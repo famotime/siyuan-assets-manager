@@ -52,6 +52,14 @@ export async function removeAssetFromBlocks(
       if (currentMarkdown.includes(`assets/${assetName}`)) {
         const newMarkdown = removeAssetFromMarkdown(currentMarkdown, assetName);
         
+        // 若该块上绑定了此二次编辑图片的元数据，同步清除块属性
+        try {
+          const meta = await getImageBlockReEditData(ref.id);
+          if (meta && meta.renderedAssetName === assetName) {
+            await removeImageBlockReEditData(ref.id);
+          }
+        } catch (e) {}
+
         // 清理前后的空格，若为空白块则直接删除
         if (newMarkdown.trim() === "") {
           await deleteBlock(ref.id);

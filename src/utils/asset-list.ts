@@ -1,6 +1,6 @@
 import type { AssetInfo, OrphanOriginalInfo } from './siyuan-db'
 
-export type AssetFilterType = 'all' | 'image' | 'reeditable' | 'unreferenced' | 'large'
+export type AssetFilterType = 'all' | 'image' | 'original' | 'reeditable' | 'unreferenced' | 'large'
 export type AssetSortField = 'name' | 'ext' | 'size' | 'docCount'
 export type AssetSortOrder = 'asc' | 'desc'
 
@@ -14,6 +14,18 @@ export interface AssetCleanupSummary {
   count: number
   totalSize: number
   sizeText: string
+}
+
+export interface TotalCleanupSummary {
+  unreferencedAssets: AssetInfo[]
+  orphanOriginals: AssetInfo[]
+  totalCount: number
+  totalSize: number
+  sizeText: string
+  unreferencedCount: number
+  unreferencedSizeText: string
+  orphanOriginalsCount: number
+  orphanOriginalsSizeText: string
 }
 
 export function isImageAsset(name: string): boolean {
@@ -65,7 +77,10 @@ export function filterAssets(assets: AssetInfo[], options: AssetFilterOptions): 
     if (searchQuery && !asset.name.toLowerCase().includes(searchQuery)) {
       return false
     }
-    if (options.filterType === 'image' && !isImageAsset(asset.name)) {
+    if (options.filterType === 'image' && (!isImageAsset(asset.name) || asset.isOriginal)) {
+      return false
+    }
+    if (options.filterType === 'original' && !asset.isOriginal) {
       return false
     }
     if (options.filterType === 'reeditable' && !asset.isReEditable) {
@@ -99,7 +114,7 @@ export function sortAssets(assets: AssetInfo[], sortField: AssetSortField, sortO
 }
 
 export function calculateUnreferencedCleanup(assets: AssetInfo[]): AssetCleanupSummary {
-  const unreferencedAssets = assets.filter((asset) => asset.docCount === 0)
+  const unreferencedAssets = assets.filter((asset) => !asset.isOriginal && asset.docCount === 0)
   const totalSize = unreferencedAssets.reduce((sum, asset) => sum + asset.size, 0)
 
   return {
@@ -116,6 +131,28 @@ export function calculateOrphanCleanup(orphans: OrphanOriginalInfo[]): { count: 
     count: orphans.length,
     totalSize,
     sizeText: formatAssetSize(totalSize),
+  }
+}
+
+export function calculateTotalCleanup(assets: AssetInfo[]): TotalCleanupSummary {
+  const unreferencedAssets = assets.filter((asset) => !asset.isOriginal && asset.docCount === 0)
+  const orphanOriginals = assets.filter((asset) => asset.isOriginal && asset.docCount === 0)
+
+  const unreferencedSize = unreferencedAssets.reduce((sum, asset) => sum + asset.size, 0)
+  const orphanOriginalsSize = orphanOriginals.reduce((sum, asset) => sum + asset.size, 0)
+  const totalSize = unreferencedSize + orphanOriginalsSize
+  const totalCount = unreferencedAssets.length + orphanOriginals.length
+
+  return {
+    unreferencedAssets,
+    orphanOriginals,
+    totalCount,
+    totalSize,
+    sizeText: formatAssetSize(totalSize),
+    unreferencedCount: unreferencedAssets.length,
+    unreferencedSizeText: formatAssetSize(unreferencedSize),
+    orphanOriginalsCount: orphanOriginals.length,
+    orphanOriginalsSizeText: formatAssetSize(orphanOriginalsSize),
   }
 }
 

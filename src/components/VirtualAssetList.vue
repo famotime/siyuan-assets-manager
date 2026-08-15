@@ -25,18 +25,52 @@
           class="asset-item"
         >
           <div class="asset-preview">
-            <img v-if="isImage(item.data.name)" :src="`/assets/${item.data.name}`" />
+            <template v-if="isImage(item.data.name) || item.data.isOriginal">
+              <img v-if="getThumbnailSrc(item.data)" :src="getThumbnailSrc(item.data)" />
+              <div v-else class="preview-loading">...</div>
+              <span
+                v-if="item.data.isReEditable"
+                class="preview-badge preview-badge--reedit"
+                title="该图片包含可二次编辑的矢量图层，点击右侧编辑按钮可无损修改"
+              >可编辑</span>
+              <span
+                v-else-if="item.data.isOriginal"
+                class="preview-badge preview-badge--original"
+                title="隔离存储的干净原始底图，供二次编辑无损还原使用"
+              >底图</span>
+            </template>
             <div v-else class="file-icon">{{ getAssetBadgeText(item.data.name) }}</div>
           </div>
           
           <div
             class="asset-name"
-            @mouseenter="$emit('show-preview', { event: $event, asset: item.data })"
+            @mouseenter="$emit('show-preview', { event: $event, asset: item.data, previewSrc: getThumbnailSrc(item.data) })"
             @mousemove="$emit('update-preview', { event: $event })"
             @mouseleave="$emit('hide-preview')"
           >
-            <span>{{ splitFileName(item.data.name).name }}</span>
-            <span v-if="item.data.isReEditable" class="reedit-tag" title="该图片包含可二次编辑的矢量图层">[可二次编辑]</span>
+            <span class="asset-title-text">{{ splitFileName(item.data.name).name }}</span>
+            <span
+              v-if="item.data.isReEditable"
+              class="asset-badge-icon-wrapper"
+              title="该图片包含可二次编辑的矢量图层，点击右侧编辑按钮可无损修改"
+              aria-label="该图片包含可二次编辑的矢量图层，点击右侧编辑按钮可无损修改"
+            >
+              <Palette
+                :size="15"
+                class="asset-badge-icon asset-badge-icon--reedit"
+              />
+            </span>
+            <span
+              v-else-if="item.data.isOriginal"
+              class="asset-badge-icon-wrapper"
+              title="隔离存储的干净原始底图，供二次编辑无损还原使用"
+              aria-label="隔离存储的干净原始底图，供二次编辑无损还原使用"
+            >
+              <Layers
+                :size="15"
+                class="asset-badge-icon asset-badge-icon--original"
+              />
+            </span>
           </div>
 
           <div class="col-ext asset-ext">
@@ -55,13 +89,13 @@
             <button v-if="item.data.docCount > 0" class="am-btn am-btn--icon" @click="$emit('open-docs', item.data)" title="在后台打开并定位到所有引用此资源的文档">
               <ExternalLink :size="16" />
             </button>
-            <button v-if="isImage(item.data.name)" class="am-btn am-btn--icon am-btn--icon-primary" @click="$emit('edit', item.data)" title="编辑此图片">
+            <button v-if="isImage(item.data.name) || item.data.isOriginal" class="am-btn am-btn--icon am-btn--icon-primary" @click="$emit('edit', item.data)" title="编辑此图片">
               <Pencil :size="16" />
             </button>
-            <button class="am-btn am-btn--icon" @click="$emit('rename', item.data)" title="重命名此资源，并自动更新所有文档引用">
+            <button v-if="!item.data.isOriginal" class="am-btn am-btn--icon" @click="$emit('rename', item.data)" title="重命名此资源，并自动更新所有文档引用">
               <TextCursorInput :size="16" />
             </button>
-            <button class="am-btn am-btn--icon am-btn--icon-danger" @click="$emit('delete', item.data)" title="删除此资源及所有引用它的文档块">
+            <button class="am-btn am-btn--icon am-btn--icon-danger" @click="$emit('delete', item.data)" :title="item.data.isOriginal ? '删除此原始底图' : '删除此资源及所有引用它的文档块'">
               <Trash2 :size="16" />
             </button>
           </div>
@@ -74,10 +108,11 @@
 
 <script setup lang="ts">
 import { useVirtualList } from '@vueuse/core';
-import { ExternalLink, Pencil, TextCursorInput, Trash2 } from 'lucide-vue-next';
-import { toRefs } from 'vue';
+import { ExternalLink, Pencil, TextCursorInput, Trash2, Layers, Palette } from 'lucide-vue-next';
+import { ref, toRefs, onUnmounted } from 'vue';
 import type { AssetInfo } from '../utils/siyuan-db';
 import { formatAssetSize, getAssetBadgeText, isImageAsset, splitFileName } from '../utils/asset-list';
+import { readOriginalImage } from '../utils/file-system';
 
 const props = defineProps<{
   assets: AssetInfo[];
@@ -99,6 +134,46 @@ function handleSort(field: 'name' | 'ext' | 'size' | 'docCount') {
 
 const formatSize = formatAssetSize;
 const isImage = isImageAsset;
+
+// 原始底图 ObjectURL 缓存管理
+const originalBlobUrlMap = ref<Record<string, string>>({});
+const loadingOriginals = new Set<string>();
+
+async function loadOriginalBlobUrl(asset: AssetInfo) {
+  if (!asset.isOriginal || originalBlobUrlMap.value[asset.name] || loadingOriginals.has(asset.name)) {
+    return;
+  }
+  loadingOriginals.add(asset.name);
+  try {
+    const blob = await readOriginalImage(asset.originalStoragePath || asset.name);
+    if (blob) {
+      originalBlobUrlMap.value[asset.name] = URL.createObjectURL(blob);
+    }
+  } catch (e) {
+    // 降级处理
+  } finally {
+    loadingOriginals.delete(asset.name);
+  }
+}
+
+function getThumbnailSrc(asset: AssetInfo): string {
+  if (!asset.isOriginal) {
+    return `/assets/${asset.name}`;
+  }
+  if (originalBlobUrlMap.value[asset.name]) {
+    return originalBlobUrlMap.value[asset.name];
+  }
+  loadOriginalBlobUrl(asset);
+  return '';
+}
+
+onUnmounted(() => {
+  for (const url of Object.values(originalBlobUrlMap.value)) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (e) {}
+  }
+});
 </script>
 
 <style scoped lang="scss">
@@ -160,7 +235,7 @@ const isImage = isImageAsset;
   &:hover {
     background-color: var(--b3-theme-background-light);
     
-    .asset-name {
+    .asset-title-text {
       color: var(--b3-theme-primary);
     }
   }
@@ -184,12 +259,51 @@ const isImage = isImageAsset;
   align-items: center;
   border-radius: 4px;
   overflow: hidden;
+  position: relative;
   flex-shrink: 0;
 
   img {
     max-width: 100%;
     max-height: 100%;
     object-fit: cover;
+  }
+}
+
+.preview-loading {
+  font-size: 10px;
+  color: var(--b3-theme-on-surface-light);
+}
+
+/* 图像缩略图上的线框标注文字，无实心底色，带 Tooltip 说明 */
+.preview-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  font-size: 9px;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  user-select: none;
+  background: transparent !important;
+  background-color: transparent !important;
+  cursor: help;
+  pointer-events: auto;
+  z-index: 2;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+
+  &--reedit {
+    color: var(--b3-theme-primary);
+    border: 1px solid var(--b3-theme-primary);
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+  }
+
+  &--original {
+    color: #d97706;
+    border: 1px solid #d97706;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -205,13 +319,59 @@ const isImage = isImageAsset;
 
 .asset-name {
   flex: 1;
-  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   padding-right: 16px;
   cursor: pointer;
+}
+
+.asset-title-text {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: color 0.15s ease;
+}
+
+/* 图标容器，保证 tooltip 触发稳定 */
+.asset-badge-icon-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: help;
+  pointer-events: auto;
+  line-height: 1;
+  transition: transform 0.15s ease;
+
+  &:hover {
+    transform: scale(1.18);
+  }
+}
+
+/* 纯线框状态图标，无底色 */
+.asset-badge-icon {
+  flex-shrink: 0;
+  display: inline-block;
+  background: transparent !important;
+  background-color: transparent !important;
+  fill: none !important;
+  stroke-width: 2px !important;
+  pointer-events: none;
+
+  &--reedit {
+    color: var(--b3-theme-primary);
+    stroke: var(--b3-theme-primary) !important;
+  }
+
+  &--original {
+    color: #d97706;
+    stroke: #d97706 !important;
+  }
 }
 
 .asset-ext, .asset-size, .asset-refs {
@@ -263,17 +423,5 @@ const isImage = isImageAsset;
     color: var(--b3-theme-error);
   }
 }
-
-.reedit-tag {
-  font-size: 11px;
-  color: var(--b3-theme-primary);
-  background-color: rgba(var(--b3-theme-primary-rgb, 66, 133, 244), 0.12);
-  border: 1px solid rgba(var(--b3-theme-primary-rgb, 66, 133, 244), 0.3);
-  padding: 1px 5px;
-  border-radius: 3px;
-  margin-left: 6px;
-  font-weight: normal;
-  display: inline-block;
-  vertical-align: middle;
-}
 </style>
+

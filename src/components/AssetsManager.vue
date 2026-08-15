@@ -14,15 +14,13 @@
         />
         <select v-model="filterType" class="am-input">
           <option value="all">全部类型</option>
-          <option value="image">图片</option>
+          <option value="image">普通图片</option>
+          <option value="original">原始底图</option>
           <option value="reeditable">可二次编辑</option>
-          <option value="unreferenced">未引用 (孤儿资源)</option>
+          <option value="unreferenced">未引用 (孤儿/孤立)</option>
           <option value="large">大文件 (>1MB)</option>
         </select>
-        <button class="am-btn am-btn--ghost" @click="handleCleanupOrphanOriginals" title="扫描并清理无引用的二次编辑原始底图">
-          清理孤立底图
-        </button>
-        <button class="am-btn am-btn--danger" @click="handleCleanupUnreferenced" style="margin-right: 4px;" title="清理所有未引用的资源">
+        <button class="am-btn am-btn--danger" @click="handleUnifiedCleanup" style="margin-right: 4px;" title="综合清理所有未引用的孤儿资源与孤立底图">
           清理
         </button>
         <button class="am-btn" @click="loadData" title="刷新资源列表">
@@ -62,9 +60,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
-import { getAllAssetsInfo, deleteAssetFile, getOrphanOriginals, cleanupOrphanOriginals, type AssetInfo } from '../utils/siyuan-db';
+import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
+import { deleteOriginalImage, readOriginalImage } from '../utils/file-system';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
-import { calculateUnreferencedCleanup, filterAssets, formatAssetSize, isImageAsset, sortAssets } from '../utils/asset-list';
+import { calculateTotalCleanup, filterAssets, formatAssetSize, isImageAsset, sortAssets, type AssetFilterType } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { usePlugin } from '../main';
@@ -74,7 +73,7 @@ import VirtualAssetList from './VirtualAssetList.vue';
 const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
 const searchQuery = ref('');
-const filterType = ref('all');
+const filterType = ref<AssetFilterType>('all');
 
 // 排序状态
 const sortField = ref<'name' | 'ext' | 'size' | 'docCount'>('size');
@@ -91,18 +90,33 @@ const previewStyle = ref({
 const mouseX = ref(0);
 const mouseY = ref(0);
 let previewTimeout: number | null = null;
+let previewBlobUrl: string | null = null;
 
-function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo }) {
-  const { event, asset } = payload;
-  if (!isImageAsset(asset.name)) return;
+async function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo, previewSrc?: string }) {
+  const { event, asset, previewSrc } = payload;
+  if (!isImageAsset(asset.name) && !asset.isOriginal) return;
   
   handleHidePreview();
   
   mouseX.value = event.clientX;
   mouseY.value = event.clientY;
   
-  previewTimeout = window.setTimeout(() => {
-    previewUrl.value = `/assets/${asset.name}`;
+  previewTimeout = window.setTimeout(async () => {
+    if (asset.isOriginal) {
+      if (previewSrc) {
+        previewUrl.value = previewSrc;
+      } else {
+        try {
+          const blob = await readOriginalImage(asset.originalStoragePath || asset.name);
+          if (blob) {
+            previewBlobUrl = URL.createObjectURL(blob);
+            previewUrl.value = previewBlobUrl;
+          }
+        } catch (e) {}
+      }
+    } else {
+      previewUrl.value = `/assets/${asset.name}`;
+    }
     positionPreview(mouseX.value, mouseY.value);
   }, 250);
 }
@@ -151,6 +165,10 @@ function handleHidePreview() {
     clearTimeout(previewTimeout);
     previewTimeout = null;
   }
+  if (previewBlobUrl) {
+    URL.revokeObjectURL(previewBlobUrl);
+    previewBlobUrl = null;
+  }
   previewUrl.value = '';
 }
 
@@ -182,7 +200,7 @@ onMounted(() => {
 const filteredAssets = computed(() => {
   return filterAssets(assets.value, {
     searchQuery: searchQuery.value,
-    filterType: filterType.value as 'all' | 'image' | 'reeditable' | 'unreferenced' | 'large',
+    filterType: filterType.value,
   });
 });
 
@@ -232,6 +250,32 @@ function handleEdit(asset: AssetInfo) {
 }
 
 async function handleDelete(asset: AssetInfo) {
+  // 针对原始底图与普通资源的差异化删除确认
+  if (asset.isOriginal) {
+    let confirmMsg = `确定要删除原始底图 ${asset.name} 吗？\n注意：此操作将直接删除底图物理文件。`;
+    if (asset.docCount > 0) {
+      confirmMsg = `【高风险警告】此原始底图正被 ${asset.docCount} 个文档中的二次编辑图片关联！\n删除此底图后，未来将无法对这些图片进行图层还原与二次编辑。\n\n确定要强制删除原始底图 ${asset.name} 吗？`;
+    }
+
+    const confirmDelete = await showConfirm({
+      title: '确认删除原始底图',
+      message: confirmMsg,
+      confirmText: '删除底图',
+      danger: true,
+    });
+    if (!confirmDelete) return;
+
+    try {
+      await deleteOriginalImage(asset.originalStoragePath || asset.name);
+      pushMsg(`原始底图 ${asset.name} 已删除`);
+      assets.value = assets.value.filter(a => a.name !== asset.name);
+    } catch (e) {
+      error("Failed to delete original image:", e);
+      pushMsg("删除底图失败");
+    }
+    return;
+  }
+
   const confirmDelete = await showConfirm({
     title: '确认删除',
     message: `确定要删除 ${asset.name} 吗？\n注意：将自动移入回收站或被移除，且文档中的引用块也将被清理。`,
@@ -263,20 +307,30 @@ function handleRename(asset: AssetInfo) {
   }
 }
 
-async function handleCleanupUnreferenced() {
-  const cleanup = calculateUnreferencedCleanup(assets.value);
-  if (cleanup.count === 0) {
-    pushMsg("当前没有未引用的资源，无需清理。");
+/**
+ * 统一综合清理：整合孤儿资源文件与孤立原始底图的一键清理
+ */
+async function handleUnifiedCleanup() {
+  const summary = calculateTotalCleanup(assets.value);
+  if (summary.totalCount === 0) {
+    pushMsg("当前没有可清理的孤儿资源或孤立底图，存储空间很干净。");
     return;
   }
 
+  const messageLines = [
+    '【警告】此操作将直接永久删除所有未被文档引用的孤儿资源文件及孤立原始底图。',
+    '',
+    '待清理清单：',
+    `• 孤儿资源文件：${summary.unreferencedCount} 个 (${summary.unreferencedSizeText})`,
+    `• 孤立原始底图：${summary.orphanOriginalsCount} 个 (${summary.orphanOriginalsSizeText})`,
+    `• 预计释放总空间：${summary.sizeText}`,
+    '',
+    '此操作直接删除物理文件，无法撤销！确定要执行清理吗？'
+  ];
+
   const confirmCleanup = await showConfirm({
-    title: '清理孤儿资源',
-    message: `【警告】此操作将永久清理所有未被文档引用的资源文件（孤儿资源）。\n\n` +
-      `统计信息：\n` +
-      `• 待清理资源数量：${cleanup.count} 个\n` +
-      `• 预计释放空间：${cleanup.sizeText}\n\n` +
-      `该操作直接删除物理文件，无法撤销！确定要执行清理吗？`,
+    title: '清理未引用资源与孤立底图',
+    message: messageLines.join('\n'),
     confirmText: '执行清理',
     danger: true
   });
@@ -285,46 +339,34 @@ async function handleCleanupUnreferenced() {
 
   loading.value = true;
   try {
-    let deletedCount = 0;
-    for (const asset of cleanup.assets) {
-      await deleteAssetFile(asset.name);
-      deletedCount++;
+    let deletedAssetsCount = 0;
+    let deletedOriginalsCount = 0;
+
+    // 1. 清理普通孤儿资源
+    for (const asset of summary.unreferencedAssets) {
+      try {
+        await deleteAssetFile(asset.name);
+        deletedAssetsCount++;
+      } catch (err) {
+        error(`删除孤儿资源失败: ${asset.name}`, err);
+      }
     }
-    pushMsg(`清理完成！已成功删除 ${deletedCount} 个未引用资源。`);
+
+    // 2. 清理孤立底图
+    for (const orig of summary.orphanOriginals) {
+      try {
+        const ok = await deleteOriginalImage(orig.originalStoragePath || orig.name);
+        if (ok) deletedOriginalsCount++;
+      } catch (err) {
+        error(`删除孤立底图失败: ${orig.name}`, err);
+      }
+    }
+
+    pushMsg(`清理完成！已成功删除 ${deletedAssetsCount} 个孤儿资源与 ${deletedOriginalsCount} 个孤立底图，共释放 ${summary.sizeText} 空间。`);
     await loadData();
   } catch (e) {
-    error("Failed to cleanup unreferenced assets", e);
+    error("Failed to cleanup assets:", e);
     pushMsg("清理失败");
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function handleCleanupOrphanOriginals() {
-  loading.value = true;
-  try {
-    const { orphans, totalSize, totalCount } = await getOrphanOriginals();
-    if (totalCount === 0) {
-      pushMsg("当前未发现孤立原始底图，存储空间很干净。");
-      return;
-    }
-
-    const sizeText = formatAssetSize(totalSize);
-    const confirmCleanup = await showConfirm({
-      title: '清理孤立原始底图',
-      message: `扫描到 ${totalCount} 个无主原始底图（对应的文档块已在思源中删除），占用空间 ${sizeText}。\n\n确定要清理这些孤立底图以释放存储空间吗？`,
-      confirmText: '清理底图',
-      danger: true,
-    });
-
-    if (!confirmCleanup) return;
-
-    const { deletedCount, freedSize } = await cleanupOrphanOriginals();
-    pushMsg(`已成功清理 ${deletedCount} 个孤立底图，释放 ${formatAssetSize(freedSize)} 空间！`);
-    await loadData();
-  } catch (e) {
-    error("Failed to cleanup orphan originals:", e);
-    pushMsg("清理孤立底图失败");
   } finally {
     loading.value = false;
   }
