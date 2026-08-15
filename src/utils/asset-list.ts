@@ -39,6 +39,15 @@ export function getAssetExtension(name: string): string {
   return splitFileName(name).ext.toLowerCase()
 }
 
+/**
+ * 获取非图片文件的图标类型徽章文本（大写，最长 4 个字符，若无后缀则为 FILE）
+ */
+export function getAssetBadgeText(name: string): string {
+  const { ext } = splitFileName(name)
+  if (!ext) return 'FILE'
+  return ext.toUpperCase().slice(0, 4)
+}
+
 export function formatAssetSize(bytes: number): string {
   if (bytes === 0) return '0 B'
 

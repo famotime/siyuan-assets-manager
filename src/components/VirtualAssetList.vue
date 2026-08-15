@@ -26,7 +26,7 @@
         >
           <div class="asset-preview">
             <img v-if="isImage(item.data.name)" :src="`/assets/${item.data.name}`" />
-            <div v-else class="file-icon">{{ splitFileName(item.data.name).ext.substring(1).toUpperCase() || 'FILE' }}</div>
+            <div v-else class="file-icon">{{ getAssetBadgeText(item.data.name) }}</div>
           </div>
           
           <div
@@ -77,7 +77,7 @@ import { useVirtualList } from '@vueuse/core';
 import { ExternalLink, Pencil, TextCursorInput, Trash2 } from 'lucide-vue-next';
 import { toRefs } from 'vue';
 import type { AssetInfo } from '../utils/siyuan-db';
-import { formatAssetSize, isImageAsset, splitFileName } from '../utils/asset-list';
+import { formatAssetSize, getAssetBadgeText, isImageAsset, splitFileName } from '../utils/asset-list';
 
 const props = defineProps<{
   assets: AssetInfo[];

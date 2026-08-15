@@ -155,20 +155,24 @@
 
 | 路径 | 说明 |
 |------|------|
-| `src/index.ts` | 思源插件入口、生命周期、右键菜单注册 |
+| `src/index.ts` | 思源插件入口、生命周期、右键菜单注册（支持二次编辑状态感知） |
 | `src/main.ts` | Vue 应用挂载与卸载 |
-| `src/App.vue` | 顶层弹窗与全局编辑/重命名编排 |
+| `src/App.vue` | 顶层弹窗与全局编辑/重命名交互编排 |
 | `src/components/` | 资源管理面板、虚拟列表、图片编辑器弹窗 |
-| `src/utils/asset-*.ts` | 资源解析、列表、命名、Markdown 引用处理 |
-| `src/utils/siyuan-*.ts` | 思源数据库和文档块引用操作 |
-| `tests/` | 单元测试 |
+| `src/utils/asset-workflow.ts` | 保存编辑与重命名长业务编排服务层 |
+| `src/utils/asset-*.ts` | 资源解析、列表徽章、命名校验、Markdown 引用处理 |
+| `src/utils/siyuan-*.ts` | 思源数据库、文档块引用与块属性（`custom-asset-reedit`）操作 |
+| `src/utils/file-system.ts` | 资产文件与隔离原始底图存储管理 |
+| `src/utils/image-editor.ts` | 图片编辑导出流水线、画布重置、分辨率换算与 Alpha 切边 |
+| `src/utils/tui-image-editor-bridge.ts` | TUI / Fabric 矢量图层提取与还原桥接 |
+| `tests/` | Vitest 自动化单元测试（14 套件 / 66+ 测试） |
 | `docs/project-structure.md` | 最新模块职责说明 |
 | `docs/refactor-plan.md` | 本轮重构计划和执行日志 |
 
 ### 当前验证状态
 
-- 已补充自动化测试，覆盖资源解析、块引用替换/移除、资源聚合、列表排序过滤、图片编辑辅助计算、入口资源名解析和元数据。
-- 构建命令会出现来自依赖的 Rollup 注释警告和 `tui-image-editor` CSS 拼写警告；当前源码构建通过。
+- 已完整配置 Vitest 自动化测试，覆盖业务工作流、资源解析、块引用替换/移除、二次编辑元数据自适应压缩、矢量图层还原、列表排序过滤、图片编辑导出流水线、入口资源名解析与隔离底图清理。
+- 构建命令会出现来自依赖的 Rollup 注释警告和 `tui-image-editor` CSS 拼写警告；当前源码构建与打包全部通过。
 
 ---
 

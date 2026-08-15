@@ -8,6 +8,7 @@ import {
   getNonTransparentBoundingBox,
   exportEditorCanvasDataUrl,
   getEditorShortcutAction,
+  resetCanvasObjects,
 } from '../src/utils/image-editor'
 import { resolveImageEditorConstructor } from '../src/utils/tui-image-editor-bridge'
 
@@ -206,6 +207,43 @@ describe('image editor helpers', () => {
         format: 'png',
         quality: 1,
       })
+    })
+  })
+
+  describe('resetCanvasObjects', () => {
+    it('removes all vector objects while keeping background image and cropzone', () => {
+      const bgImage = { type: 'image' }
+      const cropzone = { type: 'cropzone' }
+      const rectObj = { type: 'rect' }
+      const textObj = { type: 'i-text' }
+
+      let activeDiscarded = false
+      let rendered = false
+      const objects = [bgImage, cropzone, rectObj, textObj]
+      const removed: any[] = []
+
+      const mockCanvas = {
+        backgroundImage: bgImage,
+        getObjects: () => objects.slice(),
+        remove: (obj: any) => {
+          removed.push(obj)
+          const idx = objects.indexOf(obj)
+          if (idx !== -1) objects.splice(idx, 1)
+        },
+        discardActiveObject: () => {
+          activeDiscarded = true
+        },
+        renderAll: () => {
+          rendered = true
+        },
+      }
+
+      const count = resetCanvasObjects(mockCanvas)
+      expect(count).toBe(2)
+      expect(removed).toEqual([rectObj, textObj])
+      expect(objects).toEqual([bgImage, cropzone])
+      expect(activeDiscarded).toBe(true)
+      expect(rendered).toBe(true)
     })
   })
 })

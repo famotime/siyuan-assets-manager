@@ -34,6 +34,7 @@ export function calculateAnnotationTextTop(
 }
 
 import { warn } from './logger'
+import { extractVectorDataFromTui } from './tui-image-editor-bridge'
 
 export interface ImageSize {
   width: number
@@ -477,5 +478,82 @@ export function getEditorShortcutAction(e: {
 
   return null
 }
+
+/**
+ * 清空画布上的所有矢量标注对象，保留背景底图和裁剪框，并重绘
+ * @returns 被移除的对象数量
+ */
+export function resetCanvasObjects(fabricCanvas: any): number {
+  if (!fabricCanvas) return 0
+
+  const objs = fabricCanvas.getObjects ? fabricCanvas.getObjects().slice() : []
+  let removedCount = 0
+  for (const obj of objs) {
+    if (obj !== fabricCanvas.backgroundImage && obj?.type !== 'cropzone') {
+      if (typeof fabricCanvas.remove === 'function') {
+        fabricCanvas.remove(obj)
+        removedCount++
+      }
+    }
+  }
+
+  if (typeof fabricCanvas.discardActiveObject === 'function') {
+    fabricCanvas.discardActiveObject()
+  }
+
+  if (typeof fabricCanvas.renderAll === 'function') {
+    fabricCanvas.renderAll()
+  }
+
+  return removedCount
+}
+
+export interface CanvasExportResult {
+  dataUrl: string
+  vectorData: any
+}
+
+/**
+ * 执行完整的图片编辑器导出流水线：
+ * 1. 停止任何绘制模式
+ * 2. 抽取纯矢量标注图层数据
+ * 3. 从 Fabric Canvas 按原图物理比例导出 DataURL（若失败则自动回退至 adjustDataUrlResolution）
+ * 4. 进行 Alpha 像素级裁剪与 100% 原始比例重采样
+ */
+export async function prepareCanvasExport(
+  editorInstance: any,
+  originalSize: ImageSize,
+): Promise<CanvasExportResult> {
+  if (!editorInstance) {
+    throw new Error('editorInstance is null')
+  }
+
+  if (typeof editorInstance.stopDrawingMode === 'function') {
+    editorInstance.stopDrawingMode()
+  }
+
+  // 1. 抽取纯矢量标注图层
+  const vectorData = extractVectorDataFromTui(editorInstance)
+
+  // 2. 导出位图
+  let dataUrl = exportEditorCanvasDataUrl(editorInstance, originalSize)
+  if (!dataUrl) {
+    const rawDataUrl = typeof editorInstance.toDataURL === 'function' ? editorInstance.toDataURL() : ''
+    let currentImgSize = null
+    try {
+      currentImgSize = typeof editorInstance.getImageSize === 'function' ? editorInstance.getImageSize() : null
+    } catch (e) {}
+    dataUrl = await adjustDataUrlResolution(rawDataUrl, originalSize, currentImgSize)
+  }
+
+  // 3. Alpha 像素切边与 100% 原始比例重采样
+  dataUrl = await trimAndScaleDataUrl(dataUrl, originalSize)
+
+  return {
+    dataUrl,
+    vectorData,
+  }
+}
+
 
 

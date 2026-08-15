@@ -116,6 +116,35 @@
 - ✅ 思源笔记 v2.10.14 及以上版本
 - ✅ 支持所有平台：Windows / macOS / Linux / 浏览器端 / 移动端
 
+## 🛠️ 本地开发与测试
+
+### 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `npm test` | 运行全部 Vitest 自动化单元测试 |
+| `npm run build` | 生产构建并生成 `dist/` 与 `package.zip` 插件包 |
+| `npm run dev` | watch 构建并同步到配置的思源工作空间插件目录 |
+| `npm run release` | 执行版本发布脚本 |
+
+### 代码结构概览
+
+| 路径 | 说明 |
+|------|------|
+| `src/index.ts` | 插件类入口、生命周期与右键菜单注册（支持动态感知二次编辑状态） |
+| `src/main.ts` | Vue 应用挂载与卸载绑定 |
+| `src/App.vue` | 顶层弹窗与交互编排 |
+| `src/components/` | 资源管理面板、虚拟滚动列表、图片编辑器弹窗 |
+| `src/utils/asset-workflow.ts` | 保存编辑与重命名长业务编排服务层 |
+| `src/utils/asset-*.ts` | 资源解析、列表徽章、命名校验、Markdown 引用提取与替换 |
+| `src/utils/siyuan-*.ts` | 思源数据库聚合、文档块引用更新与块属性（`custom-asset-reedit`）读写 |
+| `src/utils/file-system.ts` | 资产文件与隔离原始底图存储管理 |
+| `src/utils/image-editor.ts` | 图片编辑导出流水线、画布重置、分辨率换算与 Alpha 像素切边 |
+| `src/utils/tui-image-editor-bridge.ts` | TUI / Fabric 矢量图层提取与还原桥接 |
+| `tests/` | Vitest 自动化单元测试（14 套件 / 66+ 测试） |
+| `docs/project-structure.md` | 最新模块职责说明 |
+| `docs/refactor-plan.md` | 重构计划与执行日志 |
+
 ---
 
 ## 📄 开源协议

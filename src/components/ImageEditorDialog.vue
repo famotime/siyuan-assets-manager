@@ -51,7 +51,7 @@ import { readAssetFile, readOriginalImage } from '../utils/file-system';
 import { getImageBlockReEditData, removeImageBlockReEditData } from '../utils/siyuan-block';
 import { getAssetInfoByName } from '../utils/siyuan-db';
 import localeZhCN from '../i18n/tui-locale-zh';
-import { calculateDialogSize, adjustDataUrlResolution, exportEditorCanvasDataUrl, trimAndScaleDataUrl, getEditorShortcutAction } from '../utils/image-editor';
+import { calculateDialogSize, getEditorShortcutAction, prepareCanvasExport, resetCanvasObjects, trimAndScaleDataUrl } from '../utils/image-editor';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { log, warn, error } from '../utils/logger';
@@ -276,16 +276,7 @@ async function handleResetOriginal() {
 
   const canvas = getFabricCanvasFromTui(editorInstance);
   if (canvas) {
-    const objs = canvas.getObjects ? canvas.getObjects().slice() : [];
-    for (const obj of objs) {
-      if (obj !== canvas.backgroundImage && obj?.type !== 'cropzone') {
-        canvas.remove(obj);
-      }
-    }
-    if (typeof canvas.discardActiveObject === 'function') {
-      canvas.discardActiveObject();
-    }
-    canvas.renderAll();
+    resetCanvasObjects(canvas);
     pushMsg('已重置为干净原始底图');
   }
 }
@@ -310,22 +301,7 @@ async function handleFlattenLayers() {
 async function downloadLocal() {
   if (!editorInstance) return;
   try {
-    if (typeof editorInstance.stopDrawingMode === 'function') {
-      editorInstance.stopDrawingMode();
-    }
-
-    let dataUrl = exportEditorCanvasDataUrl(editorInstance, originalSize.value);
-    if (!dataUrl) {
-      const rawDataUrl = editorInstance.toDataURL();
-      let currentImgSize = null;
-      try {
-        currentImgSize = editorInstance.getImageSize();
-      } catch (e) {}
-      dataUrl = await adjustDataUrlResolution(rawDataUrl, originalSize.value, currentImgSize);
-    }
-
-    // 终极 Alpha 像素切边与 100% 原始比例重采样
-    dataUrl = await trimAndScaleDataUrl(dataUrl, originalSize.value);
+    const { dataUrl } = await prepareCanvasExport(editorInstance, originalSize.value);
 
     const a = document.createElement('a');
     a.href = dataUrl;
@@ -345,28 +321,7 @@ async function save() {
   }
   log("save clicked, export starting...");
   try {
-    if (typeof editorInstance.stopDrawingMode === 'function') {
-      editorInstance.stopDrawingMode();
-    }
-
-    // 1. 抽取纯矢量标注图层
-    const vectorData = extractVectorDataFromTui(editorInstance);
-
-    // 2. 导出位图
-    let dataUrl = exportEditorCanvasDataUrl(editorInstance, originalSize.value);
-    if (!dataUrl) {
-      log("exportEditorCanvasDataUrl returned null, using fallback resolution adjustment");
-      const rawDataUrl = editorInstance.toDataURL();
-      let currentImgSize = null;
-      try {
-        currentImgSize = editorInstance.getImageSize();
-      } catch (e) {}
-      dataUrl = await adjustDataUrlResolution(rawDataUrl, originalSize.value, currentImgSize);
-    }
-
-    // 终极 Alpha 像素切边与 100% 原始比例重采样
-    dataUrl = await trimAndScaleDataUrl(dataUrl, originalSize.value);
-    log("trimAndScaleDataUrl completed, emitting save-edited event...");
+    const { dataUrl, vectorData } = await prepareCanvasExport(editorInstance, originalSize.value);
 
     emit('save-edited', {
       oldName: props.assetName,
@@ -384,7 +339,7 @@ async function save() {
       if (typeof editorInstance.stopDrawingMode === 'function') {
         editorInstance.stopDrawingMode();
       }
-      let rawDataUrl = editorInstance.toDataURL();
+      let rawDataUrl = editorInstance.toDataURL ? editorInstance.toDataURL() : '';
       rawDataUrl = await trimAndScaleDataUrl(rawDataUrl, originalSize.value);
       const vectorData = extractVectorDataFromTui(editorInstance);
       emit('save-edited', {

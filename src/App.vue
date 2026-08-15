@@ -61,14 +61,11 @@ import { usePlugin } from '@/main';
 import AssetsManager from './components/AssetsManager.vue';
 import ImageEditorDialog from './components/ImageEditorDialog.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import { getAssetInfoByName, deleteAssetFile, type AssetInfo } from './utils/siyuan-db';
-import { saveAssetFile, renameAssetFile, dataURLToBlob, saveOriginalImage, readAssetFile } from './utils/file-system';
-import { replaceAssetInBlocks, setImageBlockReEditData } from './utils/siyuan-block';
-import { buildEditedAssetName, resolveRenameAssetName } from './utils/asset-actions';
+import { getAssetInfoByName, type AssetInfo } from './utils/siyuan-db';
+import { executeSaveEditedAssetWorkflow, executeRenameAssetWorkflow } from './utils/asset-workflow';
 import { showConfirm } from './utils/confirm';
 import { pushMsg } from './api';
 import { error } from './utils/logger';
-import type { IAssetReEditMetadata } from './types/reedit';
 
 const visible = ref(false);
 const plugin = usePlugin();
@@ -138,93 +135,25 @@ async function handleGlobalSaveEdited(payload: {
   originalStoragePath?: string;
   originalSize?: { width: number; height: number };
 }) {
-  const { oldName, dataUrl, blockId, vectorData, isReEditMode, originalStoragePath, originalSize } = payload;
-  const newName = buildEditedAssetName(oldName);
-  
+  const pluginInstance = usePlugin() as any;
   try {
-    const blob = dataURLToBlob(dataUrl);
-    
-    // 1. 物理保存新渲染的位图文件至 data/assets/
-    await saveAssetFile(blob, newName);
-    
-    // 2. 异步获取旧图片的 AssetInfo 并联动更新引用
-    const assetRecord = await getAssetInfoByName(oldName);
-    if (assetRecord && assetRecord.references && assetRecord.references.length > 0) {
-      await replaceAssetInBlocks(assetRecord.references, oldName, newName);
-    }
+    const result = await executeSaveEditedAssetWorkflow({
+      ...payload,
+      promptOnDeleteOriginal: Boolean(pluginInstance?.settings?.promptOnDeleteOriginal),
+      onConfirmDelete: async (oldName, newName) => {
+        return await showConfirm({
+          title: '删除原文件',
+          message: `图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`,
+          confirmText: '放入回收站',
+          danger: true,
+        });
+      },
+    });
 
-    // 3. 收集所有目标 Block ID（包括传入的 blockId 以及所有引用了该图片的 blocks）
-    const targetBlockIds = new Set<string>();
-    if (blockId) {
-      targetBlockIds.add(blockId);
+    if (result.success) {
+      pushMsg("编辑已成功保存并同步到所有引用文档！");
+      window.dispatchEvent(new CustomEvent('assets-manager-refresh'));
     }
-    if (assetRecord && assetRecord.references) {
-      for (const ref of assetRecord.references) {
-        if (ref.id) {
-          targetBlockIds.add(ref.id);
-        }
-      }
-    }
-
-    // 4. 处理原始底图持久化与块自定义属性 custom-asset-reedit
-    if (targetBlockIds.size > 0) {
-      let finalOriginalPath = originalStoragePath || '';
-
-      // 如果尚未保存过隔离底图（首次编辑），将原图安全归档到 storage/originals/
-      if (!finalOriginalPath) {
-        try {
-          const originalBlob = await readAssetFile(oldName);
-          if (originalBlob) {
-            finalOriginalPath = await saveOriginalImage(originalBlob, oldName);
-          }
-        } catch (origErr) {
-          error("归档原始底图失败:", origErr);
-        }
-      }
-
-      // 如果有可用的原始底图路径，写入 custom-asset-reedit 块属性
-      if (finalOriginalPath) {
-        const metadata: IAssetReEditMetadata = {
-          version: 1,
-          originalStoragePath: finalOriginalPath,
-          renderedAssetName: newName,
-          canvasSize: {
-            width: originalSize?.width || 800,
-            height: originalSize?.height || 600,
-          },
-          compressed: false,
-          vectorData: vectorData || { objects: [] },
-          updatedAt: Date.now(),
-        };
-
-        // 短暂缓冲 100ms，确保思源内核 updateBlock 事务完全提交后再写入 setBlockAttrs
-        await new Promise((r) => setTimeout(r, 100));
-
-        for (const bId of targetBlockIds) {
-          await setImageBlockReEditData(bId, metadata);
-        }
-      }
-    }
-    
-    // 4. 询问是否删除旧图片
-    let delOld = true;
-    const pluginInstance = usePlugin() as any;
-    if (pluginInstance?.settings?.promptOnDeleteOriginal) {
-      delOld = await showConfirm({
-        title: '删除原文件',
-        message: `图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`,
-        confirmText: '放入回收站',
-        danger: true
-      });
-    }
-    if (delOld) {
-      await deleteAssetFile(oldName);
-    }
-    
-    pushMsg("编辑已成功保存并同步到所有引用文档！");
-    
-    // 5. 通知资源管家刷新数据
-    window.dispatchEvent(new CustomEvent('assets-manager-refresh'));
   } catch (e) {
     error("Failed to save edited image:", e);
     pushMsg("保存编辑失败");
@@ -241,67 +170,54 @@ function closeGlobalRenameDialog() {
 async function submitGlobalRename() {
   if (!globalRenameAsset.value) return;
   const asset = globalRenameAsset.value;
-  const oldName = asset.name;
+  const pluginInstance = usePlugin() as any;
 
-  const renameResult = await resolveRenameAssetName(oldName, globalRenameNewName.value, async (oldExt, newExt) => {
-    return await showConfirm({
-      title: '修改文件后缀名',
-      message: `检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`,
-      confirmText: '确认修改',
-      danger: true
-    });
-  });
-
-  if (renameResult.ok && !renameResult.changed) {
-    closeGlobalRenameDialog();
-    return;
-  }
-  if (!renameResult.ok && renameResult.reason === 'empty') {
-    pushMsg("文件名不能为空");
-    return;
-  }
-  if (!renameResult.ok && renameResult.reason === 'invalidChars') {
-    pushMsg("文件名不能包含字符: \\ / : * ? \" < > |");
-    return;
-  }
-  if (!renameResult.ok) {
-    return;
-  }
-  
-  const newName = renameResult.name;
-
-  closeGlobalRenameDialog();
   try {
-    let deleteOld = true;
-    const plugin = usePlugin() as any;
-    if (plugin?.settings?.promptOnDeleteOriginal) {
-      deleteOld = await showConfirm({
-        title: '删除原文件',
-        message: `文件已重命名为 ${newName}。\n是否将原文件 ${oldName} 放入回收站？`,
-        confirmText: '放入回收站',
-        danger: true
-      });
-    }
+    const result = await executeRenameAssetWorkflow({
+      asset,
+      newNameInput: globalRenameNewName.value,
+      promptOnDeleteOriginal: Boolean(pluginInstance?.settings?.promptOnDeleteOriginal),
+      onConfirmExtChange: async (oldExt, newExt) => {
+        return await showConfirm({
+          title: '修改文件后缀名',
+          message: `检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`,
+          confirmText: '确认修改',
+          danger: true,
+        });
+      },
+      onConfirmDelete: async (oldName, newName) => {
+        return await showConfirm({
+          title: '删除原文件',
+          message: `文件已重命名为 ${newName}。\n是否将原文件 ${oldName} 放入回收站？`,
+          confirmText: '放入回收站',
+          danger: true,
+        });
+      },
+    });
 
-    // 1. 重命名物理文件
-    const success = await renameAssetFile(oldName, newName, deleteOld);
-    if (!success) {
-      pushMsg("重命名物理文件失败");
+    if (!result.ok) {
+      if (result.reason === 'empty') {
+        pushMsg("文件名不能为空");
+      } else if (result.reason === 'invalidChars') {
+        pushMsg("文件名不能包含字符: \\ / : * ? \" < > |");
+      } else if (result.reason === 'fileSystemError') {
+        pushMsg("重命名物理文件失败");
+      }
       return;
     }
 
-    // 2. 联动更新文档中该资源的引用并同步修改内存数据
-    if (asset.references && asset.references.length > 0) {
-      await replaceAssetInBlocks(asset.references, oldName, newName);
+    closeGlobalRenameDialog();
+
+    if (!result.changed) {
+      return;
     }
 
-    if (asset.references && asset.references.length > 0) {
-      pushMsg(`重命名成功！已自动更新 ${asset.references.length} 个文档引用`);
+    if ((result.updatedBlockCount || 0) > 0) {
+      pushMsg(`重命名成功！已自动更新 ${result.updatedBlockCount} 个文档引用`);
     } else {
       pushMsg("重命名成功！");
     }
 
-    // 3. 通知资源管家刷新数据
     window.dispatchEvent(new CustomEvent('assets-manager-refresh'));
   } catch (e) {
     error("Failed to rename asset", e);

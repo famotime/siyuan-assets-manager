@@ -1,4 +1,4 @@
-import { sql, readDir, removeFile, sql as sqlQuery } from "../api";
+import { sql, readDir, removeFile } from "../api";
 import { extractAssetNamesFromMarkdown } from "./asset-markdown";
 import { warn, error } from "./logger";
 import { queryAllReEditableBlocks } from "./siyuan-block";
@@ -144,7 +144,7 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
   }
 
   // 2. 查询所有可能引用了 assets 的 blocks
-  const blocks: any[] = await sqlQuery(
+  const blocks: any[] = await sql(
     `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
   );
 
@@ -219,7 +219,7 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
     }
   }
 
-  const blocks: any[] = await sqlQuery(
+  const blocks: any[] = await sql(
     `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/${fileName}%' LIMIT 1000`
   );
 

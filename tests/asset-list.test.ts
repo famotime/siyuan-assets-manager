@@ -4,6 +4,7 @@ import {
   calculateOrphanCleanup,
   filterAssets,
   formatAssetSize,
+  getAssetBadgeText,
   getAssetExtension,
   sortAssets,
   splitFileName,
@@ -61,6 +62,14 @@ describe('asset list helpers', () => {
     expect(getAssetExtension('Beta.PNG')).toBe('png')
     expect(formatAssetSize(0)).toBe('0 B')
     expect(formatAssetSize(1536)).toBe('1.5 KB')
+  })
+
+  it('extracts asset badge texts for file preview icons without truncation bugs', () => {
+    expect(getAssetBadgeText('sample.pdf')).toBe('PDF')
+    expect(getAssetBadgeText('archive.tar.gz')).toBe('GZ')
+    expect(getAssetBadgeText('noext')).toBe('FILE')
+    expect(getAssetBadgeText('.gitignore')).toBe('FILE')
+    expect(getAssetBadgeText('document.docx')).toBe('DOCX')
   })
 
   it('calculates unreferenced cleanup count and total size', () => {

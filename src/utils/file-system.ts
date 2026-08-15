@@ -106,6 +106,8 @@ export async function deleteAsset(fileName: string, moveToTrash: boolean = true)
   await removeFile(`/data/assets/${fileName}`);
 }
 
+export const deleteAssetFile = deleteAsset;
+
 /**
  * 读取资产文件内容 (用于在图片编辑器中加载跨域或受限的文件)
  */

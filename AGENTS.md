@@ -1,42 +1,58 @@
 # Repository Guidelines
 
-本文件是 siyuan-assets-manager（思源笔记资源管家插件）的贡献者指南。
+本文件是 siyuan-assets-manager（思源笔记资源管家插件）的 Agent 指南，帮助编程 Agent 快速了解项目架构与开发规范。
 
-## Project Structure & Module Organization
+## 1. 项目概览与技术栈
 
-- `src/` — 全部源码：`src/index.ts`（插件主类与生命周期）、`src/main.ts`（Vue 挂载）、`src/api.ts`（SiYuan Kernel API 封装）、`src/components/`（Vue 组件）、`src/utils/`（业务逻辑）、`src/i18n/`（en_US.json / zh_CN.json）、`src/types/`（全局 d.ts 类型）。
-- `tests/` — Vitest 单元测试，`tests/mocks/siyuan.ts` 提供 `siyuan` 模块 mock。
-- `docs/` 与 `developer_docs/` — 设计文档与 SiYuan 插件开发参考。
-- 根目录 — `plugin.json`（插件元数据，`name` 决定输出目录名）、`vite.config.ts`、`release.js`、`package.zip`（构建产物，勿手改）。
+- **定位**：思源笔记资源全生命周期管理插件（资源浏览、引用追踪、重命名、孤儿清理、图片二次编辑与图层无损还原）。
+- **技术栈**：Vue 3 SFC + TypeScript + Vite + Sass + Vitest (jsdom) + TUI Image Editor / Fabric.js + lz-string。
 
-## Build, Test, and Development Commands
+## 2. 核心架构与关键特性
+
+1. **矢量二次编辑（Secondary Editing）**：
+   - 编辑标注（矩形/箭头/序号/文字）以矢量数据自适应压缩（`lz-string`）保存在思源图像块属性 `custom-asset-reedit` 中。
+   - 原始干净底图隔离归档在 `/data/storage/petal/siyuan-assets-manager/originals/`，规避思源原生清理误删，二次编辑时底图无残留重影。
+2. **长流程业务编排服务层**：
+   - `src/utils/asset-workflow.ts` 集中编排位图保存、引用替换、底图归档、块属性广播写入与原图删除确认，与 Vue UI 解耦。
+3. **图片高保真导出与图层还原**：
+   - `src/utils/image-editor.ts` 负责 100% 原始分辨率还原、Alpha 像素切边与画布重置。
+   - `src/utils/tui-image-editor-bridge.ts` 负责 Fabric 矢量图层提取、反序列化注入与序号联动配对。
+
+## 3. 模块职责清单
+
+| 模块 / 路径 | 核心职责 |
+|---|---|
+| `src/index.ts` | 插件类入口，注册顶栏图标、图片右键菜单（动态感知二次编辑状态）与生命周期 |
+| `src/main.ts` | Vue 应用挂载与卸载绑定 |
+| `src/App.vue` | 顶层弹窗与交互编排 |
+| `src/components/AssetsManager.vue` | 资源管理主面板：搜索、多维筛选（含可二次编辑）、悬浮预览、孤儿资源与孤立底图清理 |
+| `src/components/VirtualAssetList.vue` | 虚拟滚动列表：高性能渲染、类型徽章（`getAssetBadgeText`）与行级操作 |
+| `src/components/ImageEditorDialog.vue` | TUI Editor 弹窗：矢量图层还原注入、重置底图、固化图层、导出与保存 |
+| `src/utils/asset-workflow.ts` | 保存编辑与重命名长业务编排服务层 |
+| `src/utils/reedit-data.ts` | 二次编辑元数据自适应压缩/解压、HTML 实体兼容与校验 |
+| `src/utils/tui-image-editor-bridge.ts` | Fabric 矢量图层抽取、反序列化注入、序号-形状双向关联恢复 |
+| `src/utils/file-system.ts` | 资源文件与隔离原始底图存储（Electron FS 直写 / Web API 回退） |
+| `src/utils/siyuan-block.ts` | 块引用替换/清理、`custom-asset-reedit` 块属性读写与批量查询 |
+| `src/utils/siyuan-db.ts` | 资源文件聚合、引用统计、二次编辑元数据绑定、孤立底图扫描与清理 |
+| `src/utils/image-editor.ts` | 导出流水线（`prepareCanvasExport`）、画布重置、100% 分辨率换算、Alpha 切边 |
+| `src/utils/asset-list.ts` | 资源过滤、排序、扩展名拆分、图标徽章（`getAssetBadgeText`）、大小格式化与清理统计 |
+| `src/utils/asset-actions.ts` | 编辑后命名生成、重命名校验与扩展名决策 |
+| `src/utils/asset-markdown.ts` | Markdown 中 `assets/` 引用解析、正则特殊字符转义、替换与移除 |
+| `src/api.ts` | 思源 Kernel 核心 API 封装（SQL 查询、通知、文件读写、块与属性操作） |
+
+## 4. 开发与测试命令
 
 - `npm install` — 安装依赖。
-- `npm run dev` — Vite watch 构建到思源工作空间插件目录（先按 `.env.example` 配置 `VITE_SIYUAN_WORKSPACE_PATH`）。
+- `npm test` — 运行 Vitest 单元测试（14 套件 / 66+ 测试，jsdom 环境）。
+- `npx vitest run tests/asset-workflow.test.ts` — 运行指定测试文件。
 - `npm run build` — 生产构建，输出到 `dist/` 并生成 `package.zip`。
-- `npm test` — 运行全部 Vitest 测试（jsdom 环境）。
-- `npm run release[:patch|:minor|:major]` — 发布：更新版本号、commit、tag、push。
-- `npx eslint .` — 代码检查（@antfu/eslint-config + perfectionist）。
+- `npm run dev` — Watch 构建至 `.env` 中 `VITE_SIYUAN_WORKSPACE_PATH` 配置的插件目录。
+- `npm run release` — 发布版本（更新版本号、commit、tag、push）。
 
-## Coding Style & Naming Conventions
+## 5. 关键约束与开发规范
 
-- 2 空格缩进、单引号、UTF-8，规则见 `.editorconfig` 与 `eslint.config.mjs`；Vue SFC 块顺序为 `template` → `script` → `style`。
-- 文件与变量使用 camelCase，Vue 组件使用 PascalCase，工具函数按职责放入 `src/utils/` 对应文件。
-- 用户可见文案必须写入 `src/i18n/*.json`，新增 key 需中英文同步。
-
-## Testing Guidelines
-
-- 框架为 Vitest + jsdom；测试文件放在 `tests/`，命名为 `*.test.ts`。
-- `siyuan` 模块在 `vitest.config.ts` 中重定向到 mock；jsdom 环境不支持 Node 原生模块或真实 Kernel API 调用。
-- 运行全部测试用 `npm test`；单文件用 `npx vitest run tests/asset-list.test.ts`。
-- 新增或修改 `src/utils/` 逻辑时应补充对应单元测试。
-
-## Commit & Pull Request Guidelines
-
-- 提交信息遵循 Conventional Commits，使用中文描述，可选 scope，如 `feat(editor): 新增裁剪功能`、`fix: 修复重命名报错`、`refactor: 重构资源管理逻辑`、`style: 优化按钮样式`。
-- PR 需说明改动动机与影响范围，关联相关 issue，UI 改动附截图；合并前须通过 `npm test` 与 `npm run build`。
-
-## Agent-Specific Instructions
-
-- 除非用户特别指定，对话默认使用简体中文。
-- `docs/project-structure.md` 记录了更详细的模块说明，改动较大时请同步更新。
+1. **代码风格**：2 空格缩进、单引号、UTF-8；Vue SFC 顺序为 `<template>` → `<script setup>` → `<style>`。新增注释默认使用简体中文。
+2. **测试优先**：修改或新增 `src/utils/` 逻辑时必须补充对应 `tests/*.test.ts` 单元测试，确保 `npm test` 全通。
+3. **打包约束**：产物为 CommonJS 格式（`lib: { formats: ["cjs"] }`），`siyuan` 与 `process` 模块 external 不打包。
+4. **国际化**：用户可见文案需维护在 `src/i18n/*.json`（en_US 与 zh_CN 同步）。
+5. **提交规范**：遵循 Conventional Commits（如 `feat(editor): ...`, `fix: ...`, `refactor: ...`）。
