@@ -4,12 +4,14 @@ vi.mock('../src/api', () => ({
   readDir: vi.fn(),
   removeFile: vi.fn(),
   sql: vi.fn(),
+  lsNotebooks: vi.fn(),
 }))
 
 import {
   readDir,
   removeFile,
   sql,
+  lsNotebooks,
 } from '../src/api'
 import {
   getAllAssetsInfo,
@@ -17,11 +19,13 @@ import {
   attachReEditMetadata,
   getOrphanOriginals,
   cleanupOrphanOriginals,
+  formatReadableDocPath,
 } from '../src/utils/siyuan-db'
 
 const readDirMock = vi.mocked(readDir)
 const removeFileMock = vi.mocked(removeFile)
 const sqlMock = vi.mocked(sql)
+const lsNotebooksMock = vi.mocked(lsNotebooks)
 
 describe('siyuan asset database helpers', () => {
   beforeEach(() => {
@@ -99,6 +103,14 @@ describe('siyuan asset database helpers', () => {
       refCount: 1,
       docCount: 1,
     })
+  })
+
+  it('formats readable doc path starting from notebook name', () => {
+    expect(formatReadableDocPath('我的笔记本', '/前端/Vue3/组件通信.sy')).toBe('我的笔记本/前端/Vue3/组件通信.sy')
+    expect(formatReadableDocPath('知识库', '日常笔记/今日心得')).toBe('知识库/日常笔记/今日心得')
+    expect(formatReadableDocPath('默认笔记本', '')).toBe('默认笔记本')
+    expect(formatReadableDocPath('', '/前端/Vue3.sy', '/fallback.sy')).toBe('/前端/Vue3.sy')
+    expect(formatReadableDocPath('', '', '/fallback.sy')).toBe('/fallback.sy')
   })
 
   it('attaches reedit metadata to matching asset', () => {

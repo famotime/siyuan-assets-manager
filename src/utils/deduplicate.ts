@@ -1,0 +1,706 @@
+import { readAssetFile, deleteAsset } from './file-system';
+import { replaceAssetInBlocks, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
+import type { AssetInfo, BlockRef } from './siyuan-db';
+import type { IAssetReEditMetadata } from '../types/reedit';
+import { log, warn, error } from './logger';
+
+export type DeduplicateMode = 'exact' | 'similar';
+
+export interface IDuplicateItem {
+  asset: AssetInfo;
+  hash?: string; // SHA-256 文件哈希 (精确模式)
+  dHash?: string; // 64位感知哈希 (视觉相似模式)
+  score: number; // 智能推荐分数
+  isCanonical: boolean; // 是否为选中的主保留项
+  width?: number; // 图片宽度
+  height?: number; // 图片高度
+}
+
+export interface IDuplicateGroup {
+  id: string; // 唯一分组标识
+  mode: DeduplicateMode; // 去重模式
+  similarity: number; // 相似度 0~1 (精确模式为 1.0)
+  canonicalAssetName: string; // 当前选中的主资源文件名
+  items: IDuplicateItem[]; // 组内资源列表
+  redundantCount: number; // 冗余文件数量 (items.length - 1)
+  redundantSize: number; // 预估可释放空间 (字节)
+  isProcessed?: boolean; // 是否已归一化处理
+  isIgnored?: boolean; // 是否已忽略
+}
+
+export interface IDeduplicateScanProgress {
+  phase: 'grouping' | 'hashing' | 'perceptual' | 'done';
+  current: number;
+  total: number;
+  message: string;
+}
+
+export interface INormalizeStats {
+  affectedDocsCount: number;
+  affectedBlocksCount: number;
+  deletedFilesCount: number;
+  freedBytes: number;
+}
+
+const IMAGE_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'svg', 'ico', 'avif', 'tiff'
+]);
+
+/**
+ * 判断是否为图片资源
+ */
+export function isImageFile(fileName: string): boolean {
+  if (!fileName) return false;
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
+/**
+ * 第一阶段：按文件大小快速初筛
+ * 过滤掉体积唯一的单文件（仅保留存在相同大小的多文件候选池）
+ */
+export function groupBySize(assets: AssetInfo[]): Map<number, AssetInfo[]> {
+  const sizeMap = new Map<number, AssetInfo[]>();
+  for (const asset of assets) {
+    if (asset.isDir || asset.isOriginal) continue;
+    const size = asset.size || 0;
+    if (size <= 0) continue; // 忽略无效或空文件
+
+    if (!sizeMap.has(size)) {
+      sizeMap.set(size, []);
+    }
+    sizeMap.get(size)!.push(asset);
+  }
+
+  // 仅保留候选数量 >= 2 的分组
+  const duplicateSizeMap = new Map<number, AssetInfo[]>();
+  for (const [size, list] of sizeMap.entries()) {
+    if (list.length >= 2) {
+      duplicateSizeMap.set(size, list);
+    }
+  }
+  return duplicateSizeMap;
+}
+
+/**
+ * 安全地将 Blob 转换为 ArrayBuffer (兼容各类环境)
+ */
+export async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof (blob as any).arrayBuffer === 'function') {
+    return await (blob as any).arrayBuffer();
+  }
+  if (typeof (blob as any).bytes === 'function') {
+    const bytes = await (blob as any).bytes();
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  }
+  if (typeof (blob as any).text === 'function') {
+    try {
+      const text = await (blob as any).text();
+      const encoder = new TextEncoder();
+      const u8 = encoder.encode(text);
+      return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+    } catch (e) {}
+  }
+  return new Promise((resolve) => {
+    if (typeof FileReader === 'undefined') {
+      resolve(new ArrayBuffer(0));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event: any) => {
+      const res = event?.target?.result || reader.result;
+      resolve(res as ArrayBuffer);
+    };
+    reader.onerror = () => {
+      resolve(new ArrayBuffer(0));
+    };
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+/**
+ * 计算 Blob 数据的 SHA-256 哈希值
+ */
+export async function computeFileHash(blob: Blob): Promise<string> {
+  const arrayBuffer = await blobToArrayBuffer(blob);
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // 简易保底哈希算法（极端无 crypto.subtle 环境）
+  const u8 = new Uint8Array(arrayBuffer);
+  let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
+  for (let i = 0; i < u8.length; i++) {
+    const ch = u8[i];
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(16, '0');
+}
+
+/**
+ * 基于 9x8 灰度矩阵生成 64-bit dHash（差异哈希）
+ * 比较水平相邻像素亮度差，每行 8 次比较，共 64 位
+ */
+export function computeDHashFromGrayscale(grayMatrix: number[][]): string {
+  let bits = '';
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const left = grayMatrix[row]?.[col] ?? 0;
+      const right = grayMatrix[row]?.[col + 1] ?? 0;
+      bits += left > right ? '1' : '0';
+    }
+  }
+  return bits.padEnd(64, '0');
+}
+
+/**
+ * 从图片 Blob 计算 dHash 感知哈希与分辨率
+ */
+export async function computeImageDHash(blob: Blob): Promise<{ dHash: string; width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined' || typeof Image === 'undefined') {
+      resolve(null);
+      return;
+    }
+
+    const img = new Image();
+    let url = '';
+    try {
+      url = typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL(blob) : '';
+    } catch (e) {
+      resolve(null);
+      return;
+    }
+
+    let isDone = false;
+    const timer = setTimeout(() => {
+      if (!isDone) {
+        isDone = true;
+        if (url) {
+          try { URL.revokeObjectURL(url); } catch (e) {}
+        }
+        resolve(null);
+      }
+    }, 1500);
+
+    const cleanup = () => {
+      isDone = true;
+      clearTimeout(timer);
+      if (url) {
+        try { URL.revokeObjectURL(url); } catch (e) {}
+      }
+    };
+
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => {
+      if (isDone) return;
+      try {
+        const width = img.naturalWidth || img.width || 0;
+        const height = img.naturalHeight || img.height || 0;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 9;
+        canvas.height = 8;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) {
+          cleanup();
+          resolve(null);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, 9, 8);
+        const imgData = ctx.getImageData(0, 0, 9, 8);
+        const data = imgData.data;
+
+        const grayMatrix: number[][] = [];
+        for (let row = 0; row < 8; row++) {
+          const rowData: number[] = [];
+          for (let col = 0; col < 9; col++) {
+            const idx = (row * 9 + col) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            // 标准灰度加权公式
+            const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+            rowData.push(gray);
+          }
+          grayMatrix.push(rowData);
+        }
+
+        const dHash = computeDHashFromGrayscale(grayMatrix);
+        cleanup();
+        resolve({ dHash, width, height });
+      } catch (err) {
+        warn('[deduplicate] computeImageDHash error:', err);
+        cleanup();
+        resolve(null);
+      }
+    };
+
+    img.onerror = () => {
+      if (isDone) return;
+      cleanup();
+      resolve(null);
+    };
+
+    img.src = url;
+  });
+}
+
+/**
+ * 计算两个 64-bit 哈希的汉明距离（不同位的数量，0~64）
+ */
+export function calculateHammingDistance(hashA: string, hashB: string): number {
+  if (!hashA || !hashB || hashA.length !== hashB.length) return 64;
+  let dist = 0;
+  for (let i = 0; i < hashA.length; i++) {
+    if (hashA[i] !== hashB[i]) {
+      dist++;
+    }
+  }
+  return dist;
+}
+
+/**
+ * 将汉明距离转换为 0.0 ~ 1.0 的相似度百分比
+ */
+export function calculateDHashSimilarity(hashA: string, hashB: string): number {
+  const dist = calculateHammingDistance(hashA, hashB);
+  return Math.max(0, 1 - dist / 64);
+}
+
+/**
+ * 候选主资源智能评分算法
+ * 优先级：具备二次编辑元数据 > 引用次数多 > 引用文档多 > 分辨率/体积大 > 创建时间早
+ */
+export function scoreAssetCandidate(
+  asset: AssetInfo,
+  width: number = 0,
+  height: number = 0
+): number {
+  let score = 0;
+  // 1. 包含二次编辑元数据（最高权重，避免丢失图层标注）
+  if (asset.isReEditable) {
+    score += 10000;
+  }
+  // 2. 引用块总数权重
+  score += (asset.refCount || 0) * 100;
+  // 3. 引用文档数量权重
+  score += (asset.docCount || 0) * 50;
+  // 4. 图片物理像素面积（保留更高清晰度）
+  if (width * height > 0) {
+    score += Math.min(200, Math.floor((width * height) / 10000));
+  }
+  // 5. 文件体积
+  score += Math.min(50, Math.floor((asset.size || 0) / 10240));
+  // 6. 更新时间戳更早（越早越可能是原图）
+  if (asset.updated) {
+    score += Math.max(0, 10 - Math.floor((Date.now() - asset.updated) / (1000 * 3600 * 24 * 365)));
+  }
+  return score;
+}
+
+/**
+ * 挑选出得分最高者作为默认主资源
+ */
+export function pickCanonicalAsset(items: IDuplicateItem[]): string {
+  if (!items || items.length === 0) return '';
+  let bestItem = items[0];
+  for (let i = 1; i < items.length; i++) {
+    if (items[i].score > bestItem.score) {
+      bestItem = items[i];
+    }
+  }
+  return bestItem.asset.name;
+}
+
+/**
+ * 计算重复组的冗余空间
+ */
+export function calculateGroupRedundantSize(items: IDuplicateItem[], canonicalName: string): number {
+  let total = 0;
+  for (const item of items) {
+    if (item.asset.name !== canonicalName) {
+      total += item.asset.size || 0;
+    }
+  }
+  return total;
+}
+
+/**
+ * 异步执行完整的资源去重扫描流水线
+ */
+export async function scanDuplicates(
+  assets: AssetInfo[],
+  options: {
+    minSimilarity?: number; // 相似度阈值 (0.80 ~ 1.0, 默认 0.90)
+    onProgress?: (progress: IDeduplicateScanProgress) => void;
+    abortSignal?: { aborted: boolean };
+  } = {}
+): Promise<{ exactGroups: IDuplicateGroup[]; similarGroups: IDuplicateGroup[] }> {
+  const minSimilarity = options.minSimilarity ?? 0.90;
+  const onProgress = options.onProgress || (() => {});
+  const abortSignal = options.abortSignal || { aborted: false };
+
+  // 1. 过滤有效常规资源
+  const validAssets = assets.filter(a => !a.isDir && !a.isOriginal);
+
+  // -------------------------------------------------------------
+  // 阶段一：按文件大小初筛，快速排重
+  // -------------------------------------------------------------
+  onProgress({
+    phase: 'grouping',
+    current: 0,
+    total: validAssets.length,
+    message: '正在按文件大小初筛候选文件...',
+  });
+
+  const sizeCandidatesMap = groupBySize(validAssets);
+  const candidateAssets: AssetInfo[] = [];
+  for (const list of sizeCandidatesMap.values()) {
+    candidateAssets.push(...list);
+  }
+
+  if (abortSignal.aborted) {
+    return { exactGroups: [], similarGroups: [] };
+  }
+
+  // -------------------------------------------------------------
+  // 阶段二：计算候选文件精确 SHA-256 哈希
+  // -------------------------------------------------------------
+  onProgress({
+    phase: 'hashing',
+    current: 0,
+    total: candidateAssets.length,
+    message: `正在计算 ${candidateAssets.length} 个候选文件的精确哈希...`,
+  });
+
+  const assetHashMap = new Map<string, string>(); // assetName -> sha256
+  const exactClusters = new Map<string, AssetInfo[]>(); // hash -> assets
+
+  let hashProcessed = 0;
+  for (const asset of candidateAssets) {
+    if (abortSignal.aborted) return { exactGroups: [], similarGroups: [] };
+
+    try {
+      const blob = await readAssetFile(asset.name);
+      if (blob) {
+        const hash = await computeFileHash(blob);
+        assetHashMap.set(asset.name, hash);
+
+        if (!exactClusters.has(hash)) {
+          exactClusters.set(hash, []);
+        }
+        exactClusters.get(hash)!.push(asset);
+      }
+    } catch (e) {
+      warn(`[deduplicate] 读取文件 ${asset.name} 计算哈希失败:`, e);
+    }
+
+    hashProcessed++;
+    if (hashProcessed % 5 === 0 || hashProcessed === candidateAssets.length) {
+      onProgress({
+        phase: 'hashing',
+        current: hashProcessed,
+        total: candidateAssets.length,
+        message: `正在计算精确哈希 (${hashProcessed}/${candidateAssets.length})...`,
+      });
+    }
+  }
+
+  // 构建精确重复组
+  const exactGroups: IDuplicateGroup[] = [];
+  const exactMatchedAssetNames = new Set<string>();
+  let exactGroupIdx = 1;
+
+  for (const [hash, cluster] of exactClusters.entries()) {
+    if (cluster.length >= 2) {
+      const items: IDuplicateItem[] = cluster.map(asset => ({
+        asset,
+        hash,
+        score: scoreAssetCandidate(asset),
+        isCanonical: false,
+      }));
+
+      const canonicalName = pickCanonicalAsset(items);
+      for (const item of items) {
+        item.isCanonical = item.asset.name === canonicalName;
+        exactMatchedAssetNames.add(item.asset.name);
+      }
+
+      exactGroups.push({
+        id: `exact_${exactGroupIdx++}`,
+        mode: 'exact',
+        similarity: 1.0,
+        canonicalAssetName: canonicalName,
+        items,
+        redundantCount: items.length - 1,
+        redundantSize: calculateGroupRedundantSize(items, canonicalName),
+      });
+    }
+  }
+
+  if (abortSignal.aborted) {
+    return { exactGroups, similarGroups: [] };
+  }
+
+  // -------------------------------------------------------------
+  // 阶段三：对图片资源异步计算感知哈希 (dHash) 与视觉相似比对
+  // -------------------------------------------------------------
+  const imageAssets = validAssets.filter(
+    a => isImageFile(a.name) && !exactMatchedAssetNames.has(a.name)
+  );
+
+  onProgress({
+    phase: 'perceptual',
+    current: 0,
+    total: imageAssets.length,
+    message: `正在提取 ${imageAssets.length} 张图片的视觉感知特征...`,
+  });
+
+  interface IImageFeature {
+    asset: AssetInfo;
+    dHash: string;
+    width: number;
+    height: number;
+    score: number;
+  }
+
+  const imageFeatures: IImageFeature[] = [];
+  let dHashProcessed = 0;
+
+  for (const asset of imageAssets) {
+    if (abortSignal.aborted) return { exactGroups, similarGroups: [] };
+
+    try {
+      const blob = await readAssetFile(asset.name);
+      if (blob) {
+        const feature = await computeImageDHash(blob);
+        if (feature) {
+          const score = scoreAssetCandidate(asset, feature.width, feature.height);
+          imageFeatures.push({
+            asset,
+            dHash: feature.dHash,
+            width: feature.width,
+            height: feature.height,
+            score,
+          });
+        }
+      }
+    } catch (e) {
+      warn(`[deduplicate] 提取图片特征 ${asset.name} 失败:`, e);
+    }
+
+    dHashProcessed++;
+    if (dHashProcessed % 5 === 0 || dHashProcessed === imageAssets.length) {
+      onProgress({
+        phase: 'perceptual',
+        current: dHashProcessed,
+        total: imageAssets.length,
+        message: `正在提取视觉感知特征 (${dHashProcessed}/${imageAssets.length})...`,
+      });
+    }
+  }
+
+  // 使用并查集 (Disjoint Set) 将汉明距离满足阈值的图片聚类为疑似相似组
+  const parent = new Array(imageFeatures.length).fill(0).map((_, i) => i);
+  function findRoot(i: number): number {
+    if (parent[i] === i) return i;
+    parent[i] = findRoot(parent[i]);
+    return parent[i];
+  }
+  function union(i: number, j: number) {
+    const rootI = findRoot(i);
+    const rootJ = findRoot(j);
+    if (rootI !== rootJ) {
+      parent[rootI] = rootJ;
+    }
+  }
+
+  for (let i = 0; i < imageFeatures.length; i++) {
+    for (let j = i + 1; j < imageFeatures.length; j++) {
+      const sim = calculateDHashSimilarity(imageFeatures[i].dHash, imageFeatures[j].dHash);
+      if (sim >= minSimilarity) {
+        union(i, j);
+      }
+    }
+  }
+
+  // 聚类归组
+  const clusters = new Map<number, IImageFeature[]>();
+  for (let i = 0; i < imageFeatures.length; i++) {
+    const root = findRoot(i);
+    if (!clusters.has(root)) {
+      clusters.set(root, []);
+    }
+    clusters.get(root)!.push(imageFeatures[i]);
+  }
+
+  const similarGroups: IDuplicateGroup[] = [];
+  let similarGroupIdx = 1;
+
+  for (const cluster of clusters.values()) {
+    if (cluster.length >= 2) {
+      const items: IDuplicateItem[] = cluster.map(feat => ({
+        asset: feat.asset,
+        dHash: feat.dHash,
+        width: feat.width,
+        height: feat.height,
+        score: feat.score,
+        isCanonical: false,
+      }));
+
+      const canonicalName = pickCanonicalAsset(items);
+      for (const item of items) {
+        item.isCanonical = item.asset.name === canonicalName;
+      }
+
+      // 计算平均相似度
+      let simSum = 0;
+      let pairCount = 0;
+      for (let a = 0; a < cluster.length; a++) {
+        for (let b = a + 1; b < cluster.length; b++) {
+          simSum += calculateDHashSimilarity(cluster[a].dHash, cluster[b].dHash);
+          pairCount++;
+        }
+      }
+      const avgSimilarity = pairCount > 0 ? simSum / pairCount : minSimilarity;
+
+      similarGroups.push({
+        id: `similar_${similarGroupIdx++}`,
+        mode: 'similar',
+        similarity: Math.round(avgSimilarity * 100) / 100,
+        canonicalAssetName: canonicalName,
+        items,
+        redundantCount: items.length - 1,
+        redundantSize: calculateGroupRedundantSize(items, canonicalName),
+      });
+    }
+  }
+
+  onProgress({
+    phase: 'done',
+    current: validAssets.length,
+    total: validAssets.length,
+    message: '扫描完成！',
+  });
+
+  return { exactGroups, similarGroups };
+}
+
+/**
+ * 对单个重复组执行归一化合并
+ */
+export async function normalizeDuplicateGroup(
+  group: IDuplicateGroup,
+  assetsMap?: Map<string, AssetInfo>
+): Promise<INormalizeStats> {
+  const stats: INormalizeStats = {
+    affectedDocsCount: 0,
+    affectedBlocksCount: 0,
+    deletedFilesCount: 0,
+    freedBytes: 0,
+  };
+
+  const canonicalName = group.canonicalAssetName;
+  if (!canonicalName) {
+    throw new Error('未指定主保留资源文件');
+  }
+
+  const canonicalItem = group.items.find(it => it.asset.name === canonicalName);
+  const canonicalAsset = canonicalItem?.asset || assetsMap?.get(canonicalName);
+
+  // 检查主资源是否携带二次编辑元数据
+  let canonicalReEditMeta: IAssetReEditMetadata | null = null;
+  if (canonicalAsset?.isReEditable && canonicalAsset.reEditBlockId) {
+    try {
+      canonicalReEditMeta = await getImageBlockReEditData(canonicalAsset.reEditBlockId);
+    } catch (e) {
+      warn(`[deduplicate] 获取主资源二次编辑元数据失败:`, e);
+    }
+  }
+
+  const affectedRootIds = new Set<string>();
+
+  for (const item of group.items) {
+    if (item.asset.name === canonicalName) continue;
+
+    const redundant = item.asset;
+    const refs: BlockRef[] = redundant.references || [];
+
+    if (refs.length > 0) {
+      // 1. 替换文档块中的引用
+      await replaceAssetInBlocks(refs, redundant.name, canonicalName);
+      stats.affectedBlocksCount += refs.length;
+      for (const r of refs) {
+        if (r.root_id) affectedRootIds.add(r.root_id);
+      }
+
+      // 2. 如果主资源具备二次编辑元数据，同步写入这些块
+      if (canonicalReEditMeta) {
+        for (const ref of refs) {
+          try {
+            await setImageBlockReEditData(ref.id, canonicalReEditMeta);
+          } catch (attrErr) {
+            warn(`[deduplicate] 同步二次编辑属性到块 ${ref.id} 失败:`, attrErr);
+          }
+        }
+      }
+    }
+
+    // 3. 删除多余冗余物理文件
+    try {
+      await deleteAsset(redundant.name);
+      stats.deletedFilesCount += 1;
+      stats.freedBytes += redundant.size || 0;
+      log(`[deduplicate] 成功归一化并删除冗余资源: ${redundant.name}`);
+    } catch (delErr) {
+      error(`[deduplicate] 删除冗余文件 ${redundant.name} 失败:`, delErr);
+    }
+  }
+
+  stats.affectedDocsCount = affectedRootIds.size;
+  group.isProcessed = true;
+
+  return stats;
+}
+
+/**
+ * 批量执行多个重复组归一化合并
+ */
+export async function batchNormalizeDuplicateGroups(
+  groups: IDuplicateGroup[],
+  assetsMap?: Map<string, AssetInfo>,
+  onProgress?: (current: number, total: number) => void
+): Promise<INormalizeStats> {
+  const totalStats: INormalizeStats = {
+    affectedDocsCount: 0,
+    affectedBlocksCount: 0,
+    deletedFilesCount: 0,
+    freedBytes: 0,
+  };
+
+  const pendingGroups = groups.filter(g => !g.isProcessed && !g.isIgnored);
+  let processed = 0;
+
+  for (const group of pendingGroups) {
+    const singleStats = await normalizeDuplicateGroup(group, assetsMap);
+    totalStats.affectedDocsCount += singleStats.affectedDocsCount;
+    totalStats.affectedBlocksCount += singleStats.affectedBlocksCount;
+    totalStats.deletedFilesCount += singleStats.deletedFilesCount;
+    totalStats.freedBytes += singleStats.freedBytes;
+
+    processed++;
+    if (onProgress) {
+      onProgress(processed, pendingGroups.length);
+    }
+  }
+
+  return totalStats;
+}

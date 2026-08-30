@@ -38,15 +38,24 @@
             取消选择
           </button>
         </template>
-        <button
-          v-else
-          class="am-btn am-btn--danger"
-          @click="handleUnifiedCleanup"
-          style="margin-right: 4px;"
-          title="综合清理所有未引用的孤儿资源与孤立底图"
-        >
-          清理
-        </button>
+        <template v-else>
+          <button
+            class="am-btn am-btn--outline"
+            @click="handleOpenDeduplicate"
+            style="margin-right: 4px;"
+            title="识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
+          >
+            去重
+          </button>
+          <button
+            class="am-btn am-btn--danger"
+            @click="handleUnifiedCleanup"
+            style="margin-right: 4px;"
+            title="综合清理所有未引用的孤儿资源与孤立底图"
+          >
+            清理
+          </button>
+        </template>
         <button class="am-btn" @click="loadData" title="刷新资源列表">
           <svg v-if="loading" class="icon spinning" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
           <span v-else>刷新</span>
@@ -104,6 +113,13 @@
     <div v-if="previewUrl" class="image-hover-preview" :style="previewStyle">
       <img :src="previewUrl" />
     </div>
+
+    <!-- 资源去重与图片比对弹窗 -->
+    <DeduplicateDialog
+      v-model:visible="deduplicateVisible"
+      :assets="assets"
+      @completed="loadData"
+    />
   </div>
 </template>
 
@@ -132,12 +148,18 @@ import { pushMsg } from '../api';
 import { usePlugin } from '../main';
 import { error } from '../utils/logger';
 import VirtualAssetList from './VirtualAssetList.vue';
+import DeduplicateDialog from './DeduplicateDialog.vue';
 
 const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
+const deduplicateVisible = ref(false);
 const searchQuery = ref('');
 const filterType = ref<AssetFilterType>('all');
 const activeCategory = ref<AssetCategory>('all');
+
+function handleOpenDeduplicate() {
+  deduplicateVisible.value = true;
+}
 
 // 6 大分类全局统计与卡片配置
 const categoryStats = computed(() => calculateCategoryStats(assets.value));

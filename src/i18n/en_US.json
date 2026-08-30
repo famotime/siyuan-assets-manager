@@ -3,5 +3,8 @@
   "promptOnDeleteOriginalTitle": "Prompt before deleting original file",
   "promptOnDeleteOriginalDesc": "Whether to prompt to put the original file into the recycle bin after renaming or saving modified files",
   "enableLoggingTitle": "Enable log printing",
-  "enableLoggingDesc": "Whether to print plugin running logs in the console"
+  "enableLoggingDesc": "Whether to print plugin running logs in the console",
+  "deduplicateBtn": "Deduplicate",
+  "deduplicateTitle": "Asset Deduplication & Comparison",
+  "deduplicateDesc": "Identify duplicate & visually similar assets, compare and normalize into unique assets"
 }

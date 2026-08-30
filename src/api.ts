@@ -83,3 +83,9 @@ export async function setBlockAttrs(
   const url = "/api/attr/setBlockAttrs";
   return request(url, { id, attrs });
 }
+
+// **************************************** 笔记本 ****************************************
+export async function lsNotebooks(): Promise<IReslsNotebooks> {
+  const url = "/api/notebook/lsNotebooks";
+  return request(url, {});
+}

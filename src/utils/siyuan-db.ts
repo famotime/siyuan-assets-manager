@@ -1,4 +1,4 @@
-import { sql, readDir, removeFile } from "../api";
+import { sql, readDir, removeFile, lsNotebooks } from "../api";
 import { extractAssetNamesFromMarkdown } from "./asset-markdown";
 import { warn, error } from "./logger";
 import { queryAllReEditableBlocks } from "./siyuan-block";
@@ -12,6 +12,9 @@ export interface BlockRef {
   content: string;
   markdown: string;
   path: string; // document path
+  hpath?: string; // 人类可读文档路径 (如 /前端/Vue)
+  boxName?: string; // 笔记本名称
+  readablePath?: string; // 易读路径 (如 笔记本名称/前端/Vue)
 }
 
 export interface AssetInfo {
@@ -51,9 +54,27 @@ export function createAssetInfoMap(files: any[]): Map<string, AssetInfo> {
   return assetsMap;
 }
 
-export function attachBlockReferences(assetsMap: Map<string, AssetInfo>, blocks: any[] = []): void {
+/**
+ * 格式化以笔记本名称为根目录的易读文档路径 (例如: "我的笔记本/技术文档/Vue3进阶")
+ */
+export function formatReadableDocPath(boxName: string, hpath?: string, fallbackPath?: string): string {
+  const cleanHpath = (hpath || "").replace(/^\/+/, "");
+  if (boxName) {
+    return cleanHpath ? `${boxName}/${cleanHpath}` : boxName;
+  }
+  return hpath || fallbackPath || "";
+}
+
+export function attachBlockReferences(
+  assetsMap: Map<string, AssetInfo>,
+  blocks: any[] = [],
+  notebookMap: Map<string, string> = new Map()
+): void {
   for (const block of blocks) {
     const referencedAssets = extractAssetNamesFromMarkdown(block.markdown || "");
+    const boxName = notebookMap.get(block.box) || "";
+    const readablePath = formatReadableDocPath(boxName, block.hpath, block.path);
+
     for (const assetName of referencedAssets) {
       if (assetsMap.has(assetName)) {
         const asset = assetsMap.get(assetName)!;
@@ -64,6 +85,9 @@ export function attachBlockReferences(assetsMap: Map<string, AssetInfo>, blocks:
           content: block.content,
           markdown: block.markdown,
           path: block.path,
+          hpath: block.hpath,
+          boxName,
+          readablePath,
         });
         asset.refCount++;
       }
@@ -105,6 +129,31 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
   if (!files) return [];
 
   const assetsMap = createAssetInfoMap(files);
+
+  // 获取笔记本列表构建 boxId -> boxName 映射
+  const notebookMap = new Map<string, string>();
+  try {
+    const res = await lsNotebooks();
+    if (res && res.notebooks && Array.isArray(res.notebooks)) {
+      for (const nb of res.notebooks) {
+        if (nb.id && nb.name) {
+          notebookMap.set(nb.id, nb.name);
+        }
+      }
+    }
+  } catch (e) {}
+
+  // 尝试从全局 window.siyuan.notebooks 补充
+  if (notebookMap.size === 0 && (window as any).siyuan?.notebooks) {
+    const nbs = (window as any).siyuan.notebooks;
+    if (Array.isArray(nbs)) {
+      for (const nb of nbs) {
+        if (nb.id && nb.name) {
+          notebookMap.set(nb.id, nb.name);
+        }
+      }
+    }
+  }
 
   // 尝试通过 Node fs 或者 HEAD 请求补全 file size
   let fs: any;
@@ -155,13 +204,13 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
     }
   }
 
-  // 2. 查询所有可能引用了 assets 的 blocks
+  // 2. 查询所有可能引用了 assets 的 blocks (包含 hpath 以构建易读文档路径)
   const blocks: any[] = await sql(
-    `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
+    `SELECT id, root_id, box, content, markdown, path, hpath FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
   );
 
   if (blocks && blocks.length > 0) {
-    attachBlockReferences(assetsMap, blocks);
+    attachBlockReferences(assetsMap, blocks, notebookMap);
   }
 
   updateAssetDocCounts(assetsMap.values());
