@@ -26,6 +26,9 @@ import {
   scanDuplicates,
   normalizeDuplicateGroup,
   batchNormalizeDuplicateGroups,
+  saveDeduplicateCache,
+  loadDeduplicateCache,
+  clearDeduplicateCache,
   type IDuplicateGroup,
   type IDuplicateItem,
 } from '../src/utils/deduplicate';
@@ -305,6 +308,43 @@ describe('deduplicate utils', () => {
       expect(progressCallback).toHaveBeenCalledTimes(2);
       expect(g1.isProcessed).toBe(true);
       expect(g2.isProcessed).toBe(true);
+    });
+  });
+
+  describe('deduplicate persistence cache', () => {
+    it('saves and loads deduplicate cache to/from storage', async () => {
+      const mockCache = {
+        version: 1,
+        lastScanTime: 1700000000000,
+        similarityThreshold: 95,
+        exactGroups: [
+          {
+            id: 'exact_1',
+            mode: 'exact' as const,
+            similarity: 1.0,
+            canonicalAssetName: 'a.png',
+            items: [],
+            redundantCount: 1,
+            redundantSize: 1024,
+          },
+        ],
+        similarGroups: [],
+      };
+
+      const saveOk = await saveDeduplicateCache(mockCache);
+      expect(saveOk).toBe(true);
+
+      const loaded = await loadDeduplicateCache();
+      expect(loaded).not.toBeNull();
+      expect(loaded?.lastScanTime).toBe(1700000000000);
+      expect(loaded?.exactGroups.length).toBe(1);
+      expect(loaded?.exactGroups[0].canonicalAssetName).toBe('a.png');
+
+      const clearOk = await clearDeduplicateCache();
+      expect(clearOk).toBe(true);
+
+      const afterClear = await loadDeduplicateCache();
+      expect(afterClear).toBeNull();
     });
   });
 });

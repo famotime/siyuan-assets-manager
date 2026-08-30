@@ -30,6 +30,22 @@
         </div>
 
         <div class="dedup-header-actions">
+          <span v-if="lastScanTimeText" class="last-scan-badge" :title="`上次分析完成时间: ${lastScanTimeText}`">
+            上次分析: {{ lastScanTimeText }}
+          </span>
+
+          <button
+            class="am-btn am-btn--outline am-btn--sm"
+            @click="handleManualRefresh"
+            :disabled="isScanning || isMerging"
+            title="手动重新扫描分析所有资源文件并更新比对数据"
+          >
+            <svg class="icon" :class="{ spinning: isScanning }" width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+              <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
+            </svg>
+            <span>刷新分析</span>
+          </button>
+
           <!-- 相似度阈值滑块 (仅在视觉相似 Tab 显示) -->
           <div v-if="activeTab === 'similar'" class="similarity-slider-box" title="调节视觉相似度判定阈值">
             <span class="slider-label">相似度阈值:</span>
@@ -333,9 +349,12 @@ import {
   scanDuplicates,
   normalizeDuplicateGroup,
   batchNormalizeDuplicateGroups,
+  saveDeduplicateCache,
+  loadDeduplicateCache,
   type IDuplicateGroup,
   type IDuplicateItem,
   type IDeduplicateScanProgress,
+  type IDeduplicateCache,
 } from '../utils/deduplicate';
 import { formatAssetSize, formatAssetTime, getAssetBadgeText } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
@@ -356,6 +375,8 @@ const emit = defineEmits<{
 const activeTab = ref<'exact' | 'similar'>('exact');
 // 视觉相似度阈值 (80% ~ 100%)
 const similarityThreshold = ref<number>(95);
+// 上次分析完成时间戳
+const lastScanTime = ref<number>(0);
 
 // 扫描状态
 const isScanning = ref(false);
@@ -376,6 +397,11 @@ const groupSearchQuery = ref<string>('');
 // 归一化执行状态
 const isMerging = ref(false);
 const mergeProgress = ref({ current: 0, total: 0 });
+
+// 格式化上次分析时间
+const lastScanTimeText = computed(() => {
+  return lastScanTime.value > 0 ? formatAssetTime(lastScanTime.value) : '';
+});
 
 // 计算扫描百分比
 const scanProgressPercent = computed(() => {
@@ -422,12 +448,12 @@ const totalReclaimableSizeText = computed(() => {
   return formatAssetSize(totalReclaimableBytes.value);
 });
 
-// 监听弹窗打开触发扫描
+// 监听弹窗打开：优先读取持久化分析缓存，避免重复分析
 watch(
   () => props.visible,
   (newVal) => {
     if (newVal) {
-      startScan();
+      initDialogData();
     } else {
       handleCancelScan();
     }
@@ -448,7 +474,61 @@ watch(
 );
 
 /**
- * 启动全量扫描
+ * 初始化弹窗数据：优先加载持久化分析缓存
+ */
+async function initDialogData() {
+  if (isScanning.value) return;
+
+  try {
+    const cached = await loadDeduplicateCache();
+    if (cached && (cached.exactGroups?.length > 0 || cached.similarGroups?.length > 0 || cached.lastScanTime > 0)) {
+      exactGroups.value = cached.exactGroups || [];
+      similarGroups.value = cached.similarGroups || [];
+      similarityThreshold.value = cached.similarityThreshold || 95;
+      lastScanTime.value = cached.lastScanTime || 0;
+
+      // 智能聚焦有待处理项的 Tab
+      const hasExactPending = exactGroups.value.some(g => !g.isProcessed && !g.isIgnored);
+      const hasSimilarPending = similarGroups.value.some(g => !g.isProcessed && !g.isIgnored);
+      if (!hasExactPending && hasSimilarPending) {
+        activeTab.value = 'similar';
+      } else {
+        activeTab.value = 'exact';
+      }
+
+      const firstGroup = displayGroups.value[0] || (activeTab.value === 'exact' ? similarGroups.value[0] : exactGroups.value[0]);
+      if (firstGroup) {
+        selectedGroupId.value = firstGroup.id;
+      }
+      return;
+    }
+  } catch (err) {
+    warn('[DeduplicateDialog] 加载持久化缓存失败，回退自动扫描:', err);
+  }
+
+  // 首次无缓存数据，自动触发分析
+  await startScan(false);
+}
+
+/**
+ * 自动同步持久化比对数据
+ */
+async function persistCurrentCache() {
+  try {
+    await saveDeduplicateCache({
+      version: 1,
+      lastScanTime: lastScanTime.value,
+      similarityThreshold: similarityThreshold.value,
+      exactGroups: exactGroups.value,
+      similarGroups: similarGroups.value,
+    });
+  } catch (err) {
+    warn('[DeduplicateDialog] 保存持久化缓存失败:', err);
+  }
+}
+
+/**
+ * 启动全量扫描分析
  */
 async function startScan(forceRescan = false) {
   if (isScanning.value) return;
@@ -471,12 +551,17 @@ async function startScan(forceRescan = false) {
     if (!abortController.value.aborted) {
       exactGroups.value = res.exactGroups;
       similarGroups.value = res.similarGroups;
+      lastScanTime.value = Date.now();
+
       // 默认选中第一组
       const firstGroup = res.exactGroups[0] || res.similarGroups[0];
       if (firstGroup) {
         activeTab.value = res.exactGroups.length > 0 ? 'exact' : 'similar';
         selectedGroupId.value = firstGroup.id;
       }
+
+      // 扫描完成后自动持久化保存
+      await persistCurrentCache();
     }
   } catch (err) {
     error('[DeduplicateDialog] 扫描重复失败:', err);
@@ -484,6 +569,13 @@ async function startScan(forceRescan = false) {
   } finally {
     isScanning.value = false;
   }
+}
+
+/**
+ * 用户手动点击“刷新分析”按钮
+ */
+async function handleManualRefresh() {
+  await startScan(true);
 }
 
 /**
@@ -497,7 +589,7 @@ function handleCancelScan() {
 }
 
 /**
- * 相似度滑块调整
+ * 相似度滑块调整，重新按新阈值计算分析
  */
 async function handleThresholdChange() {
   startScan(true);
@@ -519,6 +611,7 @@ function handleSetCanonical(group: IDuplicateGroup, canonicalName: string) {
     }
   }
   group.redundantSize = total;
+  persistCurrentCache();
 }
 
 /**
@@ -535,6 +628,7 @@ function isItemTopRecommendation(group: IDuplicateGroup, item: IDuplicateItem): 
  */
 function handleIgnoreGroup(group: IDuplicateGroup) {
   group.isIgnored = true;
+  persistCurrentCache();
   selectNextPendingGroup();
 }
 
@@ -543,6 +637,7 @@ function handleIgnoreGroup(group: IDuplicateGroup) {
  */
 function handleUnignoreGroup(group: IDuplicateGroup) {
   group.isIgnored = false;
+  persistCurrentCache();
 }
 
 /**
@@ -552,6 +647,7 @@ function handleIgnoreAll() {
   for (const g of pendingGroups.value) {
     g.isIgnored = true;
   }
+  persistCurrentCache();
 }
 
 /**
@@ -571,6 +667,7 @@ async function handleMergeSingleGroup(group: IDuplicateGroup) {
   try {
     const stats = await normalizeDuplicateGroup(group);
     pushMsg(`已完成合并！修改了 ${stats.affectedBlocksCount} 处文档引用，释放 ${formatAssetSize(stats.freedBytes)} 空间。`);
+    await persistCurrentCache();
     emit('completed');
     selectNextPendingGroup();
   } catch (err) {
@@ -630,6 +727,7 @@ async function handleBatchMerge() {
       mergeProgress.value = { current: curr, total: tot };
     });
 
+    await persistCurrentCache();
     pushMsg(`批量去重归一化完成！更新了 ${stats.affectedDocsCount} 篇文档中的 ${stats.affectedBlocksCount} 处引用，删除 ${stats.deletedFilesCount} 个冗余文件，成功释放 ${formatAssetSize(stats.freedBytes)} 存储空间。`);
     emit('completed');
   } catch (err) {
@@ -739,7 +837,16 @@ function handleClose() {
 .dedup-header-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+}
+
+.last-scan-badge {
+  font-size: 12px;
+  color: var(--b3-theme-on-surface-light);
+  background: var(--b3-theme-surface-lighter);
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 .similarity-slider-box {

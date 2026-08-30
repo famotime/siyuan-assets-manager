@@ -2,6 +2,7 @@ import { readAssetFile, deleteAsset } from './file-system';
 import { replaceAssetInBlocks, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
 import type { AssetInfo, BlockRef } from './siyuan-db';
 import type { IAssetReEditMetadata } from '../types/reedit';
+import { usePlugin } from '../main';
 import { log, warn, error } from './logger';
 
 export type DeduplicateMode = 'exact' | 'similar';
@@ -703,4 +704,107 @@ export async function batchNormalizeDuplicateGroups(
   }
 
   return totalStats;
+}
+
+// -------------------------------------------------------------
+// 持久化存储相关
+// -------------------------------------------------------------
+export const DEDUP_CACHE_FILE = 'deduplicate-cache.json';
+export const DEDUP_LOCAL_STORAGE_KEY = 'siyuan_assets_dedup_cache';
+
+export interface IDeduplicateCache {
+  version: number;
+  lastScanTime: number; // 扫描完成时间戳 (ms)
+  similarityThreshold: number; // 相似度阈值 (80 ~ 100)
+  exactGroups: IDuplicateGroup[];
+  similarGroups: IDuplicateGroup[];
+}
+
+/**
+ * 将去重比对分析数据持久化保存到思源插件存储 (优先 saveData，保底 localStorage)
+ */
+export async function saveDeduplicateCache(cache: IDeduplicateCache): Promise<boolean> {
+  try {
+    const plugin = usePlugin();
+    if (plugin && typeof plugin.saveData === 'function') {
+      await plugin.saveData(DEDUP_CACHE_FILE, cache);
+      log(`[deduplicate] 成功持久化保存比对数据到 ${DEDUP_CACHE_FILE}`);
+      return true;
+    }
+  } catch (e) {
+    warn('[deduplicate] plugin.saveData cache error:', e);
+  }
+
+  // 保底 localStorage 存储
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DEDUP_LOCAL_STORAGE_KEY, JSON.stringify(cache));
+      log(`[deduplicate] 成功保存比对数据到 localStorage`);
+      return true;
+    }
+  } catch (e) {
+    warn('[deduplicate] localStorage cache error:', e);
+  }
+
+  return false;
+}
+
+/**
+ * 从持久化存储中读取最近一次去重比对数据
+ */
+export async function loadDeduplicateCache(): Promise<IDeduplicateCache | null> {
+  try {
+    const plugin = usePlugin();
+    if (plugin && typeof plugin.loadData === 'function') {
+      const data = await plugin.loadData(DEDUP_CACHE_FILE);
+      if (data) {
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+        if (parsed && Array.isArray(parsed.exactGroups) && Array.isArray(parsed.similarGroups)) {
+          log(`[deduplicate] 成功从 ${DEDUP_CACHE_FILE} 加载缓存比对数据`);
+          return parsed as IDeduplicateCache;
+        }
+      }
+    }
+  } catch (e) {
+    warn('[deduplicate] plugin.loadData cache error:', e);
+  }
+
+  // 保底从 localStorage 读取
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const item = localStorage.getItem(DEDUP_LOCAL_STORAGE_KEY);
+      if (item) {
+        const parsed = JSON.parse(item);
+        if (parsed && Array.isArray(parsed.exactGroups) && Array.isArray(parsed.similarGroups)) {
+          log(`[deduplicate] 成功从 localStorage 加载缓存比对数据`);
+          return parsed as IDeduplicateCache;
+        }
+      }
+    }
+  } catch (e) {
+    warn('[deduplicate] localStorage load error:', e);
+  }
+
+  return null;
+}
+
+/**
+ * 清空去重持久化缓存
+ */
+export async function clearDeduplicateCache(): Promise<boolean> {
+  try {
+    const plugin = usePlugin();
+    if (plugin && typeof plugin.removeData === 'function') {
+      await plugin.removeData(DEDUP_CACHE_FILE);
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(DEDUP_LOCAL_STORAGE_KEY);
+    }
+    return true;
+  } catch (e) {}
+
+  return false;
 }
