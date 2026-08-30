@@ -34,6 +34,20 @@
             上次分析: {{ lastScanTimeText }}
           </span>
 
+          <!-- 大图最大化模式切换开关 -->
+          <button
+            class="am-btn am-btn--sm"
+            :class="maximizeImages ? 'am-btn--primary' : 'am-btn--outline'"
+            @click="maximizeImages = !maximizeImages"
+            :title="maximizeImages ? '点击切换回标准视图（显示详细属性与引用文档）' : '点击开启大图模式（去除说明信息，最大化图片比对显示）'"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+              <path v-if="!maximizeImages" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+              <path v-else d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/>
+            </svg>
+            <span>{{ maximizeImages ? '大图模式 (开)' : '大图模式' }}</span>
+          </button>
+
           <button
             class="am-btn am-btn--outline am-btn--sm"
             @click="handleManualRefresh"
@@ -48,7 +62,7 @@
 
           <!-- 相似度阈值滑块 (仅在视觉相似 Tab 显示) -->
           <div v-if="activeTab === 'similar'" class="similarity-slider-box" title="调节视觉相似度判定阈值">
-            <span class="slider-label">相似度阈值:</span>
+            <span class="slider-label">相似度:</span>
             <input
               type="range"
               min="80"
@@ -198,12 +212,15 @@
             </div>
 
             <!-- 多文件并排比对画廊 -->
-            <div class="detail-compare-gallery">
+            <div class="detail-compare-gallery" :class="{ 'is-maximized-gallery': maximizeImages }">
               <div
                 v-for="item in currentSelectedGroup.items"
                 :key="item.asset.name"
                 class="compare-card"
-                :class="{ 'is-canonical': item.isCanonical }"
+                :class="{
+                  'is-canonical': item.isCanonical,
+                  'is-maximized-card': maximizeImages
+                }"
               >
                 <!-- 卡片顶部：单选主资源标记 -->
                 <div class="compare-card-header" @click="handleSetCanonical(currentSelectedGroup, item.asset.name)">
@@ -217,17 +234,26 @@
                     <span class="radio-custom"></span>
                     <strong class="canonical-text">{{ item.isCanonical ? '保留为主文件' : '设为主文件' }}</strong>
                   </label>
-                  <span
-                    v-if="isItemTopRecommendation(currentSelectedGroup, item)"
-                    class="recom-badge"
-                    title="根据引用量、是否可二次编辑和分辨率等综合算法推荐"
-                  >
-                    推荐保留
-                  </span>
+                  <div class="header-right-badges">
+                    <span
+                      v-if="maximizeImages"
+                      class="compact-meta-badge"
+                      :title="`${item.asset.name} (${item.width && item.height ? `${item.width}×${item.height}, ` : ''}${formatAssetSize(item.asset.size)})`"
+                    >
+                      {{ formatAssetSize(item.asset.size) }}
+                    </span>
+                    <span
+                      v-if="isItemTopRecommendation(currentSelectedGroup, item)"
+                      class="recom-badge"
+                      title="根据引用量、是否可二次编辑和分辨率等综合算法推荐"
+                    >
+                      推荐保留
+                    </span>
+                  </div>
                 </div>
 
                 <!-- 图片 / 文件预览区 -->
-                <div class="compare-card-preview">
+                <div class="compare-card-preview" :class="{ 'is-maximized-preview': maximizeImages }">
                   <img
                     v-if="isImageFile(item.asset.name)"
                     :src="`/assets/${item.asset.name}`"
@@ -238,10 +264,16 @@
                   <div v-else class="preview-non-image">
                     <div class="non-image-badge">{{ getAssetBadgeText(item.asset.name) }}</div>
                   </div>
+
+                  <!-- 大图模式下的底部紧凑半透明文件名提示条 -->
+                  <div v-if="maximizeImages" class="maximized-floating-bar" :title="item.asset.name">
+                    <span class="maximized-filename">{{ item.asset.name }}</span>
+                    <span class="maximized-res" v-if="item.width && item.height">{{ item.width }} × {{ item.height }}</span>
+                  </div>
                 </div>
 
-                <!-- 属性元数据表格 -->
-                <div class="compare-card-meta">
+                <!-- 属性元数据表格 (非大图模式显示) -->
+                <div class="compare-card-meta" v-if="!maximizeImages">
                   <div class="meta-row">
                     <span class="meta-key">文件名:</span>
                     <span class="meta-val filename-val" :title="item.asset.name">{{ item.asset.name }}</span>
@@ -270,8 +302,8 @@
                   </div>
                 </div>
 
-                <!-- 文档引用列表折叠 -->
-                <div class="compare-card-refs" v-if="item.asset.references && item.asset.references.length > 0">
+                <!-- 文档引用列表折叠 (非大图模式显示) -->
+                <div class="compare-card-refs" v-if="!maximizeImages && item.asset.references && item.asset.references.length > 0">
                   <div class="refs-header">被以下文档引用 ({{ item.asset.references.length }}):</div>
                   <div class="refs-list">
                     <div
@@ -288,7 +320,7 @@
                     </div>
                   </div>
                 </div>
-                <div v-else class="compare-card-refs is-empty">
+                <div v-else-if="!maximizeImages" class="compare-card-refs is-empty">
                   <span class="orphan-tag">孤儿文件 (无任何文档引用)</span>
                 </div>
               </div>
@@ -377,6 +409,19 @@ const activeTab = ref<'exact' | 'similar'>('exact');
 const similarityThreshold = ref<number>(95);
 // 上次分析完成时间戳
 const lastScanTime = ref<number>(0);
+
+// 大图纯享最大化显示模式
+const maximizeImages = ref<boolean>(
+  typeof localStorage !== 'undefined' && localStorage.getItem('siyuan_assets_dedup_maximize_img') === 'true'
+);
+
+watch(maximizeImages, (val) => {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('siyuan_assets_dedup_maximize_img', String(val));
+    }
+  } catch (e) {}
+});
 
 // 扫描状态
 const isScanning = ref(false);
@@ -1159,6 +1204,12 @@ function handleClose() {
   display: flex;
   gap: 16px;
   align-items: stretch;
+
+  &.is-maximized-gallery {
+    padding: 12px;
+    gap: 12px;
+    align-items: stretch;
+  }
 }
 
 .compare-card {
@@ -1171,6 +1222,13 @@ function handleClose() {
   flex-direction: column;
   overflow: hidden;
   transition: all 0.2s ease;
+
+  &.is-maximized-card {
+    width: auto;
+    flex: 1;
+    min-width: 320px;
+    height: 100%;
+  }
 
   &.is-canonical {
     border-color: var(--b3-theme-primary);
@@ -1185,6 +1243,21 @@ function handleClose() {
     justify-content: space-between;
     align-items: center;
     cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .header-right-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .compact-meta-badge {
+    font-size: 11px;
+    color: var(--b3-theme-on-surface-light);
+    background: var(--b3-theme-surface-lighter);
+    padding: 1px 6px;
+    border-radius: 4px;
   }
 
   .radio-label {
@@ -1222,6 +1295,19 @@ function handleClose() {
     overflow: hidden;
     position: relative;
 
+    &.is-maximized-preview {
+      height: 100%;
+      flex: 1;
+      min-height: 0;
+      background: #121212;
+
+      .preview-img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+    }
+
     .preview-img {
       max-width: 100%;
       max-height: 100%;
@@ -1229,7 +1315,7 @@ function handleClose() {
       transition: transform 0.2s ease;
 
       &:hover {
-        transform: scale(1.05);
+        transform: scale(1.03);
       }
     }
 
@@ -1248,6 +1334,39 @@ function handleClose() {
       background: #2a2a2a;
       padding: 12px 20px;
       border-radius: 8px;
+    }
+  }
+
+  .maximized-floating-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.68);
+    backdrop-filter: blur(4px);
+    color: rgba(255, 255, 255, 0.9);
+    padding: 6px 12px;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+    opacity: 0.9;
+    transition: opacity 0.2s ease;
+
+    .maximized-filename {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 70%;
+      direction: rtl;
+      text-align: left;
+    }
+
+    .maximized-res {
+      font-size: 11px;
+      color: #3b82f6;
+      font-weight: 600;
     }
   }
 
