@@ -1,12 +1,22 @@
 import type { AssetInfo, OrphanOriginalInfo } from './siyuan-db'
 
-export type AssetFilterType = 'all' | 'image' | 'original' | 'reeditable' | 'unreferenced' | 'large'
+export type AssetAttributeFilter = 'all' | 'reeditable' | 'original' | 'unreferenced' | 'large'
+export type AssetFilterType = AssetAttributeFilter | 'image'
+export type AssetCategory = 'all' | 'image' | 'document' | 'audio' | 'video' | 'archive'
+
 export type AssetSortField = 'name' | 'ext' | 'size' | 'docCount' | 'updated'
 export type AssetSortOrder = 'asc' | 'desc'
 
 export interface AssetFilterOptions {
   searchQuery: string
-  filterType: AssetFilterType
+  filterType?: AssetFilterType
+  category?: AssetCategory
+}
+
+export interface CategoryStatSummary {
+  count: number
+  totalSize: number
+  sizeText: string
 }
 
 export interface AssetCleanupSummary {
@@ -41,8 +51,26 @@ export interface BatchDeleteSummary {
   referencedOriginalsCount: number
 }
 
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tif', 'tiff', 'avif', 'heic'])
+const DOC_EXTS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'markdown', 'csv', 'epub', 'mobi', 'azw3', 'rtf', 'odt', 'ods', 'odp', 'wps'])
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'opus', 'mid', 'midi'])
+const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v', '3gp', 'ts'])
+const ARCHIVE_EXTS = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz', '7zip'])
+
 export function isImageAsset(name: string): boolean {
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(name)
+  const ext = getAssetExtension(name)
+  return IMAGE_EXTS.has(ext)
+}
+
+export function getAssetCategory(name: string, isOriginal?: boolean): AssetCategory {
+  if (isOriginal) return 'image'
+  const ext = getAssetExtension(name)
+  if (IMAGE_EXTS.has(ext)) return 'image'
+  if (DOC_EXTS.has(ext)) return 'document'
+  if (AUDIO_EXTS.has(ext)) return 'audio'
+  if (VIDEO_EXTS.has(ext)) return 'video'
+  if (ARCHIVE_EXTS.has(ext)) return 'archive'
+  return 'all'
 }
 
 export function splitFileName(fullName: string): { name: string, ext: string } {
@@ -103,26 +131,86 @@ export function formatAssetTime(timestamp: number): string {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 
+/**
+ * 统计全局各分类资产数量和体积
+ */
+export function calculateCategoryStats(assets: AssetInfo[]): Record<AssetCategory, CategoryStatSummary> {
+  const counts: Record<AssetCategory, number> = {
+    all: 0,
+    image: 0,
+    document: 0,
+    audio: 0,
+    video: 0,
+    archive: 0,
+  }
+
+  const sizes: Record<AssetCategory, number> = {
+    all: 0,
+    image: 0,
+    document: 0,
+    audio: 0,
+    video: 0,
+    archive: 0,
+  }
+
+  for (const asset of assets) {
+    const size = asset.size || 0
+    counts.all++
+    sizes.all += size
+
+    const cat = getAssetCategory(asset.name, asset.isOriginal)
+    if (cat !== 'all') {
+      counts[cat]++
+      sizes[cat] += size
+    }
+  }
+
+  const result = {} as Record<AssetCategory, CategoryStatSummary>
+  const categories: AssetCategory[] = ['all', 'image', 'document', 'audio', 'video', 'archive']
+  for (const cat of categories) {
+    result[cat] = {
+      count: counts[cat],
+      totalSize: sizes[cat],
+      sizeText: formatAssetSize(sizes[cat]),
+    }
+  }
+
+  return result
+}
+
 export function filterAssets(assets: AssetInfo[], options: AssetFilterOptions): AssetInfo[] {
-  const searchQuery = options.searchQuery.toLowerCase()
+  const searchQuery = (options.searchQuery || '').toLowerCase()
+  const category = options.category && options.category !== 'all' ? options.category : null
+  const filterType = options.filterType || 'all'
 
   return assets.filter((asset) => {
+    // 1. 关键字搜索
     if (searchQuery && !asset.name.toLowerCase().includes(searchQuery)) {
       return false
     }
-    if (options.filterType === 'image' && (!isImageAsset(asset.name) || asset.isOriginal)) {
+
+    // 2. 大类过滤
+    if (category) {
+      const assetCat = getAssetCategory(asset.name, asset.isOriginal)
+      if (assetCat !== category) {
+        return false
+      }
+    }
+
+    // 3. 属性状态过滤
+    if (filterType === 'image' && (!isImageAsset(asset.name) || asset.isOriginal)) {
       return false
     }
-    if (options.filterType === 'original' && !asset.isOriginal) {
+    if (filterType === 'original' && !asset.isOriginal) {
       return false
     }
-    if (options.filterType === 'reeditable' && !asset.isReEditable) {
+    if (filterType === 'reeditable' && !asset.isReEditable) {
       return false
     }
-    if (options.filterType === 'unreferenced' && asset.docCount > 0) {
+    if (filterType === 'unreferenced' && asset.docCount > 0) {
       return false
     }
-    if (options.filterType === 'large' && asset.size < 1024 * 1024) {
+    if (filterType === 'large' && asset.size < 1024 * 1024) {
       return false
     }
 

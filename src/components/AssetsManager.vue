@@ -3,7 +3,7 @@
     <div class="header">
       <h2>资源管家</h2>
       <div class="stats">
-        <span>总计: {{ sortedAssets.length }} / {{ assets.length }} 个资源</span>
+        <span>当前显示: {{ sortedAssets.length }} / {{ assets.length }} 个资源</span>
         <span v-if="selectedNames.size > 0" class="selected-badge">
           已选 {{ selectedNames.size }} 项 ({{ selectedSummary.sizeText }})
         </span>
@@ -16,10 +16,9 @@
           class="am-input"
         />
         <select v-model="filterType" class="am-input">
-          <option value="all">全部类型</option>
-          <option value="image">普通图片</option>
-          <option value="original">原始底图</option>
+          <option value="all">全部属性</option>
           <option value="reeditable">可二次编辑</option>
+          <option value="original">原始底图</option>
           <option value="unreferenced">未引用 (孤儿/孤立)</option>
           <option value="large">大文件 (>1MB)</option>
         </select>
@@ -55,6 +54,30 @@
       </div>
     </div>
 
+    <!-- 顶部 6 大分类统计卡片 -->
+    <div class="category-cards-grid">
+      <div
+        v-for="card in categoryCards"
+        :key="card.key"
+        class="category-card"
+        :class="{ 'is-active': activeCategory === card.key }"
+        @click="handleCategoryClick(card.key)"
+        :title="activeCategory === card.key && card.key !== 'all' ? `点击取消【${card.label}】筛选，查看全部` : `点击仅查看【${card.label}】资源`"
+      >
+        <div class="category-card__icon" :style="{ color: card.color }">
+          <component :is="card.icon" :size="20" />
+        </div>
+        <div class="category-card__info">
+          <div class="category-card__name">{{ card.label }}</div>
+          <div class="category-card__meta">
+            <span class="category-card__count">{{ categoryStats[card.key]?.count || 0 }} 个</span>
+            <span class="category-card__dot">·</span>
+            <span class="category-card__size">{{ categoryStats[card.key]?.sizeText || '0 B' }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="main-content" v-if="!loading">
       <VirtualAssetList 
         :assets="sortedAssets"
@@ -87,16 +110,19 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
+import { Files, Image, FileText, Music, Video, Archive } from 'lucide-vue-next';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
 import { deleteOriginalImage, readOriginalImage } from '../utils/file-system';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
 import {
   calculateBatchDeleteSummary,
+  calculateCategoryStats,
   calculateTotalCleanup,
   filterAssets,
   formatAssetSize,
   isImageAsset,
   sortAssets,
+  type AssetCategory,
   type AssetFilterType,
   type AssetSortField,
   type AssetSortOrder,
@@ -111,6 +137,27 @@ const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
 const searchQuery = ref('');
 const filterType = ref<AssetFilterType>('all');
+const activeCategory = ref<AssetCategory>('all');
+
+// 6 大分类全局统计与卡片配置
+const categoryStats = computed(() => calculateCategoryStats(assets.value));
+
+const categoryCards = computed(() => [
+  { key: 'all' as AssetCategory, label: '全部', icon: Files, color: 'var(--b3-theme-primary)' },
+  { key: 'image' as AssetCategory, label: '图片', icon: Image, color: '#10b981' },
+  { key: 'document' as AssetCategory, label: '文档', icon: FileText, color: '#3b82f6' },
+  { key: 'audio' as AssetCategory, label: '音频', icon: Music, color: '#f59e0b' },
+  { key: 'video' as AssetCategory, label: '视频', icon: Video, color: '#ef4444' },
+  { key: 'archive' as AssetCategory, label: '压缩包', icon: Archive, color: '#8b5cf6' },
+]);
+
+function handleCategoryClick(cat: AssetCategory) {
+  if (activeCategory.value === cat && cat !== 'all') {
+    activeCategory.value = 'all';
+  } else {
+    activeCategory.value = cat;
+  }
+}
 
 // 排序状态
 const sortField = ref<AssetSortField>('size');
@@ -275,6 +322,7 @@ const filteredAssets = computed(() => {
   return filterAssets(assets.value, {
     searchQuery: searchQuery.value,
     filterType: filterType.value,
+    category: activeCategory.value,
   });
 });
 
@@ -526,7 +574,7 @@ async function handleUnifiedCleanup() {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .assets-manager-container {
   padding: 16px;
   background: var(--b3-theme-background);
@@ -580,6 +628,97 @@ async function handleUnifiedCleanup() {
   border: 1px solid var(--b3-theme-surface-lighter);
   border-radius: 4px;
 }
+
+/* 顶部 6 大分类统计卡片网格 */
+.category-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.category-card {
+  background: var(--b3-theme-background-light);
+  border: 1px solid var(--b3-theme-surface-lighter);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+  box-sizing: border-box;
+
+  &:hover {
+    background: var(--b3-theme-surface);
+    border-color: var(--b3-theme-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  &.is-active {
+    background: rgba(66, 133, 244, 0.12);
+    border-color: var(--b3-theme-primary);
+    box-shadow: 0 0 0 1px var(--b3-theme-primary);
+  }
+
+  &__icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+
+    :deep(svg),
+    svg {
+      fill: none !important;
+      stroke: currentColor !important;
+      stroke-width: 2px !important;
+    }
+  }
+
+  &__info {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &__name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--b3-theme-on-background);
+    line-height: 1.2;
+  }
+
+  &__meta {
+    font-size: 11px;
+    color: var(--b3-theme-on-surface-light);
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__count {
+    font-weight: 500;
+  }
+
+  &__dot {
+    opacity: 0.5;
+  }
+
+  &__size {
+    opacity: 0.85;
+  }
+}
+
 .loading-state {
   flex: 1;
   display: flex;

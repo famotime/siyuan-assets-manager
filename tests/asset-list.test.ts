@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculateBatchDeleteSummary,
-  calculateUnreferencedCleanup,
+  calculateCategoryStats,
   calculateOrphanCleanup,
   calculateTotalCleanup,
+  calculateUnreferencedCleanup,
   filterAssets,
   formatAssetSize,
   formatAssetTime,
   getAssetBadgeText,
+  getAssetCategory,
   getAssetExtension,
   sortAssets,
   splitFileName,
@@ -44,21 +46,63 @@ describe('asset list helpers', () => {
     asset('orphan_orig.png', 1024 * 300, 0, false, true, 1500000000000),
   ]
 
-  it('filters assets by search text, type, reeditable flag, and original flag', () => {
-    // image 仅包含普通图片，不含底图
+  const allCategoryAssets = [
+    ...assets,
+    asset('sound.mp3', 1024 * 100, 1, false, false, 1720000000000),
+    asset('movie.mp4', 1024 * 1024 * 10, 1, false, false, 1730000000000),
+    asset('archive.zip', 1024 * 50, 0, false, false, 1740000000000),
+  ]
+
+  it('categorizes assets correctly by extensions and original flag', () => {
+    expect(getAssetCategory('photo.JPG')).toBe('image')
+    expect(getAssetCategory('vector.svg')).toBe('image')
+    expect(getAssetCategory('orig_hidden', true)).toBe('image')
+    expect(getAssetCategory('document.pdf')).toBe('document')
+    expect(getAssetCategory('notes.md')).toBe('document')
+    expect(getAssetCategory('music.flac')).toBe('audio')
+    expect(getAssetCategory('clip.mkv')).toBe('video')
+    expect(getAssetCategory('data.tar.gz')).toBe('archive')
+    expect(getAssetCategory('package.7z')).toBe('archive')
+    expect(getAssetCategory('unknown.xyz')).toBe('all')
+    expect(getAssetCategory('noext')).toBe('all')
+  })
+
+  it('calculates global category statistics correctly', () => {
+    const stats = calculateCategoryStats(allCategoryAssets)
+    expect(stats.all.count).toBe(8)
+    expect(stats.all.totalSize).toBe(
+      1024 * 1024 * 2 + 20 + 0 + 1024 * 500 + 1024 * 300 + 1024 * 100 + 1024 * 1024 * 10 + 1024 * 50
+    )
+    expect(stats.image.count).toBe(3) // Beta.PNG, orig_123.png, orphan_orig.png
+    expect(stats.document.count).toBe(1) // alpha.txt
+    expect(stats.audio.count).toBe(1) // sound.mp3
+    expect(stats.video.count).toBe(1) // movie.mp4
+    expect(stats.archive.count).toBe(1) // archive.zip
+  })
+
+  it('filters assets by category, search text, type, reeditable flag, and original flag', () => {
+    // 按大类过滤
+    expect(filterAssets(allCategoryAssets, { searchQuery: '', category: 'image' })).toEqual([allCategoryAssets[0], allCategoryAssets[3], allCategoryAssets[4]])
+    expect(filterAssets(allCategoryAssets, { searchQuery: '', category: 'audio' })).toEqual([allCategoryAssets[5]])
+    expect(filterAssets(allCategoryAssets, { searchQuery: '', category: 'video' })).toEqual([allCategoryAssets[6]])
+    expect(filterAssets(allCategoryAssets, { searchQuery: '', category: 'archive' })).toEqual([allCategoryAssets[7]])
+    expect(filterAssets(allCategoryAssets, { searchQuery: '', category: 'document' })).toEqual([allCategoryAssets[1]])
+
+    // 正交组合：图片类别 + 未引用
+    expect(filterAssets(allCategoryAssets, { searchQuery: '', category: 'image', filterType: 'unreferenced' })).toEqual([allCategoryAssets[4]])
+
+    // 正交组合：全部类别 + 大文件
+    expect(filterAssets(allCategoryAssets, { searchQuery: '', category: 'all', filterType: 'large' })).toEqual([allCategoryAssets[0], allCategoryAssets[6]])
+
+    // 正交组合：搜索 + 类别
+    expect(filterAssets(allCategoryAssets, { searchQuery: 'beta', category: 'image' })).toEqual([allCategoryAssets[0]])
+    expect(filterAssets(allCategoryAssets, { searchQuery: 'beta', category: 'video' })).toEqual([])
+
+    // 兼容原有 filterType 测试 (基于 base assets)
     expect(filterAssets(assets, { searchQuery: 'beta', filterType: 'image' })).toEqual([assets[0]])
     expect(filterAssets(assets, { searchQuery: '', filterType: 'image' })).toEqual([assets[0]])
-    
-    // original 仅包含底图
     expect(filterAssets(assets, { searchQuery: '', filterType: 'original' })).toEqual([assets[3], assets[4]])
-    
-    // unreferenced 包含普通孤儿与孤立底图
     expect(filterAssets(assets, { searchQuery: '', filterType: 'unreferenced' })).toEqual([assets[1], assets[4]])
-    
-    // large 包含大于 1MB 的资源
-    expect(filterAssets(assets, { searchQuery: '', filterType: 'large' })).toEqual([assets[0]])
-    
-    // reeditable 仅包含可二次编辑资源
     expect(filterAssets(assets, { searchQuery: '', filterType: 'reeditable' })).toEqual([assets[0]])
   })
 

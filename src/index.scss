@@ -41,6 +41,13 @@ $transition-fast: 0.15s ease;
 $transition-normal: 0.2s ease;
 $transition-slow: 0.3s ease;
 
+// ===== Lucide 线框图标保护 =====
+.lucide,
+svg.lucide {
+  fill: none !important;
+  stroke: currentColor !important;
+}
+
 // ===== 基础输入框 =====
 .am-input {
   box-sizing: border-box;
