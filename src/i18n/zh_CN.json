@@ -5,6 +5,6 @@
   "enableLoggingTitle": "开启日志打印",
   "enableLoggingDesc": "是否在控制台打印插件运行日志",
   "deduplicateBtn": "去重",
-  "deduplicateTitle": "资源去重与图片比对",
+  "deduplicateTitle": "去重比对",
   "deduplicateDesc": "识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
 }

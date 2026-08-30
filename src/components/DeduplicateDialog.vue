@@ -8,14 +8,14 @@
             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
             <circle cx="12" cy="12" r="3"/>
           </svg>
-          <h3>资源去重与图片比对</h3>
+          <h3>去重比对</h3>
           <div class="dedup-tab-group">
             <button
               class="dedup-tab-btn"
               :class="{ 'is-active': activeTab === 'exact' }"
               @click="activeTab = 'exact'"
             >
-              精确完全相同
+              精确相同
               <span class="dedup-tab-badge">{{ pendingExactGroups.length }}</span>
             </button>
             <button
@@ -23,7 +23,7 @@
               :class="{ 'is-active': activeTab === 'similar' }"
               @click="activeTab = 'similar'"
             >
-              疑似视觉相似
+              视觉相似
               <span class="dedup-tab-badge">{{ pendingSimilarGroups.length }}</span>
             </button>
           </div>
@@ -45,7 +45,7 @@
               <path v-if="!maximizeImages" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
               <path v-else d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/>
             </svg>
-            <span>{{ maximizeImages ? '大图模式 (开)' : '大图模式' }}</span>
+            <span>{{ maximizeImages ? '大图' : '大图' }}</span>
           </button>
 
           <button
@@ -57,7 +57,7 @@
             <svg class="icon" :class="{ spinning: isScanning }" width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
               <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
             </svg>
-            <span>刷新分析</span>
+            <span>扫描</span>
           </button>
 
           <!-- 相似度阈值滑块 (仅在视觉相似 Tab 显示) -->
@@ -104,7 +104,7 @@
         <!-- 无重复状态 -->
         <div v-if="displayGroups.length === 0" class="dedup-empty-state">
           <div class="empty-icon">✨</div>
-          <h4>未发现{{ activeTab === 'exact' ? '精确完全相同' : '疑似视觉相似' }}的重复资源</h4>
+          <h4>未发现{{ activeTab === 'exact' ? '精确相同' : '视觉相似' }}的重复资源</h4>
           <p>当前没有多余冗余文件需要归一化，您的资源库非常整洁。</p>
           <button class="am-btn am-btn--primary" @click="startScan(true)">重新全量扫描</button>
         </div>
@@ -617,7 +617,7 @@ async function startScan(forceRescan = false) {
 }
 
 /**
- * 用户手动点击“刷新分析”按钮
+ * 用户手动点击“扫描”按钮
  */
 async function handleManualRefresh() {
   await startScan(true);

@@ -114,7 +114,7 @@
       <img :src="previewUrl" />
     </div>
 
-    <!-- 资源去重与图片比对弹窗 -->
+    <!-- 去重比对弹窗 -->
     <DeduplicateDialog
       v-model:visible="deduplicateVisible"
       :assets="assets"
