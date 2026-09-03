@@ -432,6 +432,19 @@ async function save() {
   stroke: #fff;
 }
 
+/* 确保顶栏帮助菜单中各按钮（含下载、加载、查看原图等）底色与布局整洁 */
+:deep(.tui-image-editor-help-menu .tui-image-editor-download-btn) {
+  background-color: transparent !important;
+  border: none !important;
+}
+
+/* 确保主菜单与帮助菜单图标尺寸一致，且不受宿主可能存在的全局样式干扰 */
+:deep(.tui-image-editor-help-menu svg),
+:deep(.tui-image-editor-menu svg) {
+  width: 24px !important;
+  height: 24px !important;
+}
+
 /* 颜色选择 li 容器 */
 .custom-annotation-color-button {
   display: inline-flex !important;
