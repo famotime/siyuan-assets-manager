@@ -9,6 +9,10 @@ import PluginInfoString from '@/../plugin.json'
 import { destroy, init, usePlugin } from '@/main'
 import { getAssetNameFromElement, getBlockIdFromElement } from '@/utils/plugin-entry'
 import { log } from '@/utils/logger'
+import { createApp } from 'vue'
+import AssetsManager from '@/components/AssetsManager.vue'
+
+export const ASSETS_MANAGER_TAB_TYPE = "assets_manager_tab";
 
 let PluginInfo = {
   version: '',
@@ -37,11 +41,46 @@ export default class AssetsManagerPlugin extends Plugin {
   public readonly version = version
   public settings = {
     promptOnDeleteOriginal: true,
-    enableLogging: false
+    enableLogging: false,
+    openInTab: false,
   }
 
   async onload() {
     usePlugin(this);
+
+    this.addTab({
+      type: ASSETS_MANAGER_TAB_TYPE,
+      init(this: any) {
+        const custom = this;
+        if (custom.element) {
+          custom.element.style.height = "100%";
+          custom.element.style.width = "100%";
+          custom.element.style.overflow = "hidden";
+          custom.element.style.display = "flex";
+          custom.element.style.flexDirection = "column";
+
+          const tabDiv = document.createElement("div");
+          tabDiv.style.height = "100%";
+          tabDiv.style.width = "100%";
+          tabDiv.style.overflow = "hidden";
+          tabDiv.style.display = "flex";
+          tabDiv.style.flexDirection = "column";
+          custom.element.appendChild(tabDiv);
+
+          const tabApp = createApp(AssetsManager, {
+            isTabMode: true,
+          });
+          tabApp.mount(tabDiv);
+          custom.data = Object.assign({}, custom.data, { tabApp });
+        }
+      },
+      destroy(this: any) {
+        if (this?.data?.tabApp) {
+          this.data.tabApp.unmount();
+        }
+      },
+    });
+
     this.addIcons(`
 <symbol id="iconAssetsManager" viewBox="0 0 24 24">
   <g fill="none" stroke="currentColor" stroke-width="1.5">
@@ -138,38 +177,83 @@ export default class AssetsManagerPlugin extends Plugin {
   }
 
   openSetting() {
-    const setting = new Setting({});
+    const setting = new Setting({
+      width: "680px",
+    });
+
+    const createSettingCardOption = (options: {
+      checked: boolean;
+      description: string;
+      onChange: (checked: boolean) => void;
+    }): HTMLElement => {
+      const card = document.createElement("label");
+      card.className = `am-setting-card${options.checked ? " is-checked" : ""}`;
+
+      const desc = document.createElement("span");
+      desc.className = "am-setting-card__desc";
+      desc.textContent = options.description;
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "b3-switch fn__flex-center";
+      checkbox.checked = options.checked;
+
+      checkbox.addEventListener("change", (e) => {
+        const isChecked = (e.target as HTMLInputElement).checked;
+        card.classList.toggle("is-checked", isChecked);
+        options.onChange(isChecked);
+      });
+
+      card.append(desc, checkbox);
+      return card;
+    };
+
+    setting.addItem({
+      title: this.i18n.openInTabTitle || "页签中打开资源管家",
+      description: "",
+      direction: "row",
+      createActionElement: () => {
+        return createSettingCardOption({
+          checked: this.settings.openInTab,
+          description: this.i18n.openInTabDesc || "开启时，将资源管理窗口在页签打开，而不是弹窗打开",
+          onChange: (checked) => {
+            this.settings.openInTab = checked;
+            this.saveData("config.json", this.settings);
+          },
+        });
+      },
+    });
 
     setting.addItem({
       title: this.i18n.promptOnDeleteOriginalTitle || "删除原文件提示",
-      description: this.i18n.promptOnDeleteOriginalDesc || "重命名和修改文件保存后，是否弹窗提示将原文件放入回收站",
+      description: "",
+      direction: "row",
       createActionElement: () => {
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "b3-switch";
-        checkbox.checked = this.settings.promptOnDeleteOriginal;
-        checkbox.addEventListener("change", (e) => {
-          this.settings.promptOnDeleteOriginal = (e.target as HTMLInputElement).checked;
-          this.saveData("config.json", this.settings);
+        return createSettingCardOption({
+          checked: this.settings.promptOnDeleteOriginal,
+          description: this.i18n.promptOnDeleteOriginalDesc || "重命名和修改文件保存后，是否弹窗提示将原文件放入回收站",
+          onChange: (checked) => {
+            this.settings.promptOnDeleteOriginal = checked;
+            this.saveData("config.json", this.settings);
+          },
         });
-        return checkbox;
-      }
+      },
     });
 
     setting.addItem({
       title: this.i18n.enableLoggingTitle || "开启日志打印",
-      description: this.i18n.enableLoggingDesc || "是否在控制台打印插件运行日志",
+      description: "",
+      direction: "row",
       createActionElement: () => {
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "b3-switch";
-        checkbox.checked = this.settings.enableLogging;
-        checkbox.addEventListener("change", (e) => {
-          this.settings.enableLogging = (e.target as HTMLInputElement).checked;
-          this.saveData("config.json", this.settings);
+        return createSettingCardOption({
+          checked: this.settings.enableLogging,
+          description: this.i18n.enableLoggingDesc || "是否在控制台打印插件运行日志",
+          onChange: (checked) => {
+            this.settings.enableLogging = checked;
+            this.saveData("config.json", this.settings);
+          },
         });
-        return checkbox;
-      }
+      },
     });
 
     setting.open(this.name);

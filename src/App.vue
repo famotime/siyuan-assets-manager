@@ -57,7 +57,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { openTab } from 'siyuan';
 import { usePlugin } from '@/main';
+import { ASSETS_MANAGER_TAB_TYPE } from './index';
 import AssetsManager from './components/AssetsManager.vue';
 import ImageEditorDialog from './components/ImageEditorDialog.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
@@ -80,19 +82,40 @@ const globalRenameVisible = ref(false);
 const globalRenameAsset = ref<AssetInfo | null>(null);
 const globalRenameNewName = ref('');
 
+const handleToggleAssetsManager = () => {
+  const pluginInstance = plugin as any;
+  if (pluginInstance?.settings?.openInTab) {
+    if (visible.value) {
+      visible.value = false;
+    }
+    openTab({
+      app: pluginInstance.app,
+      custom: {
+        icon: 'iconAssetsManager',
+        title: pluginInstance.i18n?.addTopBarIcon || '资源管家',
+        id: pluginInstance.name + ASSETS_MANAGER_TAB_TYPE,
+      },
+    });
+  } else {
+    visible.value = !visible.value;
+  }
+};
+
 onMounted(() => {
   // 注册顶栏按钮，点击时打开资源管家
-  plugin.addTopBar({
-    icon: 'iconAssetsManager',
-    title: '资源管家',
-    callback: () => {
-      visible.value = !visible.value;
-    },
-  });
+  if (typeof plugin?.addTopBar === 'function') {
+    plugin.addTopBar({
+      icon: 'iconAssetsManager',
+      title: '资源管家',
+      callback: () => {
+        handleToggleAssetsManager();
+      },
+    });
+  }
   
   // 暴露给外部控制
   (window as any)._siyuan_assets_manager_toggle = () => {
-    visible.value = !visible.value;
+    handleToggleAssetsManager();
   };
 
   // 暴露全局图片编辑方法，支持传入 blockId

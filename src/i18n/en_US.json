@@ -6,5 +6,7 @@
   "enableLoggingDesc": "Whether to print plugin running logs in the console",
   "deduplicateBtn": "Deduplicate",
   "deduplicateTitle": "Asset Deduplication & Comparison",
-  "deduplicateDesc": "Identify duplicate & visually similar assets, compare and normalize into unique assets"
+  "deduplicateDesc": "Identify duplicate & visually similar assets, compare and normalize into unique assets",
+  "openInTabTitle": "Open in Tab",
+  "openInTabDesc": "When enabled, opens the Assets Manager in a tab instead of a dialog"
 }

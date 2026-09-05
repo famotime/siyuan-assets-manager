@@ -6,5 +6,7 @@
   "enableLoggingDesc": "是否在控制台打印插件运行日志",
   "deduplicateBtn": "去重",
   "deduplicateTitle": "去重比对",
-  "deduplicateDesc": "识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
+  "deduplicateDesc": "识别疑似重复资源与视觉相似图片，比对后一键归一化合并",
+  "openInTabTitle": "页签中打开资源管家",
+  "openInTabDesc": "开启时，将资源管理窗口在页签打开，而不是弹窗打开"
 }

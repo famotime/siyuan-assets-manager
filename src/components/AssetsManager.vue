@@ -1,6 +1,6 @@
 <template>
   <div ref="containerEl" class="assets-manager-container" style="position: relative;">
-    <div class="header">
+    <div class="header" :class="{ 'header--tab': isTabMode }">
       <h2>资源管家</h2>
       <div class="stats">
         <span>当前显示: {{ sortedAssets.length }} / {{ assets.length }} 个资源</span>
@@ -149,6 +149,15 @@ import { usePlugin } from '../main';
 import { error } from '../utils/logger';
 import VirtualAssetList from './VirtualAssetList.vue';
 import DeduplicateDialog from './DeduplicateDialog.vue';
+
+const props = withDefaults(
+  defineProps<{
+    isTabMode?: boolean;
+  }>(),
+  {
+    isTabMode: false,
+  }
+);
 
 const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
@@ -602,8 +611,11 @@ async function handleUnifiedCleanup() {
   background: var(--b3-theme-background);
   color: var(--b3-theme-on-background);
   height: 100%;
+  width: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .header {
   display: flex;
@@ -613,6 +625,10 @@ async function handleUnifiedCleanup() {
   flex-wrap: wrap;
   gap: 12px;
   padding-right: 40px; /* 为右上角关闭按钮预留空间，防止重叠 */
+
+  &--tab {
+    padding-right: 0;
+  }
 }
 .header h2 {
   margin: 0;

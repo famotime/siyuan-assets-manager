@@ -48,6 +48,116 @@ svg.lucide {
   stroke: currentColor !important;
 }
 
+// ===== 思源设置面板优雅舒适布局样式（参考 siyuan-image-quickedit） =====
+.b3-dialog__content {
+  .config-item {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 14px 0 16px 0 !important;
+    border-bottom: 1px solid var(--b3-border-color);
+    box-sizing: border-box;
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    > .fn__block {
+      width: 100% !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    .config-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--b3-theme-on-background, var(--b3-theme-on-surface));
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+
+    // 所有选项标题下无需显示原生说明文字
+    .b3-label__text {
+      display: none !important;
+    }
+
+    .fn__hr {
+      display: none !important;
+    }
+
+    > .fn__space {
+      display: none !important;
+    }
+
+    > .fn__flex-1 {
+      width: 100% !important;
+      max-width: 100% !important;
+      flex: none !important;
+      margin-bottom: 8px;
+    }
+
+    > .am-setting-card,
+    .am-setting-card {
+      width: 100% !important;
+      max-width: 100% !important;
+      flex: none !important;
+      margin: 0 !important;
+    }
+  }
+}
+
+// 现代交互卡片式开关选项
+.am-setting-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  min-height: 42px;
+  border-radius: 6px;
+  border: 1px solid var(--b3-border-color);
+  background-color: var(--b3-theme-surface);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+
+  &:hover {
+    border-color: var(--b3-theme-primary);
+    background-color: var(--b3-theme-surface-lighter);
+  }
+
+  &.is-checked {
+    border-color: var(--b3-theme-primary);
+    background-color: rgba(66, 133, 244, 0.08);
+
+    .am-setting-card__desc {
+      color: var(--b3-theme-on-surface);
+    }
+  }
+
+  .am-setting-card__desc {
+    font-size: 13px;
+    color: var(--b3-theme-on-surface-light);
+    line-height: 1.5;
+    flex: 1;
+    min-width: 0;
+    transition: color 0.15s ease;
+  }
+
+  .b3-switch {
+    flex: 0 0 26px !important;
+    width: 26px !important;
+    min-width: 26px !important;
+    max-width: 26px !important;
+    height: 16px !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    cursor: pointer;
+    flex-shrink: 0 !important;
+  }
+}
+
 // ===== 基础输入框 =====
 .am-input {
   box-sizing: border-box;
