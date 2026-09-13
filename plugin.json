@@ -1,15 +1,22 @@
 {
   "name": "siyuan-assets-manager",
-  "author": "wetoria",
+  "author": "Quincy Zou",
   "url": "https://github.com/Wetoria/siyuan-assets-manager",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "minAppVersion": "2.10.14",
+  "icon": "icon.webp",
+  "preview": "preview.webp",
   "disabledInPublish": true,
   "backends": [
-    "all"
+    "windows",
+    "linux",
+    "darwin",
+    "docker"
   ],
   "frontends": [
-    "all"
+    "desktop",
+    "browser-desktop",
+    "desktop-window"
   ],
   "displayName": {
     "default": "Assets Manager",
@@ -17,17 +24,21 @@
     "zh_CN": "资源管家"
   },
   "description": {
-    "default": "Siyuan Assets Manager Plugin",
-    "en_US": "Siyuan Assets Manager Plugin",
-    "zh_CN": "思源笔记资源管家插件"
+    "default": "Full lifecycle asset management with image vector secondary editing, deduplication, and orphan cleanup.",
+    "en_US": "Full lifecycle asset management with image vector secondary editing, deduplication, and orphan cleanup.",
+    "zh_CN": "资源全生命周期管理，支持图片矢量二次编辑、智能去重与孤儿资源清理。"
   },
   "readme": {
     "default": "README.md",
     "en_US": "README.md",
     "zh_CN": "README_zh_CN.md"
   },
-  "funding": {
-    "custom": []
-  },
-  "keywords": []
+  "keywords": [
+    "图像编辑",
+    "资产管理",
+    "清理优化",
+    "去重",
+    "大文件管理",
+    "截图标注"
+  ]
 }

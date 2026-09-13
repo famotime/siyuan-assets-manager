@@ -299,6 +299,10 @@ export default class AssetsManagerPlugin extends Plugin {
     });
   }
 
+  onDataChanged() {
+    log('[AssetsManager] Data changed event received');
+  }
+
   onunload() {
     destroy(this.name)
   }
