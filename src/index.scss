@@ -393,3 +393,37 @@ svg.lucide {
   }
 }
 
+// ===== 插件根容器宿主视口与 Flex 流严格脱标隔离 =====
+.siyuan-assets-manager-app {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+  z-index: $z-modal !important;
+}
+
+// ===== TUI 注入到 document.body 的 SVG 图标库隔离保护 =====
+// TUI 主题构造时会往 document.body appendChild 一个包含 default-icons 的隐藏 SVG，
+// 强制将其绝对定位移出可视区域且宽高为 0，防止其作为 flex-column 子项抢占 150px 默认高度
+#tui-image-editor-svg-default-icons,
+svg:has(#tui-image-editor-svg-default-icons),
+body > svg[display="none"],
+body > svg:not([class]):not([id]) {
+  display: none !important;
+  position: absolute !important;
+  top: -9999px !important;
+  left: -9999px !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+

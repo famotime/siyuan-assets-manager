@@ -26,7 +26,7 @@
   "description": {
     "default": "Full lifecycle asset management with image vector secondary editing, deduplication, and orphan cleanup.",
     "en_US": "Full lifecycle asset management with image vector secondary editing, deduplication, and orphan cleanup.",
-    "zh_CN": "资源全生命周期管理，支持图片矢量二次编辑、智能去重与孤儿资源清理。"
+    "zh_CN": "笔记内嵌图片、视频等资源的全生命周期管理，支持图片二次编辑、智能去重与孤儿资源清理。"
   },
   "readme": {
     "default": "README.md",

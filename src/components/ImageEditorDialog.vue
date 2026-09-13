@@ -51,7 +51,7 @@ import { readAssetFile, readOriginalImage } from '../utils/file-system';
 import { getImageBlockReEditData, removeImageBlockReEditData } from '../utils/siyuan-block';
 import { getAssetInfoByName } from '../utils/siyuan-db';
 import localeZhCN from '../i18n/tui-locale-zh';
-import { calculateDialogSize, getEditorShortcutAction, prepareCanvasExport, resetCanvasObjects, trimAndScaleDataUrl } from '../utils/image-editor';
+import { calculateDialogSize, cleanTuiSvgArtifacts, getEditorShortcutAction, lockHostScroll, prepareCanvasExport, removeTuiSvgArtifacts, resetCanvasObjects, resetHostViewport, trimAndScaleDataUrl, unlockHostScroll } from '../utils/image-editor';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { log, warn, error } from '../utils/logger';
@@ -83,10 +83,29 @@ const originalStoragePath = ref('');
 const isEditorReady = ref(false);
 
 /**
- * 拦截键盘快捷键，防止事件冒泡至思源笔记触发思源全局撤销/重做
+ * 拦截键盘快捷键，支持 Esc 退出，并防止事件冒泡至思源笔记触发思源全局撤销/重做或快捷键
  */
 function handleKeyDown(e: KeyboardEvent) {
   if (!editorInstance) return;
+
+  // 按 Esc 键退出图片编辑器（如果在文本编辑状态，先退出文本编辑）
+  if (e.key === 'Escape') {
+    const canvas = getFabricCanvasFromTui(editorInstance);
+    const activeObj = canvas?.getActiveObject ? canvas.getActiveObject() : null;
+    if (activeObj && activeObj.isEditing && typeof activeObj.exitEditing === 'function') {
+      activeObj.exitEditing();
+      canvas.renderAll();
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    close();
+    return;
+  }
 
   const action = getEditorShortcutAction(e);
   if (action && (action.isUndo || action.isRedo)) {
@@ -103,11 +122,22 @@ function handleKeyDown(e: KeyboardEvent) {
         editorInstance.redo().catch(() => {});
       }
     }
+    return;
+  }
+
+  // 阻断修饰键（Ctrl/Meta/Alt）组合键向宿主思源冒泡，避免误触思源全局面板或快捷操作
+  if (e.ctrlKey || e.metaKey || e.altKey) {
+    e.stopPropagation();
   }
 }
 
 watch(() => props.visible, async (newVal) => {
   if (newVal && props.assetName) {
+    // 进入编辑器界面：立即锁定宿主滚动、清理并隔离可能存在的 TUI SVG 节点，重置视口
+    lockHostScroll();
+    cleanTuiSvgArtifacts();
+    resetHostViewport();
+
     window.addEventListener('keydown', handleKeyDown, true);
     isEditorReady.value = false;
     isReEditMode.value = false;
@@ -169,16 +199,24 @@ watch(() => props.visible, async (newVal) => {
       dialogHeight.value = `${dialogSize.height}px`;
 
       await nextTick();
+      cleanTuiSvgArtifacts();
+      resetHostViewport();
       initEditor(initialUrl, async () => {
+        cleanTuiSvgArtifacts();
+        resetHostViewport();
         // 如果有二次编辑矢量图层，在编辑器底图完全就绪后注入恢复
         if (isReEditMode.value && reEditMetadata.value?.vectorData) {
           log('[ImageEditorDialog] 正在还原历史矢量标注图层...');
           await applyVectorDataToTui(editorInstance, reEditMetadata.value.vectorData);
         }
+        cleanTuiSvgArtifacts();
+        resetHostViewport();
       });
     };
     img.onerror = async () => {
       await nextTick();
+      cleanTuiSvgArtifacts();
+      resetHostViewport();
       initEditor(initialUrl);
     };
     img.src = initialUrl;
@@ -189,11 +227,33 @@ watch(() => props.visible, async (newVal) => {
       editorInstance.destroy();
       editorInstance = null;
     }
+    removeTuiSvgArtifacts();
+    unlockHostScroll();
+    resetHostViewport();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        resetHostViewport();
+        cleanTuiSvgArtifacts();
+      });
+    }
   }
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown, true);
+  if (editorInstance) {
+    editorInstance.destroy();
+    editorInstance = null;
+  }
+  removeTuiSvgArtifacts();
+  unlockHostScroll();
+  resetHostViewport();
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => {
+      resetHostViewport();
+      cleanTuiSvgArtifacts();
+    });
+  }
 });
 
 async function waitForEditorImageLoaded(editor: any, maxWaitMs = 3000): Promise<boolean> {
@@ -215,6 +275,9 @@ function initEditor(url: string, onReady?: () => Promise<void>) {
   if (editorInstance) {
     editorInstance.destroy();
   }
+
+  cleanTuiSvgArtifacts();
+  resetHostViewport();
 
   const ImageEditorConstructor = getImageEditor();
   log('Resolved constructor dynamically:', ImageEditorConstructor);
@@ -257,23 +320,40 @@ function initEditor(url: string, onReady?: () => Promise<void>) {
     }
   });
 
+  // TUI Theme 构造后会向 body 挂载 default-icons，立即执行清理隔离与视口复位
+  cleanTuiSvgArtifacts();
+  resetHostViewport();
+
   // 设置 ready 状态以激活 Teleport
   isEditorReady.value = true;
 
   if (onReady) {
     (async () => {
       await waitForEditorImageLoaded(editorInstance);
+      cleanTuiSvgArtifacts();
+      resetHostViewport();
       try {
         await onReady();
       } catch (e) {
         warn('[ImageEditorDialog] onReady callback execution error:', e);
       }
+      cleanTuiSvgArtifacts();
+      resetHostViewport();
     })();
   }
 }
 
 function close() {
   emit('update:visible', false);
+  removeTuiSvgArtifacts();
+  unlockHostScroll();
+  resetHostViewport();
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => {
+      resetHostViewport();
+      cleanTuiSvgArtifacts();
+    });
+  }
 }
 
 async function handleResetOriginal() {

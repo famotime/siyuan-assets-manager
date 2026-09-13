@@ -145,6 +145,14 @@ export default defineConfig(({
         // into your library
         external: ["siyuan", "process"],
 
+        onwarn(warning, warn) {
+          // 忽略第三方依赖中无法识别的 PURE 注释位置警告
+          if (warning.code === "INVALID_ANNOTATION") {
+            return
+          }
+          warn(warning)
+        },
+
         output: {
           entryFileNames: "[name].js",
           assetFileNames: (assetInfo) => {

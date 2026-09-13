@@ -259,14 +259,16 @@ async function submitGlobalRename() {
 
 <style lang="scss">
 .siyuan-assets-manager-app {
-  width: 100vw;
-  height: 100dvh;
-  max-height: 100vh;
-  position: absolute;
-  top: 0px;
-  left: 0px;
-  pointer-events: none;
-  box-sizing: border-box;
-  z-index: 200; /* 提升根容器层级 */
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+  z-index: 200 !important;
 }
 </style>
