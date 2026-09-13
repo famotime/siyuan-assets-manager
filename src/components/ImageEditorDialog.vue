@@ -230,7 +230,8 @@ function initEditor(url: string, onReady?: () => Promise<void>) {
       },
       locale: localeZhCN,
       menu: ['resize', 'crop', 'flip', 'rotate', 'draw', 'eraser', 'lasso', 'shape', 'icon', 'text', 'mask', 'filter', 'mosaic', 'annotation'],
-      initMenu: '',
+      // 默认初始化打开裁剪操作菜单
+      initMenu: 'crop',
       uiSize: {
         width: '100%',
         height: '100%'
