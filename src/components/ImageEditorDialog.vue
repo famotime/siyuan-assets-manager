@@ -55,6 +55,8 @@ import { calculateDialogSize, getEditorShortcutAction, prepareCanvasExport, rese
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { log, warn, error } from '../utils/logger';
+import { usePlugin } from '../main';
+import { DEFAULT_IMAGE_EDITOR_TOOLS } from '../index';
 import type { IAssetReEditMetadata } from '../types/reedit';
 
 const props = defineProps<{
@@ -216,6 +218,15 @@ function initEditor(url: string, onReady?: () => Promise<void>) {
 
   const ImageEditorConstructor = getImageEditor();
   log('Resolved constructor dynamically:', ImageEditorConstructor);
+
+  const plugin = usePlugin() as any;
+  const configuredTools = plugin?.settings?.imageEditorTools;
+  const menuTools = Array.isArray(configuredTools) && configuredTools.length > 0
+    ? configuredTools
+    : [...DEFAULT_IMAGE_EDITOR_TOOLS];
+
+  const initMenu = menuTools.includes('crop') ? 'crop' : (menuTools[0] || '');
+
   editorInstance = new ImageEditorConstructor(tuiEditorContainer.value, {
     includeUI: {
       loadImage: {
@@ -229,9 +240,9 @@ function initEditor(url: string, onReady?: () => Promise<void>) {
         'common.bisize.height': '0px'
       },
       locale: localeZhCN,
-      menu: ['resize', 'crop', 'flip', 'rotate', 'draw', 'eraser', 'lasso', 'shape', 'icon', 'text', 'mask', 'filter', 'mosaic', 'annotation'],
-      // 默认初始化打开裁剪操作菜单
-      initMenu: 'crop',
+      menu: menuTools,
+      // 默认初始化打开裁剪操作菜单（若已禁用裁剪则自动切换为首个可用菜单）
+      initMenu: initMenu,
       uiSize: {
         width: '100%',
         height: '100%'

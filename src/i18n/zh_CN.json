@@ -8,5 +8,7 @@
   "deduplicateTitle": "去重比对",
   "deduplicateDesc": "识别疑似重复资源与视觉相似图片，比对后一键归一化合并",
   "openInTabTitle": "页签中打开资源管家",
-  "openInTabDesc": "开启时，将资源管理窗口在页签打开，而不是弹窗打开"
+  "openInTabDesc": "开启时，将资源管理窗口在页签打开，而不是弹窗打开",
+  "imageEditorToolsTitle": "图片编辑器工具栏",
+  "imageEditorToolsDesc": "控制在图片编辑器中显示的工具（默认不启用蒙版与滤镜）"
 }

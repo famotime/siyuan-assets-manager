@@ -8,5 +8,7 @@
   "deduplicateTitle": "Asset Deduplication & Comparison",
   "deduplicateDesc": "Identify duplicate & visually similar assets, compare and normalize into unique assets",
   "openInTabTitle": "Open in Tab",
-  "openInTabDesc": "When enabled, opens the Assets Manager in a tab instead of a dialog"
+  "openInTabDesc": "When enabled, opens the Assets Manager in a tab instead of a dialog",
+  "imageEditorToolsTitle": "Image Editor Tools",
+  "imageEditorToolsDesc": "Control tools displayed in the image editor toolbar (mask and filter are disabled by default)"
 }

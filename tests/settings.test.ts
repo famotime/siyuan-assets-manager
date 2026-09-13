@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as siyuan from 'siyuan';
-import AssetsManagerPlugin, { tabAppMap } from '../src/index';
+import AssetsManagerPlugin, { DEFAULT_IMAGE_EDITOR_TOOLS, ALL_IMAGE_EDITOR_TOOLS, tabAppMap } from '../src/index';
 
 describe('setting auto save behavior and layout', () => {
   it('instantiates Setting with 680px width, renders interactive cards, and auto-saves on change', () => {
@@ -23,8 +23,11 @@ describe('setting auto save behavior and layout', () => {
     const plugin = new AssetsManagerPlugin();
     plugin.saveData = vi.fn().mockResolvedValue(undefined);
 
-    // 验证 openInTab 默认关闭
+    // 验证 openInTab 默认关闭，默认图片编辑器工具不包含 mask 和 filter
     expect(plugin.settings.openInTab).toBe(false);
+    expect(plugin.settings.imageEditorTools).toEqual(DEFAULT_IMAGE_EDITOR_TOOLS);
+    expect(plugin.settings.imageEditorTools.includes('mask')).toBe(false);
+    expect(plugin.settings.imageEditorTools.includes('filter')).toBe(false);
 
     plugin.openSetting();
 
@@ -34,10 +37,12 @@ describe('setting auto save behavior and layout', () => {
     expect(settingOptions.width).toBe('680px');
     expect(settingOptions.confirmCallback).toBeUndefined();
 
-    // 验证 3 个设置项：页签打开、删除提示、开启日志
-    expect(addedItems.length).toBe(3);
+    // 验证 4 个设置项：页签打开、删除提示、开启日志、图片编辑器工具栏
+    expect(addedItems.length).toBe(4);
 
-    for (const item of addedItems) {
+    // 前 3 项为开关卡片
+    for (let i = 0; i < 3; i++) {
+      const item = addedItems[i];
       expect(item.direction).toBe('row');
 
       const card = item.createActionElement() as HTMLElement;
@@ -56,7 +61,28 @@ describe('setting auto save behavior and layout', () => {
       expect(card.classList.contains('is-checked')).toBe(!wasChecked);
     }
 
-    expect(plugin.saveData).toHaveBeenCalledTimes(3);
+    // 第 4 项为图片编辑器工具栏配置
+    const toolsItem = addedItems[3];
+    expect(toolsItem.direction).toBe('column');
+    const toolsContainer = toolsItem.createActionElement() as HTMLElement;
+    expect(toolsContainer.classList.contains('am-setting-tools-container')).toBe(true);
+
+    const toolChips = toolsContainer.querySelectorAll('.am-setting-tool-chip');
+    expect(toolChips.length).toBe(ALL_IMAGE_EDITOR_TOOLS.length);
+
+    // 验证 mask 和 filter 对应的 chip 默认没有 is-checked
+    const maskChip = Array.from(toolChips).find(c => c.textContent?.includes('蒙版'));
+    expect(maskChip).toBeDefined();
+    expect(maskChip!.classList.contains('is-checked')).toBe(false);
+
+    // 模拟勾选 mask
+    const maskCheckbox = maskChip!.querySelector('input')!;
+    maskCheckbox.checked = true;
+    maskCheckbox.dispatchEvent(new Event('change'));
+    expect(maskChip!.classList.contains('is-checked')).toBe(true);
+    expect(plugin.settings.imageEditorTools.includes('mask')).toBe(true);
+
+    expect(plugin.saveData).toHaveBeenCalledTimes(4);
     expect(plugin.saveData).toHaveBeenLastCalledWith("config.json", plugin.settings);
     expect(plugin.settings.openInTab).toBe(true);
   });
