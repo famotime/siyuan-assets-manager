@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as siyuan from 'siyuan';
-import AssetsManagerPlugin from '../src/index';
+import AssetsManagerPlugin, { tabAppMap } from '../src/index';
 
 describe('setting auto save behavior and layout', () => {
   it('instantiates Setting with 680px width, renders interactive cards, and auto-saves on change', () => {
@@ -61,7 +61,7 @@ describe('setting auto save behavior and layout', () => {
     expect(plugin.settings.openInTab).toBe(true);
   });
 
-  it('registers custom tab in onload and handles init / destroy correctly', async () => {
+  it('registers custom tab in onload and handles init / destroy correctly without contaminating custom.data', async () => {
     let tabOptions: any;
     const plugin = new AssetsManagerPlugin();
     plugin.addTab = vi.fn((opts) => {
@@ -77,16 +77,37 @@ describe('setting auto save behavior and layout', () => {
     expect(tabOptions.type).toBe('assets_manager_tab');
     expect(typeof tabOptions.init).toBe('function');
     expect(typeof tabOptions.destroy).toBe('function');
+    expect(typeof tabOptions.beforeDestroy).toBe('function');
 
     const dummyElement = document.createElement('div');
     const dummyCustom = {
       element: dummyElement,
-      data: {} as any,
+      data: {
+        tabApp: { fake: 'legacy-circular-object' },
+      } as any,
     };
     tabOptions.init.call(dummyCustom);
-    expect(dummyCustom.data.tabApp).toBeDefined();
 
+    // 核心验证：custom.data 绝不能包含 tabApp，且必须可以被安全地 JSON.stringify
+    expect(dummyCustom.data.tabApp).toBeUndefined();
+    expect(() => JSON.stringify(dummyCustom.data)).not.toThrow();
+
+    // 验证挂载成功并被记录在 tabAppMap 中
+    const app = tabAppMap.get(dummyCustom);
+    expect(app).toBeDefined();
+
+    // 验证 DOM 挂载
+    const containerDiv = dummyElement.querySelector('.am-tab-container');
+    expect(containerDiv).not.toBeNull();
+
+    // 验证 beforeDestroy 会防御性清理
+    dummyCustom.data.tabApp = { fake: 're-injected' };
+    tabOptions.beforeDestroy.call(dummyCustom);
+    expect(dummyCustom.data.tabApp).toBeUndefined();
+
+    // 验证 destroy 正确卸载
     tabOptions.destroy.call(dummyCustom);
+    expect(tabAppMap.get(dummyCustom)).toBeUndefined();
   });
 
   it('toggles dialog when openInTab is false, and calls openTab when openInTab is true', async () => {

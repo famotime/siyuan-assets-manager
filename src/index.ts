@@ -26,6 +26,8 @@ const {
   version,
 } = PluginInfo
 
+export const tabAppMap = new WeakMap<object, ReturnType<typeof createApp>>();
+
 export default class AssetsManagerPlugin extends Plugin {
   // Run as mobile
   public isMobile: boolean
@@ -52,7 +54,12 @@ export default class AssetsManagerPlugin extends Plugin {
       type: ASSETS_MANAGER_TAB_TYPE,
       init(this: any) {
         const custom = this;
-        if (custom.element) {
+        // 防御性移除遗留属性，确保 custom.data 永远保持纯净可 JSON 序列化
+        if (custom?.data && 'tabApp' in custom.data) {
+          delete custom.data.tabApp;
+        }
+
+        if (custom?.element) {
           custom.element.style.height = "100%";
           custom.element.style.width = "100%";
           custom.element.style.overflow = "hidden";
@@ -60,6 +67,7 @@ export default class AssetsManagerPlugin extends Plugin {
           custom.element.style.flexDirection = "column";
 
           const tabDiv = document.createElement("div");
+          tabDiv.className = "am-tab-container";
           tabDiv.style.height = "100%";
           tabDiv.style.width = "100%";
           tabDiv.style.overflow = "hidden";
@@ -71,12 +79,34 @@ export default class AssetsManagerPlugin extends Plugin {
             isTabMode: true,
           });
           tabApp.mount(tabDiv);
-          custom.data = Object.assign({}, custom.data, { tabApp });
+
+          // 绝不能将 tabApp 存入 custom.data，因为思源会将 tab.data 进行 JSON.stringify 序列化保存工作区布局。
+          // 存入 Vue 根实例会导致循环引用异常并使页签无法关闭。
+          if (custom && typeof custom === 'object') {
+            tabAppMap.set(custom, tabApp);
+          }
+          (tabDiv as any).__am_tab_app__ = tabApp;
+        }
+      },
+      beforeDestroy(this: any) {
+        if (this?.data && 'tabApp' in this.data) {
+          delete this.data.tabApp;
         }
       },
       destroy(this: any) {
-        if (this?.data?.tabApp) {
-          this.data.tabApp.unmount();
+        if (this?.data && 'tabApp' in this.data) {
+          delete this.data.tabApp;
+        }
+        let tabApp = (this && typeof this === 'object') ? tabAppMap.get(this) : null;
+        if (!tabApp && this?.element) {
+          const tabDiv = this.element.querySelector?.('.am-tab-container') || this.element.firstElementChild;
+          tabApp = (tabDiv as any)?.__am_tab_app__;
+        }
+        if (tabApp) {
+          tabApp.unmount();
+          if (this && typeof this === 'object') {
+            tabAppMap.delete(this);
+          }
         }
       },
     });

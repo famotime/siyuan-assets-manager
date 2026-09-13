@@ -153,6 +153,7 @@ export default defineConfig(({
             }
             return assetInfo.name
           },
+          exports: "named",
         },
       },
     },
