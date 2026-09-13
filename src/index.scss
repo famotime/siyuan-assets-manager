@@ -168,12 +168,18 @@ svg.lucide {
   background: var(--b3-theme-background-light);
   color: var(--b3-theme-on-background);
   font-size: $font-size-base;
+  color-scheme: light dark;
   transition: all $transition-fast;
 
   &:focus {
     border-color: var(--b3-theme-primary);
     box-shadow: 0 0 0 2px rgba(var(--b3-theme-primary-rgb, 66, 133, 244), 0.2);
     outline: none;
+  }
+
+  option {
+    background-color: var(--b3-menu-background, var(--b3-theme-surface, #ffffff));
+    color: var(--b3-theme-on-background, #333333);
   }
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "siyuan-assets-manager",
   "author": "Quincy Zou",
-  "url": "https://github.com/Wetoria/siyuan-assets-manager",
+  "url": "https://github.com/famotime/siyuan-assets-manager",
   "version": "1.0.0",
   "minAppVersion": "2.10.14",
   "icon": "icon.webp",
@@ -20,18 +20,14 @@
   ],
   "displayName": {
     "default": "Assets Manager",
-    "en_US": "Assets Manager",
     "zh_CN": "资源管家"
   },
   "description": {
     "default": "Full lifecycle asset management with image vector secondary editing, deduplication, and orphan cleanup.",
-    "en_US": "Full lifecycle asset management with image vector secondary editing, deduplication, and orphan cleanup.",
     "zh_CN": "笔记内嵌图片、视频等资源的全生命周期管理，支持图片二次编辑、智能去重与孤儿资源清理。"
   },
   "readme": {
-    "default": "README.md",
-    "en_US": "README.md",
-    "zh_CN": "README_zh_CN.md"
+    "default": "README.md"
   },
   "keywords": [
     "图像编辑",

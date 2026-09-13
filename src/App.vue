@@ -106,7 +106,7 @@ onMounted(() => {
   if (typeof plugin?.addTopBar === 'function') {
     plugin.addTopBar({
       icon: 'iconAssetsManager',
-      title: '资源管家',
+      title: (plugin as any)?.i18n?.addTopBarIcon || '资源管家',
       callback: () => {
         handleToggleAssetsManager();
       },
