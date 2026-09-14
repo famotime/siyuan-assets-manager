@@ -21,6 +21,7 @@ import {
   cleanupOrphanOriginals,
   formatReadableDocPath,
 } from '../src/utils/siyuan-db'
+import { filterAssets, calculateTotalCleanup } from '../src/utils/asset-list'
 
 const readDirMock = vi.mocked(readDir)
 const removeFileMock = vi.mocked(removeFile)
@@ -350,5 +351,129 @@ describe('siyuan asset database helpers', () => {
     const { orphans, totalCount } = await getOrphanOriginals()
     expect(totalCount).toBe(1)
     expect(orphans[0].name).toBe('my_orig.png')
+  })
+
+  it('keeps original image as active (not orphan, not in unreferenced, not in cleanup) when edited image has document references', async () => {
+    readDirMock.mockImplementation(async (path: string) => {
+      if (path === '/data/assets') {
+        return [{ name: 'annotated_2.png', size: 500, updated: 1, isDir: false }]
+      }
+      if (path.includes('originals')) {
+        return [{ name: 'my_orig_2.png', size: 1200, updated: 2, isDir: false }]
+      }
+      return []
+    })
+
+    sqlMock.mockImplementation(async (query: string) => {
+      if (query.includes('custom-asset-reedit')) {
+        return [
+          {
+            id: 'b-attr-1',
+            root_id: 'doc-attr',
+            ial: '{: id="b-attr-1" custom-asset-reedit="{\\"version\\":1,\\"originalStoragePath\\":\\"storage/petal/siyuan-assets-manager/originals/my_orig_2.png\\",\\"renderedAssetName\\":\\"annotated_2.png\\",\\"canvasSize\\":{\\"width\\":100,\\"height\\":100},\\"compressed\\":false,\\"vectorData\\":{\\"objects\\":[]},\\"updatedAt\\":123}"}',
+          },
+        ]
+      }
+      // 模拟编辑后图片被两个不同的文档块引用（块 ID 与属性绑定的 b-attr-1 不同，例如被复制或移动）
+      return [
+        {
+          id: 'b-content-1',
+          root_id: 'doc-1',
+          box: 'box1',
+          content: '',
+          markdown: '![edit](assets/annotated_2.png)',
+          path: '/doc1.sy',
+        },
+        {
+          id: 'b-content-2',
+          root_id: 'doc-2',
+          box: 'box2',
+          content: '',
+          markdown: '![edit2](assets/annotated_2.png)',
+          path: '/doc2.sy',
+        },
+      ]
+    })
+
+    // 1. 验证 getAllAssetsInfo 正确聚合引用
+    const allAssets = await getAllAssetsInfo()
+    expect(allAssets).toHaveLength(2)
+
+    const origAsset = allAssets.find((a) => a.name === 'my_orig_2.png')
+    expect(origAsset).toBeDefined()
+    expect(origAsset?.isOriginal).toBe(true)
+    expect(origAsset?.docCount).toBe(2)
+    expect(origAsset?.refCount).toBe(2)
+    expect(origAsset?.references.map((r) => r.id)).toEqual(['b-content-1', 'b-content-2'])
+
+    // 2. 验证 getOrphanOriginals 判定其为活跃文件（非孤立）
+    const { orphans, totalCount } = await getOrphanOriginals()
+    expect(totalCount).toBe(0)
+    expect(orphans).toHaveLength(0)
+
+    // 3. 验证未引用筛选条件下不包含该原始底图
+    const unreferencedList = filterAssets(allAssets, {
+      searchQuery: '',
+      filterType: 'unreferenced',
+    })
+    expect(unreferencedList.some((a) => a.name === 'my_orig_2.png')).toBe(false)
+
+    // 4. 验证一键清理汇总中不包含该原始底图
+    const cleanupSummary = calculateTotalCleanup(allAssets)
+    expect(cleanupSummary.orphanOriginalsCount).toBe(0)
+    expect(cleanupSummary.orphanOriginals.some((a) => a.name === 'my_orig_2.png')).toBe(false)
+
+    // 5. 验证 getAssetInfoByName 单查同样具有正确的文档引用数
+    const singleOrigInfo = await getAssetInfoByName('my_orig_2.png')
+    expect(singleOrigInfo?.docCount).toBe(2)
+    expect(singleOrigInfo?.refCount).toBe(2)
+  })
+
+  it('identifies original image as orphan when edited image has 0 document references', async () => {
+    readDirMock.mockImplementation(async (path: string) => {
+      if (path === '/data/assets') {
+        return [{ name: 'unreferenced_edit.png', size: 500, updated: 1, isDir: false }]
+      }
+      if (path.includes('originals')) {
+        return [{ name: 'orphan_orig.png', size: 1200, updated: 2, isDir: false }]
+      }
+      return []
+    })
+
+    sqlMock.mockImplementation(async (query: string) => {
+      if (query.includes('custom-asset-reedit')) {
+        return [
+          {
+            id: 'b-attr-old',
+            root_id: 'doc-attr',
+            ial: '{: id="b-attr-old" custom-asset-reedit="{\\"version\\":1,\\"originalStoragePath\\":\\"storage/petal/siyuan-assets-manager/originals/orphan_orig.png\\",\\"renderedAssetName\\":\\"unreferenced_edit.png\\",\\"canvasSize\\":{\\"width\\":100,\\"height\\":100},\\"compressed\\":false,\\"vectorData\\":{\\"objects\\":[]},\\"updatedAt\\":123}"}',
+          },
+        ]
+      }
+      // 数据库中没有任何块引用 unreferenced_edit.png
+      return []
+    })
+
+    const allAssets = await getAllAssetsInfo()
+    const origAsset = allAssets.find((a) => a.name === 'orphan_orig.png')
+    expect(origAsset).toBeDefined()
+    expect(origAsset?.docCount).toBe(0)
+
+    // 孤立底图扫描应识别为孤立
+    const { orphans, totalCount } = await getOrphanOriginals()
+    expect(totalCount).toBe(1)
+    expect(orphans[0].name).toBe('orphan_orig.png')
+
+    // 未引用筛选应包含此孤立底图
+    const unreferencedList = filterAssets(allAssets, {
+      searchQuery: '',
+      filterType: 'unreferenced',
+    })
+    expect(unreferencedList.some((a) => a.name === 'orphan_orig.png')).toBe(true)
+
+    // 清理汇总中应将其包含在 orphanOriginals
+    const cleanupSummary = calculateTotalCleanup(allAssets)
+    expect(cleanupSummary.orphanOriginalsCount).toBe(1)
+    expect(cleanupSummary.orphanOriginals[0].name).toBe('orphan_orig.png')
   })
 })

@@ -129,7 +129,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
 import { Files, Image, FileText, Music, Video, Archive } from 'lucide-vue-next';
 import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
-import { deleteOriginalImage, readOriginalImage } from '../utils/file-system';
+import { deleteOriginalImage, readOriginalImage, normalizeOriginalStoragePath } from '../utils/file-system';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
 import {
   calculateBatchDeleteSummary,
@@ -415,6 +415,24 @@ function applyTargetedAssetUpdate(detail: AssetTargetedUpdateDetail) {
       nextSet.add(newName);
       selectedNames.value = nextSet;
     }
+
+    // 同步更新关联的原始底图引用状态
+    const finalOrigPath = updatedItem.originalStoragePath;
+    if (finalOrigPath) {
+      const normOrig = normalizeOriginalStoragePath(finalOrigPath);
+      const origIndex = list.findIndex(
+        (a) => a.isOriginal && normalizeOriginalStoragePath(a.originalStoragePath || a.name) === normOrig
+      );
+      if (origIndex !== -1) {
+        list[origIndex] = {
+          ...list[origIndex],
+          references: [...references],
+          refCount: references.length,
+          docCount,
+        };
+      }
+    }
+
     assets.value = list;
     return;
   }
@@ -458,6 +476,24 @@ function applyTargetedAssetUpdate(detail: AssetTargetedUpdateDetail) {
       nextSet.add(newName);
       selectedNames.value = nextSet;
     }
+
+    // 同步更新关联的原始底图引用状态
+    const finalOrigPath = newItem.originalStoragePath;
+    if (finalOrigPath) {
+      const normOrig = normalizeOriginalStoragePath(finalOrigPath);
+      const origIndex = list.findIndex(
+        (a) => a.isOriginal && normalizeOriginalStoragePath(a.originalStoragePath || a.name) === normOrig
+      );
+      if (origIndex !== -1) {
+        list[origIndex] = {
+          ...list[origIndex],
+          references: [...references],
+          refCount: references.length,
+          docCount,
+        };
+      }
+    }
+
     assets.value = list;
   }
 }

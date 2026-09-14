@@ -243,9 +243,8 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
           continue;
         }
 
-        // 关键校验 2：该文档块必须有效引用了此渲染图片（未在文档中被删除）
-        const matchedBlockRef = renderedAsset.references.find((r) => r.id === item.blockId);
-        if (!matchedBlockRef) {
+        // 关键校验 2：只要对应的编辑后图片仍有文档引用，底图就继承该编辑后图片的所有有效引用
+        if (!renderedAsset.references || renderedAsset.references.length === 0) {
           continue;
         }
 
@@ -255,7 +254,32 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
           originalToRefsMap.set(normPath, refs);
         }
 
-        refs.push(matchedBlockRef);
+        for (const ref of renderedAsset.references) {
+          if (!refs.some((r) => r.id === ref.id)) {
+            refs.push(ref);
+          }
+        }
+      }
+
+      // 补充遍历 assetsMap 中具备 originalStoragePath 的资产（双向保障，防止块属性由于文档变动丢失）
+      for (const asset of assetsMap.values()) {
+        if (!asset.originalStoragePath || !asset.references || asset.references.length === 0) {
+          continue;
+        }
+        const normPath = normalizeOriginalStoragePath(asset.originalStoragePath);
+        if (!normPath) continue;
+
+        let refs = originalToRefsMap.get(normPath);
+        if (!refs) {
+          refs = [];
+          originalToRefsMap.set(normPath, refs);
+        }
+
+        for (const ref of asset.references) {
+          if (!refs.some((r) => r.id === ref.id)) {
+            refs.push(ref);
+          }
+        }
       }
 
       for (const orig of originalFiles) {
@@ -311,24 +335,32 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
         `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 100000`
       );
 
+      // 获取当前 assets 物理文件集合，确保对应的编辑后图片真实存在且未被删除
+      const files: any[] = (await readDir("/data/assets")) || [];
+      const existingAssetNames = new Set(files.filter((f) => !f.isDir).map((f) => f.name));
+
       for (const item of reEditBlocks) {
         if (normalizeOriginalStoragePath(item.metadata.originalStoragePath) === normOrigPath) {
           const renderedName = item.metadata.renderedAssetName;
-          if (!renderedName) continue;
+          if (!renderedName || !existingAssetNames.has(renderedName)) continue;
 
-          // 验证该 block 是否仍然存在并包含对 renderedName 的有效引用
-          const matchedBlock = blocks?.find(
-            (b: any) => b.id === item.blockId && b.markdown && b.markdown.includes(`assets/${renderedName}`)
-          );
-          if (matchedBlock) {
-            refs.push({
-              id: item.blockId,
-              root_id: item.rootId,
-              box: matchedBlock.box || '',
-              content: matchedBlock.content || '',
-              markdown: matchedBlock.markdown || '',
-              path: matchedBlock.path || '',
-            });
+          // 只要编辑后图片在任何文档块中仍有引用，均收集为底图的有效引用
+          if (blocks && Array.isArray(blocks)) {
+            for (const b of blocks) {
+              const names = extractAssetNamesFromMarkdown(b.markdown || '');
+              if (names.includes(renderedName)) {
+                if (!refs.some((r) => r.id === b.id)) {
+                  refs.push({
+                    id: b.id,
+                    root_id: b.root_id,
+                    box: b.box || '',
+                    content: b.content || '',
+                    markdown: b.markdown || '',
+                    path: b.path || '',
+                  });
+                }
+              }
+            }
           }
         }
       }
@@ -473,10 +505,13 @@ export async function getOrphanOriginals(): Promise<{
     const blocks: any[] = await sql(
       `SELECT id, markdown FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
     );
-    const blockMap = new Map<string, string>();
+    const referencedAssetNames = new Set<string>();
     if (blocks && Array.isArray(blocks)) {
       for (const b of blocks) {
-        blockMap.set(b.id, b.markdown || '');
+        const names = extractAssetNamesFromMarkdown(b.markdown || '');
+        for (const name of names) {
+          referencedAssetNames.add(name);
+        }
       }
     }
 
@@ -487,12 +522,9 @@ export async function getOrphanOriginals(): Promise<{
       const origPath = normalizeOriginalStoragePath(b.metadata.originalStoragePath);
       if (!origPath || !renderedName) continue;
 
-      // 仅当渲染图片物理存在且对应块仍然包含该图片引用时，底图才算活跃（非孤立）
-      if (existingAssetNames.has(renderedName)) {
-        const md = blockMap.get(b.blockId);
-        if (md && md.includes(`assets/${renderedName}`)) {
-          activePaths.add(origPath);
-        }
+      // 只要对应的编辑后图片物理存在，且仍有文档引用，则该原始底图活跃（非孤立）
+      if (existingAssetNames.has(renderedName) && referencedAssetNames.has(renderedName)) {
+        activePaths.add(origPath);
       }
     }
 
