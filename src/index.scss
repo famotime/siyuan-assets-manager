@@ -183,6 +183,42 @@ svg.lucide {
   }
 }
 
+// ===== 输入框组（支持不可修改的固定后缀 Addon） =====
+.am-input-group {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+
+  .am-input {
+    flex: 1;
+    min-width: 0;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+
+    &:focus {
+      z-index: 1;
+    }
+  }
+
+  &__addon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 13px;
+    color: var(--b3-theme-on-surface-light);
+    background-color: var(--b3-theme-surface-lighter);
+    border: 1px solid var(--b3-theme-surface-lighter);
+    border-left: none;
+    border-top-right-radius: $radius-sm;
+    border-bottom-right-radius: $radius-sm;
+    user-select: none;
+    white-space: nowrap;
+    box-sizing: border-box;
+  }
+}
+
 // ===== 按钮系统 =====
 .am-btn {
   cursor: pointer;
@@ -204,6 +240,42 @@ svg.lucide {
 
   &:hover {
     background-color: var(--b3-theme-surface-lighter);
+  }
+
+  // 图标按钮
+  &--icon {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background-color: transparent;
+    color: var(--b3-theme-on-surface-light);
+    border: 1px solid transparent;
+
+    &:hover {
+      background-color: var(--b3-theme-surface-lighter);
+      color: var(--b3-theme-on-surface);
+    }
+
+    svg {
+      fill: none !important;
+      stroke: currentColor !important;
+      stroke-width: 2px !important;
+    }
+
+    // 危险/破坏性操作图标按钮（红色警示）
+    &-danger {
+      color: var(--b3-theme-error);
+
+      &:hover {
+        background-color: rgba(var(--b3-theme-error-rgb, 210, 63, 49), 0.12);
+        color: var(--b3-theme-error);
+      }
+
+      &:active {
+        background-color: rgba(var(--b3-theme-error-rgb, 210, 63, 49), 0.22);
+        transform: scale(0.95);
+      }
+    }
   }
 
   // 小尺寸（列表内操作按钮）
@@ -430,6 +502,24 @@ body > svg:not([class]):not([id]) {
   overflow: hidden !important;
   pointer-events: none !important;
   visibility: hidden !important;
+}
+
+// ===== 思源 Tooltips 防遮挡优化 =====
+// 靠近右上角的按钮使用 b3-tooltips__sw 时，确保气泡向左下方展开，不超出弹窗右侧边缘
+.b3-tooltips__sw {
+  &::after {
+    left: auto !important;
+    right: 0 !important;
+    transform: none !important;
+    white-space: nowrap !important;
+    z-index: 1001 !important;
+  }
+  &::before {
+    left: auto !important;
+    right: 8px !important;
+    transform: none !important;
+    z-index: 1001 !important;
+  }
 }
 
 

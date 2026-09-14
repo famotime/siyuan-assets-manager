@@ -8,6 +8,7 @@ describe('asset action helpers', () => {
   it('builds edited asset names from original extension and timestamp', () => {
     expect(buildEditedAssetName('image.png', 123)).toBe('image_edited_123.png')
     expect(buildEditedAssetName('image_edited_123.png', 456)).toBe('image_edited_456.png')
+    expect(buildEditedAssetName('640_4-20250618234728-gqwfpre_edited_1789284289907_edited_1789284310564_edited_1789285995699.png', 999)).toBe('640_4-20250618234728-gqwfpre_edited_999.png')
     expect(buildEditedAssetName('noext', 123)).toBe('_edited_123.noext')
   })
 

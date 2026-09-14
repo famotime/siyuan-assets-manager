@@ -2,28 +2,28 @@
   <div v-if="visible" class="am-dialog-overlay" style="z-index: 1000;">
     <div class="am-dialog image-editor-dialog-content" :style="{ width: dialogWidth, height: dialogHeight }">
       <div class="am-dialog__header">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <h3>编辑图片: {{ assetName }}</h3>
-          <span v-if="isReEditMode" class="reedit-badge" title="当前处于二次编辑模式，图层为可交互矢量状态">二次编辑模式</span>
+        <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; margin-right: 12px;">
+          <h3 class="editor-header-title" :title="`编辑图片: ${assetName}`">编辑图片: {{ assetName }}</h3>
+          <span v-if="isReEditMode" class="reedit-badge b3-tooltips b3-tooltips__s" aria-label="当前处于二次编辑模式，图层为可交互矢量状态">二次编辑模式</span>
         </div>
-        <div class="header-actions" style="display: flex; align-items: center; gap: 8px;">
+        <div class="header-actions" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
           <button 
             v-if="isReEditMode" 
-            class="am-btn am-btn--ghost am-btn--sm" 
+            class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw" 
             @click="handleResetOriginal" 
-            title="清空当前所有矢量标注，恢复干净原始底图"
+            aria-label="重置为原始底图（清空所有矢量标注）"
           >
-            重置为原始底图
+            <RotateCcw :size="16" />
           </button>
           <button 
             v-if="isReEditMode" 
-            class="am-btn am-btn--ghost am-btn--sm" 
+            class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw" 
             @click="handleFlattenLayers" 
-            title="将图层合并固化为普通图片（移除二次编辑元数据）"
+            aria-label="合并固化图层（转换为普通图片，移除二次编辑数据）"
           >
-            合并固化图层
+            <Layers :size="16" />
           </button>
-          <button class="am-dialog__close" @click="close" aria-label="关闭">
+          <button class="am-dialog__close b3-tooltips b3-tooltips__sw" @click="close" aria-label="关闭">
             <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
@@ -45,6 +45,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onUnmounted } from 'vue';
+import { RotateCcw, Layers } from 'lucide-vue-next';
 import { getImageEditor, extractVectorDataFromTui, applyVectorDataToTui, getFabricCanvasFromTui } from '../utils/tui-image-editor-bridge';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile, readOriginalImage } from '../utils/file-system';
@@ -458,6 +459,15 @@ async function save() {
   min-height: 400px;
   max-width: 95vw;
   max-height: 95vh;
+}
+
+.editor-header-title {
+  margin: 0;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
 }
 
 .reedit-badge {

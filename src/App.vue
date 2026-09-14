@@ -22,7 +22,7 @@
 
   <!-- 全局重命名弹窗 -->
   <div v-if="globalRenameVisible && globalRenameAsset" class="am-dialog-overlay" style="z-index: 1100;">
-    <div class="am-dialog" style="width: 400px; max-width: 90vw;">
+    <div class="am-dialog" style="width: 420px; max-width: 90vw;">
       <div class="am-dialog__header">
         <h3>重命名资源</h3>
         <button class="am-dialog__close" @click="closeGlobalRenameDialog" aria-label="关闭">
@@ -37,14 +37,18 @@
           原文件名: <strong>{{ globalRenameAsset.name }}</strong>
         </div>
         <div class="form-item">
-          <label style="display: block; margin-bottom: 8px; font-weight: bold; font-size: 13px;">新文件名 (需保留相同的后缀名):</label>
-          <input 
-            v-model="globalRenameNewName" 
-            type="text" 
-            class="am-input" 
-            style="width: 100%;"
-            @keyup.enter="submitGlobalRename"
-          />
+          <label style="display: block; margin-bottom: 8px; font-weight: bold; font-size: 13px;">新文件名:</label>
+          <div class="am-input-group">
+            <input 
+              v-model="globalRenameBaseName" 
+              type="text" 
+              class="am-input" 
+              placeholder="请输入新文件名"
+              autofocus
+              @keyup.enter="submitGlobalRename"
+            />
+            <span v-if="globalRenameExt" class="am-input-group__addon">.{{ globalRenameExt }}</span>
+          </div>
         </div>
       </div>
       <div class="am-dialog__footer">
@@ -65,6 +69,7 @@ import ImageEditorDialog from './components/ImageEditorDialog.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import { getAssetInfoByName, type AssetInfo } from './utils/siyuan-db';
 import { executeSaveEditedAssetWorkflow, executeRenameAssetWorkflow } from './utils/asset-workflow';
+import { splitFileName } from './utils/asset-list';
 import { showConfirm } from './utils/confirm';
 import { pushMsg } from './api';
 import { error } from './utils/logger';
@@ -80,7 +85,8 @@ const globalEditorBlockId = ref<string | undefined>(undefined);
 // 全局重命名状态
 const globalRenameVisible = ref(false);
 const globalRenameAsset = ref<AssetInfo | null>(null);
-const globalRenameNewName = ref('');
+const globalRenameBaseName = ref('');
+const globalRenameExt = ref('');
 
 const handleToggleAssetsManager = () => {
   const pluginInstance = plugin as any;
@@ -129,7 +135,9 @@ onMounted(() => {
   (window as any)._siyuan_assets_manager_open_rename = async (assetOrName: string | AssetInfo) => {
     if (typeof assetOrName === 'object' && assetOrName !== null && 'name' in assetOrName) {
       globalRenameAsset.value = assetOrName;
-      globalRenameNewName.value = assetOrName.name;
+      const { name, ext } = splitFileName(assetOrName.name);
+      globalRenameBaseName.value = name;
+      globalRenameExt.value = ext;
       globalRenameVisible.value = true;
       return;
     }
@@ -138,7 +146,9 @@ onMounted(() => {
       const assetInfo = await getAssetInfoByName(assetOrName);
       if (assetInfo) {
         globalRenameAsset.value = assetInfo;
-        globalRenameNewName.value = assetInfo.name;
+        const { name, ext } = splitFileName(assetInfo.name);
+        globalRenameBaseName.value = name;
+        globalRenameExt.value = ext;
         globalRenameVisible.value = true;
       } else {
         pushMsg("获取资源失败", 3000);
@@ -206,7 +216,8 @@ async function handleGlobalSaveEdited(payload: {
 function closeGlobalRenameDialog() {
   globalRenameVisible.value = false;
   globalRenameAsset.value = null;
-  globalRenameNewName.value = '';
+  globalRenameBaseName.value = '';
+  globalRenameExt.value = '';
 }
 
 async function submitGlobalRename() {
@@ -214,10 +225,19 @@ async function submitGlobalRename() {
   const asset = globalRenameAsset.value;
   const pluginInstance = usePlugin() as any;
 
+  const trimmedBase = globalRenameBaseName.value.trim();
+  if (!trimmedBase) {
+    pushMsg("文件名不能为空");
+    return;
+  }
+
+  // 拼接原扩展名，确保用户仅能修改文件名主体，不可修改后缀
+  const fullNewName = globalRenameExt.value ? `${trimmedBase}.${globalRenameExt.value}` : trimmedBase;
+
   try {
     const result = await executeRenameAssetWorkflow({
       asset,
-      newNameInput: globalRenameNewName.value,
+      newNameInput: fullNewName,
       promptOnDeleteOriginal: Boolean(pluginInstance?.settings?.promptOnDeleteOriginal),
       onConfirmExtChange: async (oldExt, newExt) => {
         return await showConfirm({

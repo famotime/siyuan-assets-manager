@@ -13,8 +13,8 @@ export function buildEditedAssetName(oldName: string, timestamp: number = Date.n
   const ext = oldName.split('.').pop()
   let baseName = oldName.substring(0, oldName.lastIndexOf('.'))
 
-  // 去除可能已存在的 _edited_\d+ 后缀，防止多次编辑造成文件名套娃
-  baseName = baseName.replace(/_edited_\d+$/, '')
+  // 清除所有已存在的 _edited_\d+ 标记，防止多次编辑造成文件名套娃，始终仅体现最后一次编辑时间
+  baseName = baseName.replace(/(_edited_\d+)+/g, '')
 
   return `${baseName}_edited_${timestamp}.${ext || 'png'}`
 }
