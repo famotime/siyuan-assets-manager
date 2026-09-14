@@ -89,6 +89,7 @@
 
     <div class="main-content" v-if="!loading">
       <VirtualAssetList 
+        ref="virtualListRef"
         :assets="sortedAssets"
         :sortField="sortField"
         :sortOrder="sortOrder"
@@ -199,6 +200,7 @@ const selectedNames = ref<Set<string>>(new Set());
 const selectedSummary = computed(() => calculateBatchDeleteSummary(assets.value, selectedNames.value));
 
 const containerEl = ref<HTMLElement | null>(null);
+const virtualListRef = ref<any>(null);
 
 // 悬浮大图预览相关状态
 const previewUrl = ref('');
@@ -242,7 +244,8 @@ async function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo,
         } catch (e) {}
       }
     } else {
-      previewUrl.value = `/assets/${asset.name}`;
+      const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
+      previewUrl.value = `/assets/${asset.name}${versionQuery}`;
     }
     positionPreview(mouseX.value, mouseY.value);
   }, 250);
@@ -339,8 +342,134 @@ async function loadData() {
   }
 }
 
-const handleGlobalRefresh = () => {
-  loadData();
+export interface AssetTargetedUpdateDetail {
+  action: 'rename' | 'edit';
+  oldName: string;
+  newName: string;
+  references?: any[];
+  updated?: number;
+  size?: number;
+  isReEditable?: boolean;
+  reEditBlockId?: string;
+  originalStoragePath?: string;
+  deletedOld?: boolean;
+}
+
+function applyTargetedAssetUpdate(detail: AssetTargetedUpdateDetail) {
+  const {
+    action,
+    oldName,
+    newName,
+    references = [],
+    updated = Date.now(),
+    size,
+    isReEditable,
+    reEditBlockId,
+    originalStoragePath,
+    deletedOld = true,
+  } = detail;
+
+  // 释放并失效旧的缩略图缓存
+  virtualListRef.value?.invalidateAssetThumbnail?.(oldName);
+  virtualListRef.value?.invalidateAssetThumbnail?.(newName);
+
+  const docCount = references.length;
+  const list = [...assets.value];
+  const oldIndex = list.findIndex(a => a.name === oldName);
+
+  if (action === 'rename') {
+    if (oldIndex !== -1) {
+      const oldItem = list[oldIndex];
+      const updatedItem: AssetInfo = {
+        ...oldItem,
+        name: newName,
+        updated,
+        references,
+        refCount: references.length,
+        docCount,
+        ...(size !== undefined && size > 0 ? { size } : {}),
+        ...(isReEditable !== undefined ? { isReEditable } : {}),
+        ...(reEditBlockId !== undefined ? { reEditBlockId } : {}),
+        ...(originalStoragePath !== undefined ? { originalStoragePath } : {}),
+      };
+      list[oldIndex] = updatedItem;
+    } else {
+      list.unshift({
+        name: newName,
+        size: size || 0,
+        updated,
+        isDir: false,
+        references,
+        refCount: references.length,
+        docCount,
+        isReEditable: Boolean(isReEditable),
+        reEditBlockId,
+        originalStoragePath,
+        isOriginal: false,
+      });
+    }
+
+    if (selectedNames.value.has(oldName)) {
+      const nextSet = new Set(selectedNames.value);
+      nextSet.delete(oldName);
+      nextSet.add(newName);
+      selectedNames.value = nextSet;
+    }
+    assets.value = list;
+    return;
+  }
+
+  if (action === 'edit') {
+    const newItem: AssetInfo = {
+      name: newName,
+      size: size || (oldIndex !== -1 ? list[oldIndex].size : 0),
+      updated,
+      isDir: false,
+      references,
+      refCount: references.length,
+      docCount,
+      isReEditable: isReEditable !== undefined ? isReEditable : true,
+      reEditBlockId,
+      originalStoragePath: originalStoragePath || (oldIndex !== -1 ? list[oldIndex].originalStoragePath : undefined),
+      isOriginal: false,
+    };
+
+    if (oldIndex !== -1) {
+      if (deletedOld) {
+        // 就地替换：在原有列表位置直接更新为新编辑图片，零跳动零闪烁
+        list[oldIndex] = newItem;
+      } else {
+        // 未删除旧文件时：旧文件的文档引用已转移给新图片，旧文件转为未引用
+        list[oldIndex] = {
+          ...list[oldIndex],
+          references: [],
+          refCount: 0,
+          docCount: 0,
+        };
+        list.splice(oldIndex, 0, newItem);
+      }
+    } else {
+      list.unshift(newItem);
+    }
+
+    if (deletedOld && selectedNames.value.has(oldName)) {
+      const nextSet = new Set(selectedNames.value);
+      nextSet.delete(oldName);
+      nextSet.add(newName);
+      selectedNames.value = nextSet;
+    }
+    assets.value = list;
+  }
+}
+
+const handleGlobalRefresh = (event?: Event) => {
+  const customEvt = event as CustomEvent<AssetTargetedUpdateDetail | undefined>;
+  const detail = customEvt?.detail;
+  if (detail && detail.oldName && detail.newName) {
+    applyTargetedAssetUpdate(detail);
+  } else {
+    loadData();
+  }
 };
 
 onMounted(() => {
@@ -535,7 +664,7 @@ async function handleBatchDelete() {
 
 function handleRename(asset: AssetInfo) {
   if ((window as any)._siyuan_assets_manager_open_rename) {
-    (window as any)._siyuan_assets_manager_open_rename(asset.name);
+    (window as any)._siyuan_assets_manager_open_rename(asset);
   }
 }
 

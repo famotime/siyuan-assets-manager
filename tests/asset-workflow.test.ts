@@ -47,6 +47,8 @@ describe('asset workflow', () => {
 
     expect(result.success).toBe(true)
     expect(result.newName).toContain('foo_edited_')
+    expect(result.references).toEqual([{ id: 'block-1', root_id: 'doc-1' }])
+    expect(result.updated).toBeGreaterThan(0)
     expect(saveAssetFile).toHaveBeenCalledTimes(1)
     expect(replaceAssetInBlocks).toHaveBeenCalledWith(
       [{ id: 'block-1', root_id: 'doc-1' }],
@@ -107,9 +109,19 @@ describe('asset workflow', () => {
     expect(result.deletedOld).toBe(true)
   })
 
-  it('handles rename workflow successfully and updates block references', async () => {
+  it('handles rename workflow successfully and updates block references and reedit metadata', async () => {
     const renameAssetFile = vi.fn().mockResolvedValue(true)
     const replaceAssetInBlocks = vi.fn().mockResolvedValue(undefined)
+    const getImageBlockReEditData = vi.fn().mockResolvedValue({
+      version: 1,
+      originalStoragePath: 'storage/petal/siyuan-assets-manager/originals/old.png',
+      renderedAssetName: 'old.png',
+      canvasSize: { width: 800, height: 600 },
+      compressed: false,
+      vectorData: { objects: [] },
+      updatedAt: 100,
+    })
+    const setImageBlockReEditData = vi.fn().mockResolvedValue(true)
 
     const asset: AssetInfo = {
       name: 'old.png',
@@ -119,11 +131,15 @@ describe('asset workflow', () => {
       references: [{ id: 'block-1', root_id: 'doc-1', box: '', content: '', markdown: '', path: '' }],
       refCount: 1,
       docCount: 1,
+      isReEditable: true,
+      reEditBlockId: 'block-1',
     }
 
     const deps: RenameWorkflowDeps = {
       renameAssetFile,
       replaceAssetInBlocks,
+      getImageBlockReEditData,
+      setImageBlockReEditData,
     }
 
     const result = await executeRenameAssetWorkflow(
@@ -139,7 +155,16 @@ describe('asset workflow', () => {
 
     expect(result.ok).toBe(true)
     expect(result.newName).toBe('renamed.png')
+    expect(result.references).toEqual(asset.references)
+    expect(result.updated).toBeGreaterThan(0)
     expect(renameAssetFile).toHaveBeenCalledWith('old.png', 'renamed.png', true)
     expect(replaceAssetInBlocks).toHaveBeenCalledWith(asset.references, 'old.png', 'renamed.png')
+    expect(getImageBlockReEditData).toHaveBeenCalledWith('block-1')
+    expect(setImageBlockReEditData).toHaveBeenCalledWith(
+      'block-1',
+      expect.objectContaining({
+        renderedAssetName: 'renamed.png',
+      }),
+    )
   })
 })

@@ -7,6 +7,7 @@ import {
 describe('asset action helpers', () => {
   it('builds edited asset names from original extension and timestamp', () => {
     expect(buildEditedAssetName('image.png', 123)).toBe('image_edited_123.png')
+    expect(buildEditedAssetName('image_edited_123.png', 456)).toBe('image_edited_456.png')
     expect(buildEditedAssetName('noext', 123)).toBe('_edited_123.noext')
   })
 

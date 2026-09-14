@@ -270,7 +270,8 @@ async function loadOriginalBlobUrl(asset: AssetInfo) {
 
 function getThumbnailSrc(asset: AssetInfo): string {
   if (!asset.isOriginal) {
-    return `/assets/${asset.name}`;
+    const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
+    return `/assets/${asset.name}${versionQuery}`;
   }
   if (originalBlobUrlMap.value[asset.name]) {
     return originalBlobUrlMap.value[asset.name];
@@ -278,6 +279,19 @@ function getThumbnailSrc(asset: AssetInfo): string {
   loadOriginalBlobUrl(asset);
   return '';
 }
+
+function invalidateAssetThumbnail(assetName: string) {
+  if (originalBlobUrlMap.value[assetName]) {
+    try {
+      URL.revokeObjectURL(originalBlobUrlMap.value[assetName]);
+    } catch (e) {}
+    delete originalBlobUrlMap.value[assetName];
+  }
+}
+
+defineExpose({
+  invalidateAssetThumbnail,
+});
 
 onUnmounted(() => {
   for (const url of Object.values(originalBlobUrlMap.value)) {

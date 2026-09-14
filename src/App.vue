@@ -125,11 +125,17 @@ onMounted(() => {
     globalEditorVisible.value = true;
   };
 
-  // 暴露全局重命名方法
-  (window as any)._siyuan_assets_manager_open_rename = async (assetName: string) => {
+  // 暴露全局重命名方法（支持直接传入 AssetInfo 避免冗余二次查询）
+  (window as any)._siyuan_assets_manager_open_rename = async (assetOrName: string | AssetInfo) => {
+    if (typeof assetOrName === 'object' && assetOrName !== null && 'name' in assetOrName) {
+      globalRenameAsset.value = assetOrName;
+      globalRenameNewName.value = assetOrName.name;
+      globalRenameVisible.value = true;
+      return;
+    }
     pushMsg("正在获取资源引用，请稍候...", 2000);
     try {
-      const assetInfo = await getAssetInfoByName(assetName);
+      const assetInfo = await getAssetInfoByName(assetOrName);
       if (assetInfo) {
         globalRenameAsset.value = assetInfo;
         globalRenameNewName.value = assetInfo.name;
@@ -175,7 +181,20 @@ async function handleGlobalSaveEdited(payload: {
 
     if (result.success) {
       pushMsg("编辑已成功保存并同步到所有引用文档！");
-      window.dispatchEvent(new CustomEvent('assets-manager-refresh'));
+      window.dispatchEvent(new CustomEvent('assets-manager-refresh', {
+        detail: {
+          action: 'edit',
+          oldName: payload.oldName,
+          newName: result.newName,
+          references: result.references || [],
+          size: result.size,
+          updated: result.updated,
+          isReEditable: result.isReEditable,
+          reEditBlockId: result.reEditBlockId,
+          originalStoragePath: result.originalPathSaved,
+          deletedOld: result.deletedOld,
+        }
+      }));
     }
   } catch (e) {
     error("Failed to save edited image:", e);
@@ -241,7 +260,20 @@ async function submitGlobalRename() {
       pushMsg("重命名成功！");
     }
 
-    window.dispatchEvent(new CustomEvent('assets-manager-refresh'));
+    window.dispatchEvent(new CustomEvent('assets-manager-refresh', {
+      detail: {
+        action: 'rename',
+        oldName: asset.name,
+        newName: result.newName,
+        references: result.references || asset.references || [],
+        updated: result.updated || Date.now(),
+        size: result.size !== undefined ? result.size : asset.size,
+        isReEditable: result.isReEditable !== undefined ? result.isReEditable : asset.isReEditable,
+        reEditBlockId: result.reEditBlockId || asset.reEditBlockId,
+        originalStoragePath: result.originalStoragePath || asset.originalStoragePath,
+        deletedOld: result.deletedOld,
+      }
+    }));
   } catch (e) {
     error("Failed to rename asset", e);
     pushMsg("重命名操作失败");

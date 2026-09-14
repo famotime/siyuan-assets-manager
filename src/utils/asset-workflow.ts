@@ -11,6 +11,7 @@ import {
 import {
   replaceAssetInBlocks as defaultReplaceAssetInBlocks,
   setImageBlockReEditData as defaultSetImageBlockReEditData,
+  getImageBlockReEditData as defaultGetImageBlockReEditData,
 } from './siyuan-block'
 import {
   getAssetInfoByName as defaultGetAssetInfoByName,
@@ -19,7 +20,7 @@ import {
   buildEditedAssetName,
   resolveRenameAssetName,
 } from './asset-actions'
-import { log, error } from './logger'
+import { log, warn, error } from './logger'
 
 export interface SaveEditedAssetParams {
   oldName: string
@@ -39,6 +40,11 @@ export interface SaveEditedAssetResult {
   targetBlockCount: number
   originalPathSaved: string
   deletedOld: boolean
+  references: BlockRef[]
+  size: number
+  updated: number
+  isReEditable: boolean
+  reEditBlockId?: string
 }
 
 export interface SaveEditedWorkflowDeps {
@@ -150,12 +156,20 @@ export async function executeSaveEditedAssetWorkflow(
     await deleteAssetFile(oldName)
   }
 
+  const updatedReferences: BlockRef[] = assetRecord?.references ? [...assetRecord.references] : []
+  const firstBlockId = targetBlockIds.size > 0 ? Array.from(targetBlockIds)[0] : undefined
+
   return {
     success: true,
     newName,
     targetBlockCount: targetBlockIds.size,
     originalPathSaved: finalOriginalPath,
     deletedOld: delOld,
+    references: updatedReferences,
+    size: blob.size,
+    updated: Date.now(),
+    isReEditable: Boolean(finalOriginalPath),
+    reEditBlockId: firstBlockId,
   }
 }
 
@@ -174,11 +188,19 @@ export interface RenameAssetWorkflowResult {
   newName?: string
   updatedBlockCount?: number
   deletedOld?: boolean
+  references?: BlockRef[]
+  updated?: number
+  size?: number
+  isReEditable?: boolean
+  reEditBlockId?: string
+  originalStoragePath?: string
 }
 
 export interface RenameWorkflowDeps {
   renameAssetFile?: typeof defaultRenameAssetFile
   replaceAssetInBlocks?: typeof defaultReplaceAssetInBlocks
+  getImageBlockReEditData?: typeof defaultGetImageBlockReEditData
+  setImageBlockReEditData?: typeof defaultSetImageBlockReEditData
 }
 
 /**
@@ -186,6 +208,7 @@ export interface RenameWorkflowDeps {
  * 1. 校验新文件名与扩展名合法性
  * 2. 物理重命名文件
  * 3. 联动更新文档中所有引用该资源的块
+ * 4. 同步更新关联块 custom-asset-reedit 自定义属性中的 renderedAssetName
  */
 export async function executeRenameAssetWorkflow(
   params: RenameAssetWorkflowParams,
@@ -201,6 +224,8 @@ export async function executeRenameAssetWorkflow(
 
   const renameAssetFile = deps.renameAssetFile || defaultRenameAssetFile
   const replaceAssetInBlocks = deps.replaceAssetInBlocks || defaultReplaceAssetInBlocks
+  const getImageBlockReEditData = deps.getImageBlockReEditData || defaultGetImageBlockReEditData
+  const setImageBlockReEditData = deps.setImageBlockReEditData || defaultSetImageBlockReEditData
 
   const oldName = asset.name
   const renameResult = await resolveRenameAssetName(
@@ -222,6 +247,12 @@ export async function executeRenameAssetWorkflow(
       changed: false,
       newName: oldName,
       updatedBlockCount: 0,
+      references: asset.references || [],
+      updated: asset.updated,
+      size: asset.size,
+      isReEditable: asset.isReEditable,
+      reEditBlockId: asset.reEditBlockId,
+      originalStoragePath: asset.originalStoragePath,
     }
   }
 
@@ -242,6 +273,21 @@ export async function executeRenameAssetWorkflow(
 
   if (asset.references && asset.references.length > 0) {
     await replaceAssetInBlocks(asset.references, oldName, newName)
+
+    // 同步更新关联块 custom-asset-reedit 自定义属性中的 renderedAssetName
+    for (const ref of asset.references) {
+      if (!ref.id) continue
+      try {
+        const meta = await getImageBlockReEditData(ref.id)
+        if (meta && (meta.renderedAssetName === oldName || !meta.renderedAssetName)) {
+          meta.renderedAssetName = newName
+          meta.updatedAt = Date.now()
+          await setImageBlockReEditData(ref.id, meta)
+        }
+      } catch (attrErr) {
+        warn(`[asset-workflow] 重命名更新块 ${ref.id} 二次编辑属性失败:`, attrErr)
+      }
+    }
   }
 
   return {
@@ -250,5 +296,11 @@ export async function executeRenameAssetWorkflow(
     newName,
     updatedBlockCount: asset.references?.length || 0,
     deletedOld: deleteOld,
+    references: asset.references || [],
+    updated: Date.now(),
+    size: asset.size,
+    isReEditable: asset.isReEditable,
+    reEditBlockId: asset.reEditBlockId,
+    originalStoragePath: asset.originalStoragePath,
   }
 }

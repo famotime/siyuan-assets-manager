@@ -11,7 +11,10 @@ export type RenameAssetNameResult =
 
 export function buildEditedAssetName(oldName: string, timestamp: number = Date.now()): string {
   const ext = oldName.split('.').pop()
-  const baseName = oldName.substring(0, oldName.lastIndexOf('.'))
+  let baseName = oldName.substring(0, oldName.lastIndexOf('.'))
+
+  // 去除可能已存在的 _edited_\d+ 后缀，防止多次编辑造成文件名套娃
+  baseName = baseName.replace(/_edited_\d+$/, '')
 
   return `${baseName}_edited_${timestamp}.${ext || 'png'}`
 }
