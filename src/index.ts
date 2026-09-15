@@ -137,7 +137,7 @@ export default class AssetsManagerPlugin extends Plugin {
   } = {
     promptOnDeleteOriginal: true,
     enableLogging: false,
-    openInTab: false,
+    openInTab: true,
     imageEditorTools: [...DEFAULT_IMAGE_EDITOR_TOOLS],
   }
 

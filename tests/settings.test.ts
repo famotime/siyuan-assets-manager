@@ -23,8 +23,8 @@ describe('setting auto save behavior and layout', () => {
     const plugin = new AssetsManagerPlugin();
     plugin.saveData = vi.fn().mockResolvedValue(undefined);
 
-    // 验证 openInTab 默认关闭，默认图片编辑器工具不包含 mask 和 filter
-    expect(plugin.settings.openInTab).toBe(false);
+    // 验证 openInTab 默认开启，默认图片编辑器工具不包含 mask 和 filter
+    expect(plugin.settings.openInTab).toBe(true);
     expect(plugin.settings.imageEditorTools).toEqual(DEFAULT_IMAGE_EDITOR_TOOLS);
     expect(plugin.settings.imageEditorTools.includes('mask')).toBe(false);
     expect(plugin.settings.imageEditorTools.includes('filter')).toBe(false);
@@ -84,7 +84,7 @@ describe('setting auto save behavior and layout', () => {
 
     expect(plugin.saveData).toHaveBeenCalledTimes(4);
     expect(plugin.saveData).toHaveBeenLastCalledWith("config.json", plugin.settings);
-    expect(plugin.settings.openInTab).toBe(true);
+    expect(plugin.settings.openInTab).toBe(false);
   });
 
   it('registers custom tab in onload and handles init / destroy correctly without contaminating custom.data', async () => {
@@ -146,13 +146,8 @@ describe('setting auto save behavior and layout', () => {
 
     await plugin.onload();
 
-    // 此时 openInTab 默认为 false
-    expect(plugin.settings.openInTab).toBe(false);
-    (window as any)._siyuan_assets_manager_toggle();
-    expect(openTabSpy).not.toHaveBeenCalled();
-
-    // 开启 openInTab
-    plugin.settings.openInTab = true;
+    // 此时 openInTab 默认为 true
+    expect(plugin.settings.openInTab).toBe(true);
     (window as any)._siyuan_assets_manager_toggle();
     expect(openTabSpy).toHaveBeenCalledTimes(1);
     expect(openTabSpy).toHaveBeenCalledWith(expect.objectContaining({
@@ -160,5 +155,11 @@ describe('setting auto save behavior and layout', () => {
         id: plugin.name + 'assets_manager_tab'
       })
     }));
+
+    // 关闭 openInTab 后，触发 toggle 将开启弹窗而不是页签
+    openTabSpy.mockClear();
+    plugin.settings.openInTab = false;
+    (window as any)._siyuan_assets_manager_toggle();
+    expect(openTabSpy).not.toHaveBeenCalled();
   });
 });

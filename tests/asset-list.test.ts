@@ -210,4 +210,14 @@ describe('asset list helpers', () => {
     expect(summary.referencedOriginalsCount).toBe(1) // orig_123.png (docCount = 1)
     expect(summary.totalSize).toBe(1024 * 1024 * 2 + 20 + 1024 * 500)
   })
+
+  it('ensures asset preview element in VirtualAssetList has hover preview event handlers', async () => {
+    const fs = await import('fs')
+    const path = await import('path')
+    const vueContent = fs.readFileSync(path.resolve(__dirname, '../src/components/VirtualAssetList.vue'), 'utf-8')
+    expect(vueContent).toContain('class="asset-preview"')
+    expect(vueContent).toMatch(/class="asset-preview"[\s\S]*?@mouseenter="\$emit\('show-preview'/)
+    expect(vueContent).toMatch(/class="asset-preview"[\s\S]*?@mousemove="\$emit\('update-preview'/)
+    expect(vueContent).toMatch(/class="asset-preview"[\s\S]*?@mouseleave="\$emit\('hide-preview'/)
+  })
 })

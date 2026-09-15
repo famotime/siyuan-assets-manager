@@ -48,7 +48,12 @@
             />
           </div>
 
-          <div class="asset-preview">
+          <div
+            class="asset-preview"
+            @mouseenter="$emit('show-preview', { event: $event, asset: item.data, previewSrc: getThumbnailSrc(item.data) })"
+            @mousemove="$emit('update-preview', { event: $event })"
+            @mouseleave="$emit('hide-preview')"
+          >
             <template v-if="isImage(item.data.name) || item.data.isOriginal">
               <img v-if="getThumbnailSrc(item.data)" :src="getThumbnailSrc(item.data)" />
               <div v-else class="preview-loading">...</div>
