@@ -57,6 +57,34 @@ const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'o
 const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v', '3gp', 'ts'])
 const ARCHIVE_EXTS = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz', '7zip'])
 
+/**
+ * 浏览器原生可直接播放解码的常见视频格式
+ */
+export const PLAYABLE_VIDEO_EXTS = new Set(['mp4', 'webm', 'm4v'])
+
+/**
+ * 浏览器原生可直接播放解码的常见音频格式
+ */
+export const PLAYABLE_AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus'])
+
+export function isPlayableVideoAsset(name: string): boolean {
+  const ext = getAssetExtension(name)
+  return PLAYABLE_VIDEO_EXTS.has(ext)
+}
+
+export function isPlayableAudioAsset(name: string): boolean {
+  const ext = getAssetExtension(name)
+  return PLAYABLE_AUDIO_EXTS.has(ext)
+}
+
+export function isPlayableMediaAsset(name: string): boolean {
+  return isPlayableVideoAsset(name) || isPlayableAudioAsset(name)
+}
+
+export function isPreviewableAsset(name: string, isOriginal?: boolean): boolean {
+  return Boolean(isOriginal) || isImageAsset(name) || isPlayableVideoAsset(name) || isPlayableAudioAsset(name)
+}
+
 export function isImageAsset(name: string): boolean {
   const ext = getAssetExtension(name)
   return IMAGE_EXTS.has(ext)

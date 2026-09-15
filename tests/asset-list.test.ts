@@ -11,6 +11,10 @@ import {
   getAssetBadgeText,
   getAssetCategory,
   getAssetExtension,
+  isPlayableAudioAsset,
+  isPlayableMediaAsset,
+  isPlayableVideoAsset,
+  isPreviewableAsset,
   sortAssets,
   splitFileName,
 } from '../src/utils/asset-list'
@@ -209,6 +213,39 @@ describe('asset list helpers', () => {
     expect(summary.referencedCount).toBe(1) // Beta.PNG (docCount = 2)
     expect(summary.referencedOriginalsCount).toBe(1) // orig_123.png (docCount = 1)
     expect(summary.totalSize).toBe(1024 * 1024 * 2 + 20 + 1024 * 500)
+  })
+
+  it('identifies playable video and audio assets correctly for preview', () => {
+    // 视频原生播放格式
+    expect(isPlayableVideoAsset('video.mp4')).toBe(true)
+    expect(isPlayableVideoAsset('clip.WEBM')).toBe(true)
+    expect(isPlayableVideoAsset('movie.m4v')).toBe(true)
+    expect(isPlayableVideoAsset('video.avi')).toBe(false)
+    expect(isPlayableVideoAsset('video.mkv')).toBe(false)
+    expect(isPlayableVideoAsset('video.flv')).toBe(false)
+
+    // 音频原生播放格式
+    expect(isPlayableAudioAsset('song.mp3')).toBe(true)
+    expect(isPlayableAudioAsset('voice.WAV')).toBe(true)
+    expect(isPlayableAudioAsset('track.ogg')).toBe(true)
+    expect(isPlayableAudioAsset('podcast.m4a')).toBe(true)
+    expect(isPlayableAudioAsset('lossless.flac')).toBe(true)
+    expect(isPlayableAudioAsset('record.aac')).toBe(true)
+    expect(isPlayableAudioAsset('voice.opus')).toBe(true)
+    expect(isPlayableAudioAsset('midi.mid')).toBe(false)
+    expect(isPlayableAudioAsset('song.wma')).toBe(false)
+
+    // 多媒体通用判断
+    expect(isPlayableMediaAsset('video.mp4')).toBe(true)
+    expect(isPlayableMediaAsset('song.mp3')).toBe(true)
+    expect(isPlayableMediaAsset('doc.pdf')).toBe(false)
+
+    // 综合可预览判断 (包含图片、原始底图、音视频)
+    expect(isPreviewableAsset('pic.png')).toBe(true)
+    expect(isPreviewableAsset('hidden_name', true)).toBe(true)
+    expect(isPreviewableAsset('sample.mp4')).toBe(true)
+    expect(isPreviewableAsset('sample.mp3')).toBe(true)
+    expect(isPreviewableAsset('notes.md')).toBe(false)
   })
 
   it('ensures asset preview element in VirtualAssetList has hover preview event handlers', async () => {
