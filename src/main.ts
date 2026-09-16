@@ -4,13 +4,10 @@ import {
 import { createApp } from 'vue'
 import App from './App.vue'
 import { getPluginAppElementId } from './utils/plugin-entry'
-let plugin = null
-export function usePlugin(pluginProps?: Plugin): Plugin {
-  if (pluginProps) {
-    plugin = pluginProps
-  }
-  return plugin;
-}
+import { usePlugin } from './utils/plugin-context'
+
+// 重新导出以保持既有 `@/main` 引用可用；工具模块请直接从 plugin-context 导入
+export { usePlugin }
 
 
 let app = null

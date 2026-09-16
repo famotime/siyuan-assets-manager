@@ -2,7 +2,7 @@ import { readAssetFile, deleteAsset } from './file-system';
 import { replaceAssetInBlocks, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
 import type { AssetInfo, BlockRef } from './siyuan-db';
 import type { IAssetReEditMetadata } from '../types/reedit';
-import { usePlugin } from '../main';
+import { usePlugin } from './plugin-context';
 import { log, warn, error } from './logger';
 
 export type DeduplicateMode = 'exact' | 'similar';

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { log, warn, error } from '../src/utils/logger';
-import { usePlugin } from '../src/main';
+import { usePlugin } from '../src/utils/plugin-context';
 
 describe('logger module', () => {
   let consoleLogSpy: any;

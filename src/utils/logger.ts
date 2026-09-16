@@ -1,4 +1,4 @@
-import { usePlugin } from '../main';
+import { usePlugin } from './plugin-context';
 
 function isLoggingEnabled(): boolean {
   try {
