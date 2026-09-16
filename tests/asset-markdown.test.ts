@@ -57,6 +57,16 @@ describe('asset markdown helpers', () => {
     ])
   })
 
+  it('extracts quoted attribute paths whose names contain apostrophes or brackets', () => {
+    expect(extractAssetNamesFromMarkdown('<img src="assets/it\'s.png" />')).toEqual(["it's.png"])
+    expect(extractAssetNamesFromMarkdown('<video src="assets/take[1].mp4"></video>')).toEqual([
+      'take[1].mp4',
+    ])
+    expect(extractAssetNamesFromMarkdown("<audio src='assets/clip.mp3'></audio>")).toEqual([
+      'clip.mp3',
+    ])
+  })
+
   it('replaces encoded and decoded asset names gracefully', () => {
     const markdown = '![img](assets/%E6%B5%8B%E8%AF%95.png) and ![plain](assets/测试.png)'
     expect(replaceAssetInMarkdown(markdown, '测试.png', 'new.png')).toBe(
@@ -84,5 +94,23 @@ describe('asset markdown helpers', () => {
       '',
       'plain ',
     ].join('\n'))
+  })
+
+  it('removes the whole HTML element that embeds the asset via src', () => {
+    expect(
+      removeAssetFromMarkdown('<video controls="controls" src="assets/movie.mp4"></video>', 'movie.mp4'),
+    ).toBe('')
+    expect(
+      removeAssetFromMarkdown('<audio controls="controls" src="assets/song.mp3"></audio>', 'song.mp3'),
+    ).toBe('')
+    expect(removeAssetFromMarkdown('<img src="assets/pic.png" />', 'pic.png')).toBe('')
+  })
+
+  it('keeps the element when only data-src points at the removed asset', () => {
+    // data-src 只是思源记录的原始文件名，删掉它不应该连整个播放器一起移除
+    const markdown = '<video src="assets/movie.mp4" data-src="assets/orig.mp4"></video>'
+    expect(removeAssetFromMarkdown(markdown, 'orig.mp4')).toBe(
+      '<video src="assets/movie.mp4" data-src=""></video>',
+    )
   })
 })

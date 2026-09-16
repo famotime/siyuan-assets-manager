@@ -509,6 +509,45 @@ describe('siyuan asset database helpers', () => {
     expect(cleanupSummary.orphanOriginals[0].name).toBe('orphan_orig.png')
   })
 
+  it('does not treat HTML-embedded video/audio references as orphans', async () => {
+    readDirMock.mockImplementation(async (path: string) => {
+      if (path === '/data/assets') {
+        return [
+          { name: 'movie.mp4', size: 900, updated: 1, isDir: false },
+          { name: 'song.mp3', size: 400, updated: 1, isDir: false },
+        ]
+      }
+      return []
+    })
+
+    sqlMock.mockImplementation(async (query: string) => {
+      if (query.includes('custom-asset-reedit')) {
+        return []
+      }
+      // 思源对视频/音频导出的是 HTML 标签，而不是 markdown 图片/链接
+      return [
+        {
+          id: 'b-media',
+          root_id: 'doc-1',
+          box: 'box1',
+          content: '',
+          markdown: [
+            '<video controls="controls" src="assets/movie.mp4"></video>',
+            '<audio controls="controls" src="assets/song.mp3"></audio>',
+          ].join('\n'),
+          path: '/doc1.sy',
+        },
+      ]
+    })
+
+    const allAssets = await getAllAssetsInfo()
+    expect(allAssets.find((a) => a.name === 'movie.mp4')?.docCount).toBe(1)
+    expect(allAssets.find((a) => a.name === 'song.mp3')?.docCount).toBe(1)
+
+    const cleanupSummary = calculateTotalCleanup(allAssets)
+    expect(cleanupSummary.unreferencedCount).toBe(0)
+  })
+
   it('does not treat an inline-referenced asset as an orphan that cleanup would delete', async () => {
     readDirMock.mockImplementation(async (path: string) => {
       if (path === '/data/assets') {

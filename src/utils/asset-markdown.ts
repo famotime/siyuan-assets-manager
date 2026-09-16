@@ -9,7 +9,18 @@ export function extractAssetNamesFromMarkdown(markdown: string): string[] {
     assets.push(...cleanAndDecodeAssetName(raw))
   }
 
-  const barePathRegex = /(?:^|[\s"'])assets\/([^\s"'\]\?#]+)/g
+  // 引号包裹的路径（HTML 属性形式，如 src="assets/x.png"）按配对的引号收尾。
+  // 思源对视频/音频/HTML 块导出的就是这种形式，文件名里的单引号、方括号
+  // 不能被当成终止符，否则会截出一个并不存在的名字，把资源误判成孤儿。
+  const quotedPathRegex = /(["'])assets\/(.*?)\1/g
+  let quotedMatch: RegExpExecArray | null
+  while ((quotedMatch = quotedPathRegex.exec(markdown)) !== null) {
+    assets.push(...cleanAndDecodeAssetName(quotedMatch[2]))
+  }
+
+  // 裸路径只认行首/空白分隔的情形；引号包裹的已经由上面的 quotedPathRegex 处理，
+  // 交叠匹配会因字符集把 it's.png 这类名字截成 "it"，产生指向不存在文件的假名字
+  const barePathRegex = /(?:^|\s)assets\/([^\s"'\]\?#]+)/g
   let bareMatch: RegExpExecArray | null
   while ((bareMatch = barePathRegex.exec(markdown)) !== null) {
     assets.push(...cleanAndDecodeAssetName(bareMatch[1]))
@@ -109,11 +120,25 @@ export function replaceAssetInMarkdown(markdown: string, oldAssetName: string, n
 
 export function removeAssetFromMarkdown(markdown: string, assetName: string): string {
   const escapedName = escapeRegExp(assetName)
+
+  // 思源把视频/音频/HTML 块导出为 <video src="assets/x.mp4"></video> 这类标签，
+  // 只靠 pathRegex 抹路径会在正文里留下 <video src=""></video> 这样的空播放器。
+  // 这里在 src 命中资源时整段移除元素；data-src 只是思源记录的原始文件名，
+  // 用 (?<![-\w]) 把它排除在外，删掉原始底图时不应连播放器一起删。
+  const htmlSrcAttr = `(?<![-\\w])src=["']assets/${escapedName}["']`
+  const htmlPairedRegex = new RegExp(
+    `<([a-zA-Z][\\w-]*)\\b[^>]*?${htmlSrcAttr}[^>]*>\\s*</\\1>`,
+    'g',
+  )
+  const htmlVoidRegex = new RegExp(`<[a-zA-Z][\\w-]*\\b[^>]*?${htmlSrcAttr}[^>]*/?>`, 'g')
+
   const imgRegex = new RegExp(`!\\[.*?\\]\\(assets/${escapedName}\\)(\\{.*?\\})?`, 'g')
   const linkRegex = new RegExp(`\\[.*?\\]\\(assets/${escapedName}\\)(\\{.*?\\})?`, 'g')
   const pathRegex = new RegExp(`assets/${escapedName}`, 'g')
 
   return markdown
+    .replace(htmlPairedRegex, '')
+    .replace(htmlVoidRegex, '')
     .replace(imgRegex, '')
     .replace(linkRegex, '')
     .replace(pathRegex, '')
