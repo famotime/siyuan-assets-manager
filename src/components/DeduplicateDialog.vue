@@ -303,20 +303,21 @@
                 </div>
 
                 <!-- 文档引用列表折叠 (非大图模式显示) -->
-                <div class="compare-card-refs" v-if="!maximizeImages && item.asset.references && item.asset.references.length > 0">
-                  <div class="refs-header">被以下文档引用 ({{ item.asset.references.length }}):</div>
+                <div class="compare-card-refs" v-if="!maximizeImages && docGroups(item.asset).length > 0">
+                  <div class="refs-header">被以下文档引用 ({{ docGroups(item.asset).length }}):</div>
                   <div class="refs-list">
                     <div
-                      v-for="ref in item.asset.references.slice(0, 3)"
-                      :key="ref.id"
+                      v-for="group in docGroups(item.asset).slice(0, 3)"
+                      :key="group.rootId"
                       class="ref-item"
-                      :title="`点击在后台打开文档: ${ref.readablePath || ref.hpath || ref.path || ref.id}`"
-                      @click="handleOpenDocRef(ref)"
+                      :title="`点击在后台打开文档: ${group.first.readablePath || group.first.hpath || group.first.path || group.first.id}`"
+                      @click="handleOpenDocRef(group.first)"
                     >
-                      📄 {{ ref.readablePath || ref.hpath || ref.path || ref.id }}
+                      <span class="ref-path">📄 {{ group.first.readablePath || group.first.hpath || group.first.path || group.first.id }}</span>
+                      <span v-if="group.refs.length > 1" class="ref-count">（{{ group.refs.length }} 处）</span>
                     </div>
-                    <div v-if="item.asset.references.length > 3" class="ref-more">
-                      ...等共 {{ item.asset.references.length }} 处
+                    <div v-if="docGroups(item.asset).length > 3" class="ref-more">
+                      ...等共 {{ docGroups(item.asset).length }} 篇文档
                     </div>
                   </div>
                 </div>
@@ -388,7 +389,7 @@ import {
   type IDeduplicateScanProgress,
   type IDeduplicateCache,
 } from '../utils/deduplicate';
-import { formatAssetSize, formatAssetTime, getAssetBadgeText } from '../utils/asset-list';
+import { formatAssetSize, formatAssetTime, getAssetBadgeText, groupReferencesByDoc } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { log, warn, error } from '../utils/logger';
@@ -781,6 +782,11 @@ async function handleBatchMerge() {
   } finally {
     isMerging.value = false;
   }
+}
+
+/** 按文档聚合引用，避免把同一篇文档的多个引用块显示成多篇文档 */
+function docGroups(asset: AssetInfo) {
+  return groupReferencesByDoc(asset.references || []);
 }
 
 /**
@@ -1446,14 +1452,26 @@ function handleClose() {
     }
 
     .ref-item {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
       color: var(--b3-theme-on-surface);
       cursor: pointer;
       padding: 1px 2px;
       border-radius: 3px;
       transition: all 0.15s ease;
+
+      .ref-path {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* 同一篇文档内的引用处数，不参与截断 */
+      .ref-count {
+        flex: none;
+        opacity: 0.65;
+      }
 
       &:hover {
         color: var(--b3-theme-primary);

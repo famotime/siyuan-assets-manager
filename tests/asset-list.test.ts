@@ -11,6 +11,7 @@ import {
   getAssetBadgeText,
   getAssetCategory,
   getAssetExtension,
+  groupReferencesByDoc,
   isPlayableAudioAsset,
   isPlayableMediaAsset,
   isPlayableVideoAsset,
@@ -18,7 +19,21 @@ import {
   sortAssets,
   splitFileName,
 } from '../src/utils/asset-list'
-import type { AssetInfo } from '../src/utils/siyuan-db'
+import type { AssetInfo, BlockRef } from '../src/utils/siyuan-db'
+import { countReferencedDocs } from '../src/utils/siyuan-db'
+
+function blockRef(id: string, rootId: string): BlockRef {
+  return {
+    id,
+    root_id: rootId,
+    box: 'box',
+    content: '',
+    markdown: '',
+    path: '/doc.sy',
+    hpath: '/doc',
+    readablePath: `笔记本/doc-${rootId}`,
+  }
+}
 
 function asset(
   name: string,
@@ -256,5 +271,50 @@ describe('asset list helpers', () => {
     expect(vueContent).toMatch(/class="asset-preview"[\s\S]*?@mouseenter="\$emit\('show-preview'/)
     expect(vueContent).toMatch(/class="asset-preview"[\s\S]*?@mousemove="\$emit\('update-preview'/)
     expect(vueContent).toMatch(/class="asset-preview"[\s\S]*?@mouseleave="\$emit\('hide-preview'/)
+  })
+})
+
+describe('groupReferencesByDoc', () => {
+  it('collapses several references from one document into a single group', () => {
+    const groups = groupReferencesByDoc([
+      blockRef('b-1', 'doc-1'),
+      blockRef('b-2', 'doc-1'),
+      blockRef('b-3', 'doc-2'),
+    ])
+
+    expect(groups).toHaveLength(2)
+    expect(groups[0].rootId).toBe('doc-1')
+    expect(groups[0].refs.map((ref) => ref.id)).toEqual(['b-1', 'b-2'])
+    // 代表块用于展示路径与定位，取该文档中第一个引用块
+    expect(groups[0].first.id).toBe('b-1')
+    expect(groups[1].rootId).toBe('doc-2')
+  })
+
+  it('returns no groups for no references', () => {
+    expect(groupReferencesByDoc([])).toEqual([])
+  })
+
+  it('agrees with countReferencedDocs on how many documents there are', () => {
+    const refs = [
+      blockRef('b-1', 'doc-1'),
+      blockRef('b-2', 'doc-1'),
+      blockRef('b-3', 'doc-2'),
+      blockRef('b-4', 'doc-3'),
+      blockRef('b-5', 'doc-3'),
+    ]
+
+    expect(groupReferencesByDoc(refs)).toHaveLength(countReferencedDocs(refs))
+  })
+
+  it('does not count reference blocks as documents in the dedup dialog', async () => {
+    const fs = await import('fs')
+    const path = await import('path')
+    const vueContent = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/DeduplicateDialog.vue'),
+      'utf-8',
+    )
+
+    expect(vueContent).toMatch(/被以下文档引用\s*\(\{\{\s*docGroups\(/)
+    expect(vueContent).not.toMatch(/被以下文档引用\s*\(\{\{\s*item\.asset\.references\.length/)
   })
 })

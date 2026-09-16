@@ -1,4 +1,4 @@
-import type { AssetInfo, OrphanOriginalInfo } from './siyuan-db'
+import type { AssetInfo, BlockRef, OrphanOriginalInfo } from './siyuan-db'
 
 export type AssetAttributeFilter = 'all' | 'reeditable' | 'original' | 'unreferenced' | 'large'
 export type AssetFilterType = AssetAttributeFilter | 'image'
@@ -17,6 +17,35 @@ export interface CategoryStatSummary {
   count: number
   totalSize: number
   sizeText: string
+}
+
+export interface DocReferenceGroup {
+  rootId: string
+  /** 该文档中第一个引用块，用于展示易读路径与定位 */
+  first: BlockRef
+  /** 该文档内的全部引用块 */
+  refs: BlockRef[]
+}
+
+/**
+ * 按文档聚合引用块。
+ *
+ * 同一篇文档里可以有多个块引用同一份资源，直接遍历 references 会把一篇文档
+ * 显示成多次。分组后条数恒等于 countReferencedDocs()，保证"篇文档"与列表长度一致。
+ */
+export function groupReferencesByDoc(references: BlockRef[] = []): DocReferenceGroup[] {
+  const groups = new Map<string, DocReferenceGroup>()
+
+  for (const ref of references) {
+    const existing = groups.get(ref.root_id)
+    if (existing) {
+      existing.refs.push(ref)
+    } else {
+      groups.set(ref.root_id, { rootId: ref.root_id, first: ref, refs: [ref] })
+    }
+  }
+
+  return [...groups.values()]
 }
 
 export interface AssetCleanupSummary {

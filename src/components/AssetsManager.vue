@@ -239,6 +239,7 @@ import {
   isPlayableVideoAsset,
   sortAssets,
   splitFileName,
+  groupReferencesByDoc,
   type AssetCategory,
   type AssetFilterType,
   type AssetSortField,
@@ -807,24 +808,26 @@ function handleSortChange(field: AssetSortField) {
 }
 
 async function handleOpenDocs(asset: AssetInfo) {
-  if (asset.references.length === 0) {
+  // 按文档去重：同一篇文档被多个块引用时只打开一个页签，定位到该文档的第一个引用块
+  const groups = groupReferencesByDoc(asset.references);
+  if (groups.length === 0) {
     pushMsg("该资源未被任何文档引用");
     return;
   }
-  
+
   const plugin = usePlugin();
   try {
-    for (const ref of asset.references) {
+    for (const group of groups) {
       await openTab({
         app: plugin.app,
         doc: {
-          id: ref.id,
+          id: group.first.id,
           action: ["cb-get-hl", "cb-get-focus", "cb-get-context"]
         },
         keepCursor: true
       });
     }
-    pushMsg(`已在后台打开并定位到 ${asset.references.length} 个引用位置`);
+    pushMsg(`已在后台为 ${groups.length} 篇引用文档各打开一个页签`);
   } catch (e) {
     error("Failed to open documents", e);
     pushMsg("打开文档失败");
