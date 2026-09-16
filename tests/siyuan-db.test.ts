@@ -20,6 +20,7 @@ import {
   getOrphanOriginals,
   cleanupOrphanOriginals,
   formatReadableDocPath,
+  countReferencedDocs,
 } from '../src/utils/siyuan-db'
 import { filterAssets, calculateTotalCleanup } from '../src/utils/asset-list'
 
@@ -104,6 +105,22 @@ describe('siyuan asset database helpers', () => {
       refCount: 1,
       docCount: 1,
     })
+  })
+
+  it('counts distinct referenced documents instead of reference blocks', () => {
+    const ref = (id: string, rootId: string) => ({
+      id,
+      root_id: rootId,
+      box: 'box',
+      content: '',
+      markdown: '',
+      path: '/doc.sy',
+    })
+
+    // 同一篇文档里的多个块只算一篇文档
+    expect(countReferencedDocs([ref('b-1', 'doc-1'), ref('b-2', 'doc-1')])).toBe(1)
+    expect(countReferencedDocs([ref('b-1', 'doc-1'), ref('b-2', 'doc-2')])).toBe(2)
+    expect(countReferencedDocs([])).toBe(0)
   })
 
   it('formats readable doc path starting from notebook name', () => {
@@ -213,6 +230,21 @@ describe('siyuan asset database helpers', () => {
       docCount: 1,
       isOriginal: false,
     })
+  })
+
+  it('does not interpolate the asset name into the reference lookup SQL', async () => {
+    sqlMock.mockResolvedValue([])
+
+    // 含单引号、LIKE 通配符的文件名，插值进 SQL 会导致语句报错或通配符误匹配
+    await getAssetInfoByName("o'brien 100%_chart.png")
+
+    const referenceLookup = sqlMock.mock.calls
+      .map(([statement]) => statement)
+      .find((statement) => statement.includes('markdown LIKE'))
+
+    expect(referenceLookup).toBeDefined()
+    expect(referenceLookup).not.toContain("o'brien")
+    expect(referenceLookup).not.toContain('100%')
   })
 
   it('aggregates original images into getAllAssetsInfo and links references', async () => {
@@ -475,5 +507,44 @@ describe('siyuan asset database helpers', () => {
     const cleanupSummary = calculateTotalCleanup(allAssets)
     expect(cleanupSummary.orphanOriginalsCount).toBe(1)
     expect(cleanupSummary.orphanOriginals[0].name).toBe('orphan_orig.png')
+  })
+
+  it('does not treat an inline-referenced asset as an orphan that cleanup would delete', async () => {
+    readDirMock.mockImplementation(async (path: string) => {
+      if (path === '/data/assets') {
+        return [{ name: 'inline.png', size: 300, updated: 1, isDir: false }]
+      }
+      return []
+    })
+
+    sqlMock.mockImplementation(async (query: string) => {
+      if (query.includes('custom-asset-reedit')) {
+        return []
+      }
+      // 图片紧跟文字、且闭合括号后没有空白，是最容易被漏掉的引用形式
+      return [
+        {
+          id: 'b-inline',
+          root_id: 'doc-1',
+          box: 'box1',
+          content: '',
+          markdown: '这是![截图](assets/inline.png)说明文字',
+          path: '/doc1.sy',
+        },
+      ]
+    })
+
+    const allAssets = await getAllAssetsInfo()
+    const asset = allAssets.find((a) => a.name === 'inline.png')
+    expect(asset?.docCount).toBe(1)
+    expect(asset?.refCount).toBe(1)
+
+    // 关键：不能被「未引用」筛选命中，否则一键清理会直接删掉仍在使用的图片
+    const unreferenced = filterAssets(allAssets, { searchQuery: '', filterType: 'unreferenced' })
+    expect(unreferenced.some((a) => a.name === 'inline.png')).toBe(false)
+
+    const cleanupSummary = calculateTotalCleanup(allAssets)
+    expect(cleanupSummary.unreferencedCount).toBe(0)
+    expect(cleanupSummary.unreferencedAssets).toHaveLength(0)
   })
 })

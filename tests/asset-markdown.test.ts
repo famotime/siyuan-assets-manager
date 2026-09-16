@@ -30,6 +30,33 @@ describe('asset markdown helpers', () => {
     ])
   })
 
+  it('extracts references whose closing paren is not followed by whitespace', () => {
+    expect(extractAssetNamesFromMarkdown('这是![截图](assets/inline.png)说明文字')).toEqual(['inline.png'])
+    expect(extractAssetNamesFromMarkdown('![img](assets/period.png)。')).toEqual(['period.png'])
+    expect(extractAssetNamesFromMarkdown('![img](assets/bold.png)**加粗**')).toEqual(['bold.png'])
+    expect(extractAssetNamesFromMarkdown('![img](assets/comma.png),接着是文字')).toEqual(['comma.png'])
+  })
+
+  it('extracts every reference when images are adjacent without a separator', () => {
+    expect(extractAssetNamesFromMarkdown('![a](assets/first.png)![b](assets/second.png)')).toEqual([
+      'first.png',
+      'second.png',
+    ])
+  })
+
+  it('extracts the image that is wrapped in a link', () => {
+    expect(extractAssetNamesFromMarkdown('[![a](assets/wrapped.png)](https://example.com)')).toEqual([
+      'wrapped.png',
+    ])
+  })
+
+  it('keeps bracketed file names that are followed by text', () => {
+    expect(extractAssetNamesFromMarkdown('![img](assets/%E5%B1%8F%E5%B9%95(1).png)后面')).toEqual([
+      '%E5%B1%8F%E5%B9%95(1).png',
+      '屏幕(1).png',
+    ])
+  })
+
   it('replaces encoded and decoded asset names gracefully', () => {
     const markdown = '![img](assets/%E6%B5%8B%E8%AF%95.png) and ![plain](assets/测试.png)'
     expect(replaceAssetInMarkdown(markdown, '测试.png', 'new.png')).toBe(

@@ -61,12 +61,30 @@ function extractMarkdownLinkAssets(markdown: string): string[] {
   return assets
 }
 
+/**
+ * 定位 Markdown 链接目标的结束位置（即 `](assets/` 之后第一个"未被括号配平"的 `)`）。
+ *
+ * 不能简单地取"后一个字符是空白/`{`/结尾"的 `)`：思源导出的 Markdown 里，
+ * 行内图片后面可以直接跟文字、标点或另一张图片（如 `这是![图](assets/x.png)文字`、`![a](assets/x.png)![b](assets/y.png)`），
+ * 这类引用会被整条漏掉。
+ *
+ * 改为按 CommonMark 规则配平括号：文件名本身可以包含 `)`（如 `a(1).png`），
+ * 只有深度归零的那个 `)` 才是目标结束符；目标中不允许出现空白，遇到空白同样视为结束。
+ */
 function findMarkdownLinkTargetEnd(markdown: string, assetStart: number): number {
-  for (let i = assetStart; i < markdown.length; i++) {
-    if (markdown[i] !== ')') continue
+  let depth = 0
 
-    const next = markdown[i + 1]
-    if (!next || /\s/.test(next) || next === '{') {
+  for (let i = assetStart; i < markdown.length; i++) {
+    const char = markdown[i]
+
+    if (char === '(') {
+      depth++
+    } else if (char === ')') {
+      if (depth === 0) {
+        return i
+      }
+      depth--
+    } else if (/\s/.test(char)) {
       return i
     }
   }

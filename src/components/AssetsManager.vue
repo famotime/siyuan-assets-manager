@@ -225,7 +225,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
 import { Files, Image, FileText, Music, Video, Archive, Volume2, VolumeX, Play, Pause, AlertCircle } from 'lucide-vue-next';
-import { getAllAssetsInfo, deleteAssetFile, type AssetInfo } from '../utils/siyuan-db';
+import { getAllAssetsInfo, deleteAssetFile, countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
 import { deleteOriginalImage, readOriginalImage, normalizeOriginalStoragePath } from '../utils/file-system';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
 import {
@@ -644,7 +644,7 @@ function applyTargetedAssetUpdate(detail: AssetTargetedUpdateDetail) {
   virtualListRef.value?.invalidateAssetThumbnail?.(oldName);
   virtualListRef.value?.invalidateAssetThumbnail?.(newName);
 
-  const docCount = references.length;
+  const docCount = countReferencedDocs(references);
   const list = [...assets.value];
   const oldIndex = list.findIndex(a => a.name === oldName);
 

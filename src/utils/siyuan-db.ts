@@ -95,10 +95,17 @@ export function attachBlockReferences(
   }
 }
 
+/**
+ * 统计引用涉及的文档数（同一篇文档中的多个引用块只计一次文档）
+ */
+export function countReferencedDocs(references: BlockRef[] = []): number {
+  const docIds = new Set(references.map(r => r.root_id));
+  return docIds.size;
+}
+
 export function updateAssetDocCounts(assets: Iterable<AssetInfo>): void {
   for (const asset of assets) {
-    const docIds = new Set(asset.references.map(r => r.root_id));
-    asset.docCount = docIds.size;
+    asset.docCount = countReferencedDocs(asset.references);
   }
 }
 
@@ -425,8 +432,12 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
     }
   }
 
+  // 只按 assets/ 粗筛，不把文件名插值进 SQL：
+  // 文件名可能含单引号（破坏语句）或 % _ 通配符（造成误匹配）；
+  // 且 Markdown 中的引用可能是 URI 编码形式，按原始名 LIKE 反而会漏掉真实引用。
+  // 精确匹配交由下方的 extractAssetNamesFromMarkdown 完成（与 getAllAssetsInfo 一致）。
   const blocks: any[] = await sql(
-    `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/${fileName}%' LIMIT 1000`
+    `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
   );
 
   const references: BlockRef[] = [];
