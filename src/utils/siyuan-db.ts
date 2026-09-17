@@ -12,6 +12,7 @@ import {
 } from "./file-system";
 import { defaultStorage } from "./storage";
 import { fetchCatalogInventory } from "./asset-catalog";
+import { resolveAttributeViewReferences } from "./attribute-view";
 import type { IAssetReEditMetadata } from "../types/reedit";
 
 export interface BlockRef {
@@ -80,25 +81,51 @@ export function attachBlockReferences(
   notebookMap: Map<string, string> = new Map()
 ): void {
   for (const block of blocks) {
-    const referencedAssets = extractAssetNamesFromMarkdown(block.markdown || "");
+    const mdAssets = extractAssetNamesFromMarkdown(block.markdown || "");
+    const ialAssets = block.ial ? extractAssetNamesFromMarkdown(block.ial) : [];
+    const referencedAssets = Array.from(new Set([...mdAssets, ...ialAssets]));
     const boxName = notebookMap.get(block.box) || "";
     const readablePath = formatReadableDocPath(boxName, block.hpath, block.path);
 
     for (const assetName of referencedAssets) {
       if (assetsMap.has(assetName)) {
         const asset = assetsMap.get(assetName)!;
-        asset.references.push({
-          id: block.id,
-          root_id: block.root_id,
-          box: block.box,
-          content: block.content,
-          markdown: block.markdown,
-          path: block.path,
-          hpath: block.hpath,
-          boxName,
-          readablePath,
-        });
-        asset.refCount++;
+        if (!asset.references.some((r) => r.id === block.id)) {
+          asset.references.push({
+            id: block.id,
+            root_id: block.root_id,
+            box: block.box,
+            content: block.content,
+            markdown: block.markdown,
+            path: block.path,
+            hpath: block.hpath,
+            boxName,
+            readablePath,
+          });
+          asset.refCount++;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 将数据库属性视图中的引用合并挂载到资产对象上
+ */
+export function attachAttributeViewReferences(
+  assetsMap: Map<string, AssetInfo>,
+  avReferencesMap: Map<string, BlockRef[]> = new Map()
+): void {
+  if (!avReferencesMap || avReferencesMap.size === 0) return;
+
+  for (const [assetName, avRefs] of avReferencesMap.entries()) {
+    if (assetsMap.has(assetName) && Array.isArray(avRefs)) {
+      const asset = assetsMap.get(assetName)!;
+      for (const ref of avRefs) {
+        if (!asset.references.some((r) => r.id === ref.id)) {
+          asset.references.push(ref);
+          asset.refCount++;
+        }
       }
     }
   }
@@ -222,14 +249,16 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
   // 且 Markdown 中的引用可能是 URI 编码形式，按原始名 LIKE 反而会漏掉真实引用。
   // 精确匹配交由下方的 extractAssetNamesFromMarkdown 完成（与 getAllAssetsInfo 一致）。
   const blocks: any[] = await sql(
-    `SELECT id, root_id, box, content, markdown, path, hpath FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
+    `SELECT id, root_id, box, content, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`
   );
 
   const references: BlockRef[] = [];
+  const notebookMap = await getNotebookMap();
   if (blocks && blocks.length > 0) {
-    const notebookMap = await getNotebookMap();
     for (const block of blocks) {
-      const referencedAssets = extractAssetNamesFromMarkdown(block.markdown || "");
+      const mdAssets = extractAssetNamesFromMarkdown(block.markdown || "");
+      const ialAssets = block.ial ? extractAssetNamesFromMarkdown(block.ial) : [];
+      const referencedAssets = Array.from(new Set([...mdAssets, ...ialAssets]));
       if (referencedAssets.includes(fileName)) {
         references.push({
           id: block.id,
@@ -246,6 +275,19 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
         });
       }
     }
+  }
+
+  // 补充检索数据库属性视图中的关联引用
+  try {
+    const avRefsMap = await resolveAttributeViewReferences(notebookMap);
+    const avRefs = avRefsMap.get(fileName) || [];
+    for (const ref of avRefs) {
+      if (!references.some((r) => r.id === ref.id)) {
+        references.push(ref);
+      }
+    }
+  } catch (avErr) {
+    warn("[siyuan-db] 查询属性视图关联引用失败:", avErr);
   }
 
   const docIds = new Set(references.map(r => r.root_id));

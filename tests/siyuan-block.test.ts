@@ -198,4 +198,13 @@ describe('siyuan block asset updates', () => {
     expect(results[0].blockId).toBe('b-1')
     expect(results[0].metadata.renderedAssetName).toBe('rend.png')
   })
+
+  it('synchronously updates attribute view references when replacing assets', async () => {
+    sqlMock.mockResolvedValue([])
+    const avModule = await import('../src/utils/attribute-view')
+    const spy = vi.spyOn(avModule, 'replaceAssetInAttributeViews').mockResolvedValue(1)
+
+    await replaceAssetInBlocks([], 'old-photo.png', 'new-photo.png')
+    expect(spy).toHaveBeenCalledWith('old-photo.png', 'new-photo.png')
+  })
 })

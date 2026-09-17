@@ -6,6 +6,7 @@ import {
 } from "./asset-markdown";
 import type { IAssetReEditMetadata } from "../types/reedit";
 import { serializeReEditMetadata, deserializeReEditMetadata, decodeHtmlEntities } from "./reedit-data";
+import { replaceAssetInAttributeViews } from "./attribute-view";
 import { log, warn, error } from "./logger";
 
 /** 思源图像块二次编辑自定义属性名称 */
@@ -77,6 +78,13 @@ export async function replaceAssetInBlocks(
         }
       }
     }
+  }
+
+  // 同步原子更新属性视图 (Attribute View) 中的资源引用
+  try {
+    await replaceAssetInAttributeViews(oldAssetName, newAssetName);
+  } catch (avErr) {
+    warn(`[siyuan-block] 同步更新属性视图资源 ${oldAssetName} -> ${newAssetName} 失败:`, avErr);
   }
 }
 

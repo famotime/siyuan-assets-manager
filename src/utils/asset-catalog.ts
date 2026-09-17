@@ -16,10 +16,12 @@ import {
   type OrphanOriginalInfo,
   createAssetInfoMap,
   attachBlockReferences,
+  attachAttributeViewReferences,
   updateAssetDocCounts,
   attachReEditMetadata,
   getNotebookMap,
 } from './siyuan-db';
+import { resolveAttributeViewReferences } from './attribute-view';
 
 export interface CatalogInventory {
   allAssets: AssetInfo[];
@@ -39,13 +41,20 @@ export function resolveCatalogPipeline(
   reEditBlocks: Array<{ blockId: string; rootId: string; metadata: IAssetReEditMetadata }>,
   originalFiles: Array<{ name: string; path: string; size: number; updated: number }>,
   notebookMap: Map<string, string>,
-  sidecarMetadataList: Array<{ assetName: string; metadata: IAssetReEditMetadata }> = []
+  sidecarMetadataList: Array<{ assetName: string; metadata: IAssetReEditMetadata }> = [],
+  avReferencesMap: Map<string, BlockRef[]> = new Map()
 ): CatalogInventory {
-  // 1. 构建常规资产 Map 并挂载引用
+  // 1. 构建常规资产 Map 并挂载文档块引用
   const assetsMap = createAssetInfoMap(files);
   if (blocks && blocks.length > 0) {
     attachBlockReferences(assetsMap, blocks, notebookMap);
   }
+
+  // 1.0 挂载数据库属性视图引用 (Attribute View)
+  if (avReferencesMap && avReferencesMap.size > 0) {
+    attachAttributeViewReferences(assetsMap, avReferencesMap);
+  }
+
   updateAssetDocCounts(assetsMap.values());
 
   // 1.1 挂载 Sidecar 元数据（优先全局真理源）
@@ -200,12 +209,13 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
   }
 
   const files = rawFiles;
-  const [notebookMap, blocks, reEditBlocks, originalFiles, sidecarMetadataList] = await Promise.all([
-    getNotebookMap().catch(() => new Map<string, string>()),
-    sql(`SELECT id, root_id, box, content, markdown, path, hpath FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`).catch(() => []),
+  const notebookMap = await getNotebookMap().catch(() => new Map<string, string>());
+  const [blocks, reEditBlocks, originalFiles, sidecarMetadataList, avReferencesMap] = await Promise.all([
+    sql(`SELECT id, root_id, box, content, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`).catch(() => []),
     queryAllReEditableBlocks().catch(() => []),
     listOriginalImages().catch(() => []),
     listAllAssetMetadataFiles().catch(() => []),
+    resolveAttributeViewReferences(notebookMap).catch(() => new Map<string, BlockRef[]>()),
   ]);
 
   // 自动平滑向后迁移：将存在于块 IAL 但尚未落盘 Sidecar 的元数据自动持久化到 Sidecar
@@ -226,7 +236,15 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
     }
   }
 
-  const inventory = resolveCatalogPipeline(files, blocks, reEditBlocks, originalFiles, notebookMap, sidecarMetadataList);
+  const inventory = resolveCatalogPipeline(
+    files,
+    blocks,
+    reEditBlocks,
+    originalFiles,
+    notebookMap,
+    sidecarMetadataList,
+    avReferencesMap
+  );
 
   // 批量通过 storage stat 补全缺失的 size 与 updated
   const assetsToStat = inventory.allAssets.filter((a) => !a.isOriginal && (a.size === 0 || !a.updated));

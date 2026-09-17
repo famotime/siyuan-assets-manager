@@ -621,4 +621,63 @@ describe('siyuan asset database helpers', () => {
     expect(cleanupSummary.unreferencedCount).toBe(0)
     expect(cleanupSummary.unreferencedAssets).toHaveLength(0)
   })
+
+  it('extracts asset references from block ial attributes such as document title-img or icon', async () => {
+    const assetsMap = new Map([
+      ['cover.png', { name: 'cover.png', size: 100, updated: 1, isDir: false, references: [], refCount: 0, docCount: 0 }],
+      ['icon.png', { name: 'icon.png', size: 50, updated: 1, isDir: false, references: [], refCount: 0, docCount: 0 }],
+    ])
+
+    const blocks = [
+      {
+        id: 'doc-block-1',
+        root_id: 'doc-1',
+        box: 'box-1',
+        content: '',
+        markdown: '',
+        ial: '{: id="doc-block-1" title-img="assets/cover.png" icon="assets/icon.png"}',
+        path: '/doc.sy',
+        hpath: '/知识库/主页',
+      },
+    ]
+
+    const { attachBlockReferences } = await import('../src/utils/siyuan-db')
+    attachBlockReferences(assetsMap as any, blocks)
+
+    expect(assetsMap.get('cover.png')?.refCount).toBe(1)
+    expect(assetsMap.get('icon.png')?.refCount).toBe(1)
+    expect(assetsMap.get('cover.png')?.references[0].id).toBe('doc-block-1')
+  })
+
+  it('retrieves database attribute view references in getAssetInfoByName', async () => {
+    sqlMock.mockImplementation(async (query: string) => {
+      // 模拟 blocks 表中没有普通 markdown 引用
+      return []
+    })
+
+    const avModule = await import('../src/utils/attribute-view')
+    vi.spyOn(avModule, 'resolveAttributeViewReferences').mockResolvedValue(
+      new Map([
+        [
+          'db_pic.png',
+          [
+            {
+              id: 'av-block-2',
+              root_id: 'doc-2',
+              box: 'box-1',
+              content: '[数据库] 素材表 (图片)',
+              markdown: '',
+              path: '/doc2.sy',
+            },
+          ],
+        ],
+      ])
+    )
+
+    const info = await getAssetInfoByName('db_pic.png')
+    expect(info).not.toBeNull()
+    expect(info?.refCount).toBe(1)
+    expect(info?.docCount).toBe(1)
+    expect(info?.references[0].content).toBe('[数据库] 素材表 (图片)')
+  })
 })

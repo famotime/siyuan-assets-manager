@@ -154,4 +154,61 @@ describe('AssetCatalog Resolution Pipeline', () => {
     expect(activeOrig?.refCount).toBe(1);
     expect(activeOrig?.references[0].id).toBe('block-in-doc-2');
   });
+
+  it('protects database associated assets from being treated as orphans and binds database references', () => {
+    const files = [
+      { name: 'db_only_photo.png', size: 12000, updated: 300, isDir: false },
+      { name: 'real_orphan.png', size: 4000, updated: 300, isDir: false },
+    ];
+
+    // 普通文档块中没有任何对 db_only_photo.png 的引用
+    const blocks: any[] = [];
+    const reEditBlocks: any[] = [];
+    const originalFiles: any[] = [];
+    const notebookMap = new Map([['box-1', '测试笔记']]);
+
+    // 属性视图中关联了 db_only_photo.png
+    const avReferencesMap = new Map([
+      [
+        'db_only_photo.png',
+        [
+          {
+            id: 'av-block-101',
+            root_id: 'doc-movie',
+            box: 'box-1',
+            content: '[数据库] 影视清单 (海报)',
+            markdown: '<div data-type="NodeAttributeView" data-av-id="av-1"></div>',
+            path: '/movie.sy',
+            hpath: '/影视/清单',
+            boxName: '测试笔记',
+            readablePath: '测试笔记/影视/清单',
+          },
+        ],
+      ],
+    ]);
+
+    const result = resolveCatalogPipeline(
+      files,
+      blocks,
+      reEditBlocks,
+      originalFiles,
+      notebookMap,
+      [],
+      avReferencesMap
+    );
+
+    // 1. 数据库图片拥有正确引用计数和文档计数
+    const dbAsset = result.assetsMap.get('db_only_photo.png');
+    expect(dbAsset).toBeDefined();
+    expect(dbAsset?.refCount).toBe(1);
+    expect(dbAsset?.docCount).toBe(1);
+    expect(dbAsset?.references[0].content).toBe('[数据库] 影视清单 (海报)');
+    expect(dbAsset?.references[0].readablePath).toBe('测试笔记/影视/清单');
+
+    // 2. 真正的孤儿资源仍然是 0 引用
+    const realOrphan = result.assetsMap.get('real_orphan.png');
+    expect(realOrphan).toBeDefined();
+    expect(realOrphan?.refCount).toBe(0);
+    expect(realOrphan?.docCount).toBe(0);
+  });
 });
