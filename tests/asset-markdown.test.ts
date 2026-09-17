@@ -113,4 +113,22 @@ describe('asset markdown helpers', () => {
       '<video src="assets/movie.mp4" data-src=""></video>',
     )
   })
+
+  it('does not replace assets whose names merely start with the target as a prefix', () => {
+    const markdown = '![img](assets/pic.png) and ![bak](assets/pic.png.bak) and assets/pic.png_thumb.jpg'
+    expect(replaceAssetInMarkdown(markdown, 'pic.png', 'new_pic.png')).toBe(
+      '![img](assets/new_pic.png) and ![bak](assets/pic.png.bak) and assets/pic.png_thumb.jpg',
+    )
+  })
+
+  it('removes paired HTML elements even when they contain fallback text or multiline content', () => {
+    const markdown = [
+      '<video controls="controls" src="assets/movie.mp4">您的浏览器不支持播放该视频</video>',
+      '<video controls src="assets/movie.mp4">',
+      '  <span>不支持视频</span>',
+      '</video>',
+    ].join('\n')
+
+    expect(removeAssetFromMarkdown(markdown, 'movie.mp4').trim()).toBe('')
+  })
 })

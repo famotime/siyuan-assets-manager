@@ -16,6 +16,7 @@ import {
 import {
   getAllAssetsInfo,
   getAssetInfoByName,
+  getNotebookMap,
   attachReEditMetadata,
   getOrphanOriginals,
   cleanupOrphanOriginals,
@@ -209,15 +210,44 @@ describe('siyuan asset database helpers', () => {
     expect(sqlMock).not.toHaveBeenCalled()
   })
 
-  it('builds single asset info by exact parsed references', async () => {
+  it('builds notebook map from lsNotebooks and fallback to window.siyuan.notebooks', async () => {
+    lsNotebooksMock.mockResolvedValue({
+      notebooks: [
+        { id: 'box-1', name: '工作笔记' },
+        { id: 'box-2', name: '生活随笔' },
+      ],
+    } as any)
+
+    const map = await getNotebookMap()
+    expect(map.get('box-1')).toBe('工作笔记')
+    expect(map.get('box-2')).toBe('生活随笔')
+
+    // 当 lsNotebooks 失败或为空时，从 window.siyuan.notebooks 兜底
+    lsNotebooksMock.mockRejectedValue(new Error('network error'))
+    vi.stubGlobal('window', {
+      siyuan: {
+        notebooks: [{ id: 'box-fallback', name: '备用笔记本' }],
+      },
+    })
+
+    const fallbackMap = await getNotebookMap()
+    expect(fallbackMap.get('box-fallback')).toBe('备用笔记本')
+  })
+
+  it('builds single asset info by exact parsed references with hpath and readablePath', async () => {
+    lsNotebooksMock.mockResolvedValue({
+      notebooks: [{ id: 'box-1', name: '我的笔记本' }],
+    } as any)
+
     sqlMock.mockResolvedValue([
       {
         id: 'block-1',
         root_id: 'doc-1',
-        box: 'box',
+        box: 'box-1',
         content: '',
         markdown: 'assets/a+b(1).png assets/aXb(1).png',
         path: '/doc.sy',
+        hpath: '/前端/Vue3',
       },
     ])
 
@@ -229,6 +259,11 @@ describe('siyuan asset database helpers', () => {
       refCount: 1,
       docCount: 1,
       isOriginal: false,
+    })
+    expect(result?.references[0]).toMatchObject({
+      id: 'block-1',
+      hpath: '/前端/Vue3',
+      readablePath: '我的笔记本/前端/Vue3',
     })
   })
 

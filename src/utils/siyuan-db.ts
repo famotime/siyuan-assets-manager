@@ -128,16 +128,9 @@ export function attachReEditMetadata(
 }
 
 /**
- * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用以及二次编辑状态
+ * 获取笔记本映射表（boxId -> boxName）
  */
-export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
-  // 1. 获取 /data/assets 下的所有物理文件
-  const files: any[] = await readDir("/data/assets");
-  if (!files) return [];
-
-  const assetsMap = createAssetInfoMap(files);
-
-  // 获取笔记本列表构建 boxId -> boxName 映射
+export async function getNotebookMap(): Promise<Map<string, string>> {
   const notebookMap = new Map<string, string>();
   try {
     const res = await lsNotebooks();
@@ -161,6 +154,22 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
       }
     }
   }
+
+  return notebookMap;
+}
+
+/**
+ * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用以及二次编辑状态
+ */
+export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
+  // 1. 获取 /data/assets 下的所有物理文件
+  const files: any[] = await readDir("/data/assets");
+  if (!files) return [];
+
+  const assetsMap = createAssetInfoMap(files);
+
+  // 获取笔记本列表构建 boxId -> boxName 映射
+  const notebookMap = await getNotebookMap();
 
   // 尝试通过 Node fs 或者 HEAD 请求补全 file size
   let fs: any;
@@ -339,12 +348,13 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
 
       // 查询所有引用了 assets 的文档块进行交叉验证
       const blocks: any[] = await sql(
-        `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 100000`
+        `SELECT id, root_id, box, content, markdown, path, hpath FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 100000`
       );
 
       // 获取当前 assets 物理文件集合，确保对应的编辑后图片真实存在且未被删除
       const files: any[] = (await readDir("/data/assets")) || [];
       const existingAssetNames = new Set(files.filter((f) => !f.isDir).map((f) => f.name));
+      const notebookMap = await getNotebookMap();
 
       for (const item of reEditBlocks) {
         if (normalizeOriginalStoragePath(item.metadata.originalStoragePath) === normOrigPath) {
@@ -364,6 +374,11 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
                     content: b.content || '',
                     markdown: b.markdown || '',
                     path: b.path || '',
+                    hpath: b.hpath || '',
+                    readablePath: formatReadableDocPath(
+                      b.box && notebookMap ? notebookMap.get(b.box) : undefined,
+                      b.hpath || b.path
+                    ),
                   });
                 }
               }
@@ -437,11 +452,12 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
   // 且 Markdown 中的引用可能是 URI 编码形式，按原始名 LIKE 反而会漏掉真实引用。
   // 精确匹配交由下方的 extractAssetNamesFromMarkdown 完成（与 getAllAssetsInfo 一致）。
   const blocks: any[] = await sql(
-    `SELECT id, root_id, box, content, markdown, path FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
+    `SELECT id, root_id, box, content, markdown, path, hpath FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
   );
 
   const references: BlockRef[] = [];
   if (blocks && blocks.length > 0) {
+    const notebookMap = await getNotebookMap();
     for (const block of blocks) {
       const referencedAssets = extractAssetNamesFromMarkdown(block.markdown || "");
       if (referencedAssets.includes(fileName)) {
@@ -452,6 +468,11 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
           content: block.content,
           markdown: block.markdown,
           path: block.path,
+          hpath: block.hpath,
+          readablePath: formatReadableDocPath(
+            block.box && notebookMap ? notebookMap.get(block.box) : undefined,
+            block.hpath || block.path
+          ),
         });
       }
     }

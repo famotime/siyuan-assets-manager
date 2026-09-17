@@ -103,18 +103,24 @@ function findMarkdownLinkTargetEnd(markdown: string, assetStart: number): number
   return -1
 }
 
+/**
+ * 资源路径合法终止符断言：必须紧跟闭合括号、引号、空白、URL 参数/哈希、属性块、HTML 标签结束、中英文标点或文本结尾。
+ * 避免如 `pic.png` 误替换 `pic.png.bak` 或 `pic.png_thumb.jpg` 等具有相同前缀的文件名。
+ */
+const ASSET_PATH_TERMINATOR = '(?=[)"\'\\s?#{}\\]>，。、；：！？,!;:|]|$)'
+
 export function replaceAssetInMarkdown(markdown: string, oldAssetName: string, newAssetName: string): string {
   let res = markdown
   // 若包含中文或特殊字符，同步支持被 URI 编码过的旧名称替换
   try {
     const encodedOld = encodeURIComponent(oldAssetName)
     if (encodedOld !== oldAssetName) {
-      const encRegex = new RegExp(`assets/${escapeRegExp(encodedOld)}`, 'g')
+      const encRegex = new RegExp(`assets/${escapeRegExp(encodedOld)}${ASSET_PATH_TERMINATOR}`, 'g')
       res = res.replace(encRegex, `assets/${newAssetName}`)
     }
   } catch (e) {}
 
-  const regex = new RegExp(`assets/${escapeRegExp(oldAssetName)}`, 'g')
+  const regex = new RegExp(`assets/${escapeRegExp(oldAssetName)}${ASSET_PATH_TERMINATOR}`, 'g')
   return res.replace(regex, `assets/${newAssetName}`)
 }
 
@@ -125,9 +131,10 @@ export function removeAssetFromMarkdown(markdown: string, assetName: string): st
   // 只靠 pathRegex 抹路径会在正文里留下 <video src=""></video> 这样的空播放器。
   // 这里在 src 命中资源时整段移除元素；data-src 只是思源记录的原始文件名，
   // 用 (?<![-\w]) 把它排除在外，删掉原始底图时不应连播放器一起删。
+  // 成对标签内部允许存在 fallback 说明文字（如“浏览器不支持播放”）或子元素，整段移除。
   const htmlSrcAttr = `(?<![-\\w])src=["']assets/${escapedName}["']`
   const htmlPairedRegex = new RegExp(
-    `<([a-zA-Z][\\w-]*)\\b[^>]*?${htmlSrcAttr}[^>]*>\\s*</\\1>`,
+    `<([a-zA-Z][\\w-]*)\\b[^>]*?${htmlSrcAttr}[^>]*>[\\s\\S]*?</\\1>`,
     'g',
   )
   const htmlVoidRegex = new RegExp(`<[a-zA-Z][\\w-]*\\b[^>]*?${htmlSrcAttr}[^>]*/?>`, 'g')
