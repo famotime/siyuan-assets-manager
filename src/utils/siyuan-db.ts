@@ -2,7 +2,16 @@ import { sql, readDir, removeFile, lsNotebooks } from "../api";
 import { extractAssetNamesFromMarkdown } from "./asset-markdown";
 import { warn, error } from "./logger";
 import { queryAllReEditableBlocks } from "./siyuan-block";
-import { listOriginalImages, deleteOriginalImage, normalizeOriginalStoragePath } from "./file-system";
+import {
+  listOriginalImages,
+  deleteOriginalImage,
+  normalizeOriginalStoragePath,
+  readAssetMetadataFile,
+  saveAssetMetadataFile,
+  deleteAssetMetadataFile,
+} from "./file-system";
+import { defaultStorage } from "./storage";
+import { fetchCatalogInventory } from "./asset-catalog";
 import type { IAssetReEditMetadata } from "../types/reedit";
 
 export interface BlockRef {
@@ -162,166 +171,8 @@ export async function getNotebookMap(): Promise<Map<string, string>> {
  * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用以及二次编辑状态
  */
 export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
-  // 1. 获取 /data/assets 下的所有物理文件
-  const files: any[] = await readDir("/data/assets");
-  if (!files) return [];
-
-  const assetsMap = createAssetInfoMap(files);
-
-  // 获取笔记本列表构建 boxId -> boxName 映射
-  const notebookMap = await getNotebookMap();
-
-  // 尝试通过 Node fs 或者 HEAD 请求补全 file size
-  let fs: any;
-  let pathLib: any;
-  let dataDir = "";
-  try {
-    fs = (window as any).require("fs");
-    pathLib = (window as any).require("path");
-    dataDir = (window as any).siyuan?.config?.system?.dataDir;
-  } catch (e) {}
-
-  if (fs && pathLib && dataDir) {
-    // 桌面端 Electron 环境
-    for (const [name, asset] of assetsMap.entries()) {
-      try {
-        const absolutePath = pathLib.join(dataDir, "assets", name);
-        const stat = fs.statSync(absolutePath);
-        if (asset.size === 0) {
-          asset.size = stat.size;
-        }
-        if (stat.mtimeMs) {
-          asset.updated = stat.mtimeMs;
-        }
-      } catch (e) {}
-    }
-  } else {
-    // 浏览器或移动端环境，并发批量获取大小与时间
-    const assetsToFetch = Array.from(assetsMap.values()).filter(a => a.size === 0 || !a.updated);
-    const limit = 50;
-    for (let i = 0; i < assetsToFetch.length; i += limit) {
-      const batch = assetsToFetch.slice(i, i + limit);
-      await Promise.all(batch.map(async (asset) => {
-        try {
-          const response = await fetch(`/assets/${asset.name}`, { method: 'HEAD' });
-          const contentLength = response.headers.get('content-length');
-          if (contentLength) {
-            asset.size = parseInt(contentLength, 10);
-          }
-          const lastModified = response.headers.get('last-modified');
-          if (lastModified && !asset.updated) {
-            const time = Date.parse(lastModified);
-            if (!isNaN(time)) {
-              asset.updated = time;
-            }
-          }
-        } catch (e) {}
-      }));
-    }
-  }
-
-  // 2. 查询所有可能引用了 assets 的 blocks (包含 hpath 以构建易读文档路径)
-  const blocks: any[] = await sql(
-    `SELECT id, root_id, box, content, markdown, path, hpath FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
-  );
-
-  if (blocks && blocks.length > 0) {
-    attachBlockReferences(assetsMap, blocks, notebookMap);
-  }
-
-  updateAssetDocCounts(assetsMap.values());
-
-  // 3. 关联查询所有具备 custom-asset-reedit 的文档块
-  let reEditBlocks: Array<{ blockId: string; rootId: string; metadata: IAssetReEditMetadata }> = [];
-  try {
-    reEditBlocks = await queryAllReEditableBlocks();
-    attachReEditMetadata(assetsMap, reEditBlocks);
-  } catch (err) {
-    warn("[siyuan-db] 查询二次编辑块元数据失败:", err);
-  }
-
-  // 4. 扫描并聚合隔离存储目录中的原始底图资源
-  const originalAssets: AssetInfo[] = [];
-  try {
-    const originalFiles = await listOriginalImages();
-    if (originalFiles && originalFiles.length > 0) {
-      // 建立底图相对路径与二次编辑块/文档的映射
-      const originalToRefsMap = new Map<string, BlockRef[]>();
-
-      for (const item of reEditBlocks) {
-        const normPath = normalizeOriginalStoragePath(item.metadata.originalStoragePath);
-        if (!normPath) continue;
-
-        const renderedName = item.metadata.renderedAssetName;
-        // 关键校验 1：二次编辑渲染图片必须在物理 assetsMap 中存在（未被删除）
-        const renderedAsset = renderedName ? assetsMap.get(renderedName) : undefined;
-        if (!renderedAsset) {
-          continue;
-        }
-
-        // 关键校验 2：只要对应的编辑后图片仍有文档引用，底图就继承该编辑后图片的所有有效引用
-        if (!renderedAsset.references || renderedAsset.references.length === 0) {
-          continue;
-        }
-
-        let refs = originalToRefsMap.get(normPath);
-        if (!refs) {
-          refs = [];
-          originalToRefsMap.set(normPath, refs);
-        }
-
-        for (const ref of renderedAsset.references) {
-          if (!refs.some((r) => r.id === ref.id)) {
-            refs.push(ref);
-          }
-        }
-      }
-
-      // 补充遍历 assetsMap 中具备 originalStoragePath 的资产（双向保障，防止块属性由于文档变动丢失）
-      for (const asset of assetsMap.values()) {
-        if (!asset.originalStoragePath || !asset.references || asset.references.length === 0) {
-          continue;
-        }
-        const normPath = normalizeOriginalStoragePath(asset.originalStoragePath);
-        if (!normPath) continue;
-
-        let refs = originalToRefsMap.get(normPath);
-        if (!refs) {
-          refs = [];
-          originalToRefsMap.set(normPath, refs);
-        }
-
-        for (const ref of asset.references) {
-          if (!refs.some((r) => r.id === ref.id)) {
-            refs.push(ref);
-          }
-        }
-      }
-
-      for (const orig of originalFiles) {
-        const normOrigPath = normalizeOriginalStoragePath(orig.path);
-        const refs = originalToRefsMap.get(normOrigPath) || [];
-        const docIds = new Set(refs.map((r) => r.root_id));
-
-        originalAssets.push({
-          name: orig.name,
-          size: orig.size,
-          updated: orig.updated,
-          isDir: false,
-          references: refs,
-          refCount: refs.length,
-          docCount: docIds.size,
-          isReEditable: false,
-          isOriginal: true,
-          originalStoragePath: orig.path,
-        });
-      }
-    }
-  } catch (err) {
-    warn("[siyuan-db] 扫描原始底图列表失败:", err);
-  }
-
-  return [...Array.from(assetsMap.values()), ...originalAssets];
+  const inventory = await fetchCatalogInventory();
+  return inventory.allAssets;
 }
 
 /**
@@ -329,6 +180,9 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
  */
 export async function deleteAssetFile(fileName: string): Promise<void> {
   await removeFile("/data/assets/" + fileName);
+  try {
+    await deleteAssetMetadataFile(fileName);
+  } catch (e) {}
 }
 
 /**
@@ -342,63 +196,12 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
       (f) => f.name === fileName || normalizeOriginalStoragePath(f.path) === normalizeOriginalStoragePath(fileName)
     );
     if (origMatch) {
-      const reEditBlocks = await queryAllReEditableBlocks();
+      const inventory = await fetchCatalogInventory();
       const normOrigPath = normalizeOriginalStoragePath(origMatch.path);
-      const refs: BlockRef[] = [];
-
-      // 查询所有引用了 assets 的文档块进行交叉验证
-      const blocks: any[] = await sql(
-        `SELECT id, root_id, box, content, markdown, path, hpath FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 100000`
+      const found = inventory.originalAssets.find(
+        (a) => a.name === origMatch.name || normalizeOriginalStoragePath(a.originalStoragePath || '') === normOrigPath
       );
-
-      // 获取当前 assets 物理文件集合，确保对应的编辑后图片真实存在且未被删除
-      const files: any[] = (await readDir("/data/assets")) || [];
-      const existingAssetNames = new Set(files.filter((f) => !f.isDir).map((f) => f.name));
-      const notebookMap = await getNotebookMap();
-
-      for (const item of reEditBlocks) {
-        if (normalizeOriginalStoragePath(item.metadata.originalStoragePath) === normOrigPath) {
-          const renderedName = item.metadata.renderedAssetName;
-          if (!renderedName || !existingAssetNames.has(renderedName)) continue;
-
-          // 只要编辑后图片在任何文档块中仍有引用，均收集为底图的有效引用
-          if (blocks && Array.isArray(blocks)) {
-            for (const b of blocks) {
-              const names = extractAssetNamesFromMarkdown(b.markdown || '');
-              if (names.includes(renderedName)) {
-                if (!refs.some((r) => r.id === b.id)) {
-                  refs.push({
-                    id: b.id,
-                    root_id: b.root_id,
-                    box: b.box || '',
-                    content: b.content || '',
-                    markdown: b.markdown || '',
-                    path: b.path || '',
-                    hpath: b.hpath || '',
-                    readablePath: formatReadableDocPath(
-                      b.box && notebookMap ? notebookMap.get(b.box) : undefined,
-                      b.hpath || b.path
-                    ),
-                  });
-                }
-              }
-            }
-          }
-        }
-      }
-      const docIds = new Set(refs.map(r => r.root_id));
-      return {
-        name: origMatch.name,
-        size: origMatch.size,
-        updated: origMatch.updated,
-        isDir: false,
-        references: refs,
-        refCount: refs.length,
-        docCount: docIds.size,
-        isReEditable: false,
-        isOriginal: true,
-        originalStoragePath: origMatch.path,
-      };
+      return found || null;
     }
   } catch (e) {
     warn("[siyuan-db] 查询底图信息失败:", e);
@@ -406,46 +209,13 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
 
   let size = 0;
   let updated = Date.now();
-  
-  let fs: any;
-  let pathLib: any;
-  let dataDir = "";
   try {
-    fs = (window as any).require("fs");
-    pathLib = (window as any).require("path");
-    dataDir = (window as any).siyuan?.config?.system?.dataDir;
-  } catch (e) {}
-
-  if (fs && pathLib && dataDir) {
-    try {
-      let absolutePath = pathLib.join(dataDir, "assets", fileName);
-      if (!fs.existsSync(absolutePath)) {
-        try {
-          const decoded = decodeURIComponent(fileName);
-          const decodedPath = pathLib.join(dataDir, "assets", decoded);
-          if (fs.existsSync(decodedPath)) {
-            absolutePath = decodedPath;
-          }
-        } catch (decErr) {}
-      }
-
-      if (fs.existsSync(absolutePath)) {
-        const stat = fs.statSync(absolutePath);
-        size = stat.size;
-        updated = stat.mtimeMs || Date.now();
-      }
-    } catch (e) {}
-  } else {
-    try {
-      const response = await fetch(`/assets/${fileName}`, { method: 'HEAD' });
-      const contentLength = response.headers.get('content-length');
-      if (contentLength) {
-        size = parseInt(contentLength, 10);
-      }
-    } catch (e) {
-      warn("HEAD request failed for", fileName, e);
+    const st = await defaultStorage.statAsset(fileName);
+    if (st) {
+      size = st.size;
+      updated = st.updated;
     }
-  }
+  } catch (e) {}
 
   // 只按 assets/ 粗筛，不把文件名插值进 SQL：
   // 文件名可能含单引号（破坏语句）或 % _ 通配符（造成误匹配）；
@@ -485,15 +255,38 @@ export async function getAssetInfoByName(fileName: string): Promise<AssetInfo | 
   let reEditBlockId: string | undefined;
   let originalStoragePath: string | undefined;
 
+  // 1. 优先从 Sidecar 读取元数据（解耦单点块属性）
+  try {
+    const sidecarMeta = await readAssetMetadataFile(fileName);
+    if (sidecarMeta) {
+      isReEditable = true;
+      originalStoragePath = sidecarMeta.originalStoragePath;
+    }
+  } catch (e) {}
+
+  // 2. 尝试从块属性补充 reEditBlockId 或作为 fallback
   try {
     const reEditBlocks = await queryAllReEditableBlocks();
     const match = reEditBlocks.find((b) => b.metadata.renderedAssetName === fileName);
     if (match) {
       isReEditable = true;
       reEditBlockId = match.blockId;
-      originalStoragePath = match.metadata.originalStoragePath;
+      if (!originalStoragePath) {
+        originalStoragePath = match.metadata.originalStoragePath;
+      }
+      // 即时自愈：如果 Sidecar 还没写，写入 Sidecar
+      try {
+        const sidecarMeta = await readAssetMetadataFile(fileName);
+        if (!sidecarMeta) {
+          await saveAssetMetadataFile(fileName, match.metadata);
+        }
+      } catch (migErr) {}
     }
   } catch (e) {}
+
+  if (!reEditBlockId && references.length > 0) {
+    reEditBlockId = references[0].id;
+  }
 
   return {
     name: fileName,
@@ -526,55 +319,11 @@ export async function getOrphanOriginals(): Promise<{
   totalCount: number;
 }> {
   try {
-    const allOriginals = await listOriginalImages();
-    const reEditBlocks = await queryAllReEditableBlocks();
-
-    // 获取所有 assets 物理文件
-    const files: any[] = (await readDir("/data/assets")) || [];
-    const existingAssetNames = new Set(files.filter((f) => !f.isDir).map((f) => f.name));
-
-    // 查询所有可能引用了 assets 的 blocks 进行交叉验证
-    const blocks: any[] = await sql(
-      `SELECT id, markdown FROM blocks WHERE markdown LIKE '%assets/%' LIMIT 1000000`
-    );
-    const referencedAssetNames = new Set<string>();
-    if (blocks && Array.isArray(blocks)) {
-      for (const b of blocks) {
-        const names = extractAssetNamesFromMarkdown(b.markdown || '');
-        for (const name of names) {
-          referencedAssetNames.add(name);
-        }
-      }
-    }
-
-    const activePaths = new Set<string>();
-
-    for (const b of reEditBlocks) {
-      const renderedName = b.metadata.renderedAssetName;
-      const origPath = normalizeOriginalStoragePath(b.metadata.originalStoragePath);
-      if (!origPath || !renderedName) continue;
-
-      // 只要对应的编辑后图片物理存在，且仍有文档引用，则该原始底图活跃（非孤立）
-      if (existingAssetNames.has(renderedName) && referencedAssetNames.has(renderedName)) {
-        activePaths.add(origPath);
-      }
-    }
-
-    const orphans: OrphanOriginalInfo[] = [];
-    let totalSize = 0;
-
-    for (const orig of allOriginals) {
-      const normalized = normalizeOriginalStoragePath(orig.path);
-      if (!activePaths.has(normalized)) {
-        orphans.push(orig);
-        totalSize += orig.size;
-      }
-    }
-
+    const inventory = await fetchCatalogInventory();
     return {
-      orphans,
-      totalSize,
-      totalCount: orphans.length,
+      orphans: inventory.orphanOriginals,
+      totalSize: inventory.totalOrphanSize,
+      totalCount: inventory.orphanOriginals.length,
     };
   } catch (e) {
     error("[siyuan-db] 获取孤立原始底图失败:", e);

@@ -1,32 +1,27 @@
-import { putFile, removeFile, readDir } from "../api";
-import { log, error } from "./logger";
+import {
+  defaultStorage,
+  ORIGINALS_STORAGE_DIR,
+  ORIGINALS_STORAGE_RELATIVE,
+  normalizeOriginalStoragePath,
+  getOriginalAbsoluteDataPath,
+  METADATA_STORAGE_DIR,
+  METADATA_STORAGE_RELATIVE,
+  normalizeMetadataFileName,
+  getMetadataAbsoluteDataPath,
+} from './storage';
+import type { IAssetReEditMetadata } from '../types/reedit';
+import { error } from './logger';
 
-/** 原始底图在思源中的存储根目录（绝对路径） */
-export const ORIGINALS_STORAGE_DIR = "/data/storage/petal/siyuan-assets-manager/originals";
-
-/** 原始底图相对路径前缀 */
-export const ORIGINALS_STORAGE_RELATIVE = "storage/petal/siyuan-assets-manager/originals";
-
-/**
- * 规范化原始底图路径为相对路径 (如 "storage/petal/siyuan-assets-manager/originals/foo.png")
- */
-export function normalizeOriginalStoragePath(pathOrName: string): string {
-  if (!pathOrName) return "";
-  let clean = pathOrName.replace(/^\/+/, "").replace(/^data\//, "");
-  if (!clean.startsWith(ORIGINALS_STORAGE_RELATIVE)) {
-    const baseName = clean.split("/").pop() || clean;
-    clean = `${ORIGINALS_STORAGE_RELATIVE}/${baseName}`;
-  }
-  return clean;
-}
-
-/**
- * 获取原始底图的绝对访问路径 (如 "/data/storage/petal/siyuan-assets-manager/originals/foo.png")
- */
-export function getOriginalAbsoluteDataPath(storagePath: string): string {
-  const relative = normalizeOriginalStoragePath(storagePath);
-  return `/data/${relative}`;
-}
+export {
+  ORIGINALS_STORAGE_DIR,
+  ORIGINALS_STORAGE_RELATIVE,
+  normalizeOriginalStoragePath,
+  getOriginalAbsoluteDataPath,
+  METADATA_STORAGE_DIR,
+  METADATA_STORAGE_RELATIVE,
+  normalizeMetadataFileName,
+  getMetadataAbsoluteDataPath,
+};
 
 /**
  * 将 DataURL 安全转换为 Blob，避免大型 DataURL 调用 fetch 失败
@@ -50,51 +45,7 @@ export function dataURLToBlob(dataUrl: string): Blob {
  * @param fileName 文件名（不包含 assets/ 前缀）
  */
 export async function saveAssetFile(blob: Blob, fileName: string): Promise<void> {
-  // 1. 优先在桌面端 Electron 环境下直接使用 Node.js FS 秒写，避免大文件上传限制
-  let fs: any;
-  let pathLib: any;
-  let dataDir = '';
-  try {
-    fs = (window as any).require('fs');
-    pathLib = (window as any).require('path');
-    dataDir = (window as any).siyuan?.config?.system?.dataDir;
-  } catch (e) {}
-
-  if (fs && pathLib && dataDir) {
-    try {
-      const destPath = pathLib.join(dataDir, 'assets', fileName);
-      const arrayBuffer = await blob.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      fs.writeFileSync(destPath, buffer);
-      log(`[saveAssetFile] FS writeFileSync succeeded for ${fileName}`);
-      return;
-    } catch (fsErr) {
-      error(`[saveAssetFile] FS writeFileSync failed, fallback to API:`, fsErr);
-    }
-  }
-
-  // 2. Web 环境保底：使用原生 fetch 提交 FormData
-  const form = new FormData();
-  form.append('path', `/data/assets/${fileName}`);
-  form.append('isDir', 'false');
-  form.append('modTime', Math.floor(Date.now() / 1000).toString());
-  const file = new File([blob], fileName, { type: blob.type || 'image/png' });
-  form.append('file', file);
-
-  try {
-    const res = await fetch('/api/file/putFile', {
-      method: 'POST',
-      body: form,
-    });
-    const json = await res.json();
-    if (json.code !== 0) {
-      throw new Error(json.msg || `putFile returned code ${json.code}`);
-    }
-    log(`[saveAssetFile] fetch putFile succeeded for ${fileName}`);
-  } catch (apiErr) {
-    error(`[saveAssetFile] fetch putFile failed:`, apiErr);
-    await putFile(`/data/assets/${fileName}`, false, file);
-  }
+  return defaultStorage.saveAsset(fileName, blob);
 }
 
 /**
@@ -103,7 +54,7 @@ export async function saveAssetFile(blob: Blob, fileName: string): Promise<void>
  * @param moveToTrash 是否移到回收站
  */
 export async function deleteAsset(fileName: string, moveToTrash: boolean = true): Promise<void> {
-  await removeFile(`/data/assets/${fileName}`);
+  await defaultStorage.deleteAsset(fileName);
 }
 
 export const deleteAssetFile = deleteAsset;
@@ -112,36 +63,7 @@ export const deleteAssetFile = deleteAsset;
  * 读取资产文件内容 (用于在图片编辑器中加载跨域或受限的文件)
  */
 export async function readAssetFile(fileName: string): Promise<Blob | null> {
-  // 1. 桌面端 Electron 环境下直接读取
-  let fs: any;
-  let pathLib: any;
-  let dataDir = '';
-  try {
-    fs = (window as any).require('fs');
-    pathLib = (window as any).require('path');
-    dataDir = (window as any).siyuan?.config?.system?.dataDir;
-  } catch (e) {}
-
-  if (fs && pathLib && dataDir) {
-    try {
-      const absPath = pathLib.join(dataDir, 'assets', fileName);
-      if (fs.existsSync(absPath)) {
-        const buffer = fs.readFileSync(absPath);
-        return new Blob([buffer]);
-      }
-    } catch (e) {}
-  }
-
-  // 2. Web 环境通过 fetch 读取
-  try {
-    const response = await fetch(`/assets/${fileName}`);
-    if (response.ok) {
-      return await response.blob();
-    }
-  } catch (e) {
-    error("Failed to read asset", e);
-  }
-  return null;
+  return defaultStorage.readAsset(fileName);
 }
 
 /**
@@ -159,11 +81,11 @@ export async function renameAssetFile(oldName: string, newName: string, deleteOl
     }
     await saveAssetFile(blob, newName);
     if (deleteOld) {
-      await removeFile(`/data/assets/${oldName}`);
+      await deleteAssetFile(oldName);
     }
     return true;
   } catch (e) {
-    error("[file-system] 重命名物理文件失败:", e);
+    error('[file-system] 重命名物理文件失败:', e);
     return false;
   }
 }
@@ -175,186 +97,28 @@ export async function renameAssetFile(oldName: string, newName: string, deleteOl
  * @returns 相对存储路径（如 storage/petal/siyuan-assets-manager/originals/172000_foo.png）
  */
 export async function saveOriginalImage(blob: Blob, baseName: string): Promise<string> {
-  const cleanBase = baseName.split("/").pop() || "original.png";
-  const uniqueName = `${Date.now()}_${cleanBase}`;
-  const relativePath = `${ORIGINALS_STORAGE_RELATIVE}/${uniqueName}`;
-  const absolutePath = `/data/${relativePath}`;
-
-  // 1. Electron 环境极速直写
-  let fs: any;
-  let pathLib: any;
-  let dataDir = '';
-  try {
-    fs = (window as any).require('fs');
-    pathLib = (window as any).require('path');
-    dataDir = (window as any).siyuan?.config?.system?.dataDir;
-  } catch (e) {}
-
-  if (fs && pathLib && dataDir) {
-    try {
-      const originalsDir = pathLib.join(dataDir, 'storage', 'petal', 'siyuan-assets-manager', 'originals');
-      if (!fs.existsSync(originalsDir)) {
-        fs.mkdirSync(originalsDir, { recursive: true });
-      }
-      const destPath = pathLib.join(originalsDir, uniqueName);
-      const arrayBuffer = await blob.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      fs.writeFileSync(destPath, buffer);
-      log(`[file-system] FS 成功写入原始底图: ${relativePath}`);
-      return relativePath;
-    } catch (fsErr) {
-      error(`[file-system] FS 写入原始底图失败，回退 API:`, fsErr);
-    }
-  }
-
-  // 2. Web API 环境
-  const file = new File([blob], uniqueName, { type: blob.type || 'image/png' });
-  const form = new FormData();
-  form.append('path', absolutePath);
-  form.append('isDir', 'false');
-  form.append('modTime', Math.floor(Date.now() / 1000).toString());
-  form.append('file', file);
-
-  try {
-    const res = await fetch('/api/file/putFile', {
-      method: 'POST',
-      body: form,
-    });
-    const json = await res.json();
-    if (json.code !== 0) {
-      throw new Error(json.msg || `putFile returned code ${json.code}`);
-    }
-    log(`[file-system] API 成功写入原始底图: ${relativePath}`);
-    return relativePath;
-  } catch (apiErr) {
-    error(`[file-system] API 写入原始底图失败:`, apiErr);
-    await putFile(absolutePath, false, file);
-    return relativePath;
-  }
+  return defaultStorage.saveOriginal(baseName, blob);
 }
 
 /**
  * 从隔离存储目录读取原始干净底图
  */
 export async function readOriginalImage(storagePathOrName: string): Promise<Blob | null> {
-  const relativePath = normalizeOriginalStoragePath(storagePathOrName);
-  const fileName = relativePath.split("/").pop() || "";
-  const absolutePath = `/data/${relativePath}`;
-
-  // 1. Electron 环境
-  let fs: any;
-  let pathLib: any;
-  let dataDir = '';
-  try {
-    fs = (window as any).require('fs');
-    pathLib = (window as any).require('path');
-    dataDir = (window as any).siyuan?.config?.system?.dataDir;
-  } catch (e) {}
-
-  if (fs && pathLib && dataDir) {
-    try {
-      const destPath = pathLib.join(dataDir, 'storage', 'petal', 'siyuan-assets-manager', 'originals', fileName);
-      if (fs.existsSync(destPath)) {
-        const buffer = fs.readFileSync(destPath);
-        return new Blob([buffer]);
-      }
-    } catch (e) {}
-  }
-
-  // 2. Web 环境
-  try {
-    const response = await fetch('/api/file/getFile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: absolutePath }),
-    });
-    if (response.ok) {
-      return await response.blob();
-    }
-  } catch (e) {
-    error("[file-system] 读取原始底图失败:", storagePathOrName, e);
-  }
-  return null;
+  return defaultStorage.readOriginal(storagePathOrName);
 }
 
 /**
  * 删除隔离存储目录中的原始底图
  */
 export async function deleteOriginalImage(storagePathOrName: string): Promise<boolean> {
-  const absolutePath = getOriginalAbsoluteDataPath(storagePathOrName);
-  try {
-    await removeFile(absolutePath);
-    return true;
-  } catch (e) {
-    error("[file-system] 删除原始底图失败:", absolutePath, e);
-    return false;
-  }
+  return defaultStorage.deleteOriginal(storagePathOrName);
 }
 
 /**
  * 列出隔离存储目录中的所有原始底图文件
  */
 export async function listOriginalImages(): Promise<Array<{ name: string; path: string; size: number; updated: number }>> {
-  try {
-    const files: any[] = await readDir(ORIGINALS_STORAGE_DIR);
-    if (!files || !Array.isArray(files)) return [];
-
-    let fs: any;
-    let pathLib: any;
-    let dataDir = '';
-    try {
-      fs = (window as any).require('fs');
-      pathLib = (window as any).require('path');
-      dataDir = (window as any).siyuan?.config?.system?.dataDir;
-    } catch (e) {}
-
-    const results: Array<{ name: string; path: string; size: number; updated: number }> = [];
-
-    for (const file of files) {
-      if (file.isDir) continue;
-
-      let size = file.size || 0;
-      let updated = file.updated || 0;
-
-      // 1. 在 Electron 桌面端使用 Node.js fs.statSync 精准快速获取真实文件大小
-      if (fs && pathLib && dataDir) {
-        try {
-          const absPath = pathLib.join(dataDir, 'storage', 'petal', 'siyuan-assets-manager', 'originals', file.name);
-          if (fs.existsSync(absPath)) {
-            const stat = fs.statSync(absPath);
-            size = stat.size;
-            updated = stat.mtimeMs || updated;
-          }
-        } catch (err) {}
-      }
-
-      results.push({
-        name: file.name,
-        path: `${ORIGINALS_STORAGE_RELATIVE}/${file.name}`,
-        size,
-        updated,
-      });
-    }
-
-    // 2. Web 环境保底：对 size 仍为 0 的文件通过 readOriginalImage 获取 blob 大小
-    if (!fs || !pathLib || !dataDir) {
-      for (const item of results) {
-        if (item.size === 0) {
-          try {
-            const blob = await readOriginalImage(item.path);
-            if (blob) {
-              item.size = blob.size;
-            }
-          } catch (e) {}
-        }
-      }
-    }
-
-    return results;
-  } catch (e) {
-    error("[file-system] 列出原始底图失败:", e);
-    return [];
-  }
+  return defaultStorage.listOriginals();
 }
 
 /**
@@ -372,4 +136,32 @@ export async function copyAssetToOriginals(assetName: string): Promise<string | 
     error(`[file-system] 拷贝资产至原始底图目录异常:`, e);
     return null;
   }
+}
+
+/**
+ * 将二次编辑元数据保存到插件专属存储目录 (data/storage/petal/siyuan-assets-manager/metadata/${assetName}.json)
+ */
+export async function saveAssetMetadataFile(assetName: string, metadata: IAssetReEditMetadata): Promise<void> {
+  return defaultStorage.saveAssetMetadata(assetName, metadata);
+}
+
+/**
+ * 从插件专属存储目录读取二次编辑元数据
+ */
+export async function readAssetMetadataFile(assetName: string): Promise<IAssetReEditMetadata | null> {
+  return defaultStorage.readAssetMetadata(assetName);
+}
+
+/**
+ * 删除插件专属存储目录中的二次编辑元数据
+ */
+export async function deleteAssetMetadataFile(assetName: string): Promise<boolean> {
+  return defaultStorage.deleteAssetMetadata(assetName);
+}
+
+/**
+ * 列出插件专属存储目录中的所有二次编辑元数据
+ */
+export async function listAllAssetMetadataFiles(): Promise<Array<{ assetName: string; metadata: IAssetReEditMetadata }>> {
+  return defaultStorage.listAssetMetadata();
 }

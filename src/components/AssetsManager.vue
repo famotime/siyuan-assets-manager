@@ -247,7 +247,7 @@ import {
 } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
-import { usePlugin } from '../main';
+import { usePlugin } from '../utils/plugin-context';
 import { error } from '../utils/logger';
 import VirtualAssetList from './VirtualAssetList.vue';
 import DeduplicateDialog from './DeduplicateDialog.vue';

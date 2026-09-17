@@ -1,4 +1,4 @@
-import { readAssetFile, deleteAsset } from './file-system';
+import { readAssetFile, deleteAsset, readAssetMetadataFile, saveAssetMetadataFile } from './file-system';
 import { replaceAssetInBlocks, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
 import type { AssetInfo, BlockRef } from './siyuan-db';
 import type { IAssetReEditMetadata } from '../types/reedit';
@@ -619,12 +619,22 @@ export async function normalizeDuplicateGroup(
 
   // 检查主资源是否携带二次编辑元数据
   let canonicalReEditMeta: IAssetReEditMetadata | null = null;
-  if (canonicalAsset?.isReEditable && canonicalAsset.reEditBlockId) {
+  try {
+    canonicalReEditMeta = await readAssetMetadataFile(canonicalName);
+  } catch (e) {}
+
+  if (!canonicalReEditMeta && canonicalAsset?.isReEditable && canonicalAsset.reEditBlockId) {
     try {
       canonicalReEditMeta = await getImageBlockReEditData(canonicalAsset.reEditBlockId);
     } catch (e) {
       warn(`[deduplicate] 获取主资源二次编辑元数据失败:`, e);
     }
+  }
+
+  if (canonicalReEditMeta) {
+    try {
+      await saveAssetMetadataFile(canonicalName, canonicalReEditMeta);
+    } catch (e) {}
   }
 
   const affectedRootIds = new Set<string>();
@@ -636,22 +646,13 @@ export async function normalizeDuplicateGroup(
     const refs: BlockRef[] = redundant.references || [];
 
     if (refs.length > 0) {
-      // 1. 替换文档块中的引用
-      await replaceAssetInBlocks(refs, redundant.name, canonicalName);
+      // 1. 替换文档块中的引用，若主资源具备二次编辑元数据则原子同步写入
+      await replaceAssetInBlocks(refs, redundant.name, canonicalName, {
+        newReEditMetadata: canonicalReEditMeta || undefined,
+      });
       stats.affectedBlocksCount += refs.length;
       for (const r of refs) {
         if (r.root_id) affectedRootIds.add(r.root_id);
-      }
-
-      // 2. 如果主资源具备二次编辑元数据，同步写入这些块
-      if (canonicalReEditMeta) {
-        for (const ref of refs) {
-          try {
-            await setImageBlockReEditData(ref.id, canonicalReEditMeta);
-          } catch (attrErr) {
-            warn(`[deduplicate] 同步二次编辑属性到块 ${ref.id} 失败:`, attrErr);
-          }
-        }
       }
     }
 

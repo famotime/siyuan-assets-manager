@@ -11,18 +11,34 @@ import { log, warn, error } from "./logger";
 /** 思源图像块二次编辑自定义属性名称 */
 export const CUSTOM_ATTR_REEDIT = "custom-asset-reedit";
 
+export interface ReplaceAssetOptions {
+  /** 是否自动同步更新相关块 custom-asset-reedit 属性中的 renderedAssetName（适用于重命名场景） */
+  updateReEditMeta?: boolean;
+  /** 如果提供全新的二次编辑元数据，将原子写入到所有受影响的块（适用于保存新编辑或去重合并） */
+  newReEditMetadata?: IAssetReEditMetadata;
+  /** 额外的目标块 ID 集合（例如当前正在编辑但可能尚未建立 Markdown 引用的块 ID） */
+  additionalBlockIds?: string[];
+}
+
 /**
- * 替换给定 Block 集合中的资源引用，并更新到 Siyuan 数据库中
+ * 替换给定 Block 集合中的资源引用，并原子同步维护二次编辑元数据
  * @param references 涉及该资源的所有 Block 引用信息
  * @param oldAssetName 旧资源名称（如 123.png）
  * @param newAssetName 新资源名称（如 123_edited.png）
+ * @param options 可选原子同步配置
  */
 export async function replaceAssetInBlocks(
   references: BlockRef[],
   oldAssetName: string,
-  newAssetName: string
+  newAssetName: string,
+  options?: ReplaceAssetOptions
 ): Promise<void> {
+  const affectedBlockIds = new Set<string>();
+
   for (const ref of references) {
+    if (ref.id) {
+      affectedBlockIds.add(ref.id);
+    }
     // 重新获取最新的 markdown，防止并发修改导致丢失
     const blocks = await sql(`SELECT markdown FROM blocks WHERE id = '${ref.id}'`);
     if (blocks && blocks.length > 0) {
@@ -31,6 +47,34 @@ export async function replaceAssetInBlocks(
         const newMarkdown = replaceAssetInMarkdown(currentMarkdown, oldAssetName, newAssetName);
         // 使用 Siyuan API 更新 Block，注意：更新时需要包含 data
         await updateBlock("markdown", newMarkdown, ref.id);
+      }
+    }
+  }
+
+  if (options?.additionalBlockIds) {
+    for (const bId of options.additionalBlockIds) {
+      if (bId) affectedBlockIds.add(bId);
+    }
+  }
+
+  // 原子维护二次编辑元数据
+  if (affectedBlockIds.size > 0) {
+    if (options?.newReEditMetadata) {
+      for (const bId of affectedBlockIds) {
+        await setImageBlockReEditData(bId, options.newReEditMetadata);
+      }
+    } else if (options?.updateReEditMeta) {
+      for (const bId of affectedBlockIds) {
+        try {
+          const meta = await getImageBlockReEditData(bId);
+          if (meta && (meta.renderedAssetName === oldAssetName || !meta.renderedAssetName)) {
+            meta.renderedAssetName = newAssetName;
+            meta.updatedAt = Date.now();
+            await setImageBlockReEditData(bId, meta);
+          }
+        } catch (attrErr) {
+          warn(`[siyuan-block] 重命名更新块 ${bId} 二次编辑属性失败:`, attrErr);
+        }
       }
     }
   }

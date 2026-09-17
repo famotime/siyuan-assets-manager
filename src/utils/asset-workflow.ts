@@ -7,6 +7,9 @@ import {
   saveOriginalImage as defaultSaveOriginalImage,
   readAssetFile as defaultReadAssetFile,
   deleteAssetFile as defaultDeleteAssetFile,
+  saveAssetMetadataFile as defaultSaveAssetMetadataFile,
+  readAssetMetadataFile as defaultReadAssetMetadataFile,
+  deleteAssetMetadataFile as defaultDeleteAssetMetadataFile,
 } from './file-system'
 import {
   replaceAssetInBlocks as defaultReplaceAssetInBlocks,
@@ -55,6 +58,8 @@ export interface SaveEditedWorkflowDeps {
   saveOriginalImage?: typeof defaultSaveOriginalImage
   setImageBlockReEditData?: typeof defaultSetImageBlockReEditData
   deleteAssetFile?: typeof defaultDeleteAssetFile
+  saveAssetMetadata?: typeof defaultSaveAssetMetadataFile
+  deleteAssetMetadata?: typeof defaultDeleteAssetMetadataFile
 }
 
 /**
@@ -87,6 +92,8 @@ export async function executeSaveEditedAssetWorkflow(
   const saveOriginalImage = deps.saveOriginalImage || defaultSaveOriginalImage
   const setImageBlockReEditData = deps.setImageBlockReEditData || defaultSetImageBlockReEditData
   const deleteAssetFile = deps.deleteAssetFile || defaultDeleteAssetFile
+  const saveAssetMetadata = deps.saveAssetMetadata || defaultSaveAssetMetadataFile
+  const deleteAssetMetadata = deps.deleteAssetMetadata || defaultDeleteAssetMetadataFile
 
   const newName = buildEditedAssetName(oldName)
   const blob = dataURLToBlob(dataUrl)
@@ -141,6 +148,14 @@ export async function executeSaveEditedAssetWorkflow(
         updatedAt: Date.now(),
       }
 
+      // 4.1 持久化到资产级 Sidecar 元数据（全局真理源）
+      try {
+        await saveAssetMetadata(newName, metadata)
+      } catch (sidecarErr) {
+        error('[asset-workflow] 保存 Sidecar 元数据失败:', sidecarErr)
+      }
+
+      // 4.2 双写维护所有关联块的 custom-asset-reedit 自定义属性（向前兼容与菜单极速展示）
       for (const bId of targetBlockIds) {
         await setImageBlockReEditData(bId, metadata)
       }
@@ -154,6 +169,9 @@ export async function executeSaveEditedAssetWorkflow(
   }
   if (delOld) {
     await deleteAssetFile(oldName)
+    try {
+      await deleteAssetMetadata(oldName)
+    } catch (e) {}
   }
 
   const updatedReferences: BlockRef[] = assetRecord?.references ? [...assetRecord.references] : []
@@ -201,6 +219,9 @@ export interface RenameWorkflowDeps {
   replaceAssetInBlocks?: typeof defaultReplaceAssetInBlocks
   getImageBlockReEditData?: typeof defaultGetImageBlockReEditData
   setImageBlockReEditData?: typeof defaultSetImageBlockReEditData
+  readAssetMetadata?: typeof defaultReadAssetMetadataFile
+  saveAssetMetadata?: typeof defaultSaveAssetMetadataFile
+  deleteAssetMetadata?: typeof defaultDeleteAssetMetadataFile
 }
 
 /**
@@ -209,6 +230,7 @@ export interface RenameWorkflowDeps {
  * 2. 物理重命名文件
  * 3. 联动更新文档中所有引用该资源的块
  * 4. 同步更新关联块 custom-asset-reedit 自定义属性中的 renderedAssetName
+ * 5. 同步迁移/更新 Sidecar 元数据文件
  */
 export async function executeRenameAssetWorkflow(
   params: RenameAssetWorkflowParams,
@@ -226,6 +248,9 @@ export async function executeRenameAssetWorkflow(
   const replaceAssetInBlocks = deps.replaceAssetInBlocks || defaultReplaceAssetInBlocks
   const getImageBlockReEditData = deps.getImageBlockReEditData || defaultGetImageBlockReEditData
   const setImageBlockReEditData = deps.setImageBlockReEditData || defaultSetImageBlockReEditData
+  const readAssetMetadata = deps.readAssetMetadata || defaultReadAssetMetadataFile
+  const saveAssetMetadata = deps.saveAssetMetadata || defaultSaveAssetMetadataFile
+  const deleteAssetMetadata = deps.deleteAssetMetadata || defaultDeleteAssetMetadataFile
 
   const oldName = asset.name
   const renameResult = await resolveRenameAssetName(
@@ -288,6 +313,21 @@ export async function executeRenameAssetWorkflow(
         warn(`[asset-workflow] 重命名更新块 ${ref.id} 二次编辑属性失败:`, attrErr)
       }
     }
+  }
+
+  // 5. 同步迁移/更新 Sidecar 元数据
+  try {
+    const sidecar = await readAssetMetadata(oldName)
+    if (sidecar) {
+      sidecar.renderedAssetName = newName
+      sidecar.updatedAt = Date.now()
+      await saveAssetMetadata(newName, sidecar)
+      if (deleteOld) {
+        await deleteAssetMetadata(oldName)
+      }
+    }
+  } catch (sidecarErr) {
+    warn(`[asset-workflow] 重命名更新 Sidecar 元数据失败:`, sidecarErr)
   }
 
   return {

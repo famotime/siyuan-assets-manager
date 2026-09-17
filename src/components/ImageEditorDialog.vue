@@ -48,15 +48,16 @@ import { ref, watch, nextTick, onUnmounted } from 'vue';
 import { RotateCcw, Layers } from 'lucide-vue-next';
 import { getImageEditor, extractVectorDataFromTui, applyVectorDataToTui, getFabricCanvasFromTui } from '../utils/tui-image-editor-bridge';
 import 'tui-image-editor/dist/tui-image-editor.css';
-import { readAssetFile, readOriginalImage } from '../utils/file-system';
-import { getImageBlockReEditData, removeImageBlockReEditData } from '../utils/siyuan-block';
+import { readAssetFile, readOriginalImage, readAssetMetadataFile, saveAssetMetadataFile } from '../utils/file-system';
+import { getImageBlockReEditData, removeImageBlockReEditData, setImageBlockReEditData } from '../utils/siyuan-block';
 import { getAssetInfoByName } from '../utils/siyuan-db';
 import localeZhCN from '../i18n/tui-locale-zh';
-import { calculateDialogSize, cleanTuiSvgArtifacts, getEditorShortcutAction, lockHostScroll, prepareCanvasExport, removeTuiSvgArtifacts, resetCanvasObjects, resetHostViewport, trimAndScaleDataUrl, unlockHostScroll } from '../utils/image-editor';
+import { calculateDialogSize, getEditorShortcutAction, prepareCanvasExport, resetCanvasObjects, trimAndScaleDataUrl } from '../utils/image-editor';
+import { cleanTuiSvgArtifacts, removeTuiSvgArtifacts, lockHostScroll, unlockHostScroll, resetHostViewport } from '../utils/host-isolation';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { log, warn, error } from '../utils/logger';
-import { usePlugin } from '../main';
+import { usePlugin } from '../utils/plugin-context';
 import { DEFAULT_IMAGE_EDITOR_TOOLS } from '../index';
 import type { IAssetReEditMetadata } from '../types/reedit';
 
@@ -148,35 +149,64 @@ watch(() => props.visible, async (newVal) => {
     let imageBlob: Blob | null = null;
     let initialUrl = '';
 
-    // 1. 获取目标 blockId（优先使用传入的 blockId，若无则尝试通过资产名反查）
+    // 1. 优先从 Sidecar 读取元数据（全局真理源，不随块删除而丢失）
+    let meta: IAssetReEditMetadata | null = null;
+    try {
+      meta = await readAssetMetadataFile(props.assetName);
+    } catch (sidecarErr) {
+      warn('[ImageEditorDialog] 读取 Sidecar 元数据失败:', sidecarErr);
+    }
+
+    // 2. 若 Sidecar 未命中，回退到块属性查找（向前兼容）
     let targetBlockId = props.blockId;
-    if (!targetBlockId) {
+    if (!meta) {
+      if (!targetBlockId) {
+        try {
+          const assetInfo = await getAssetInfoByName(props.assetName);
+          if (assetInfo?.reEditBlockId) {
+            targetBlockId = assetInfo.reEditBlockId;
+          } else if (assetInfo?.references && assetInfo.references.length === 1) {
+            targetBlockId = assetInfo.references[0].id;
+          }
+        } catch (e) {}
+      }
+
+      if (targetBlockId) {
+        try {
+          meta = await getImageBlockReEditData(targetBlockId);
+          // 即时自愈：如果从块中读到了历史元数据，立即补迁至 Sidecar
+          if (meta) {
+            try {
+              await saveAssetMetadataFile(props.assetName, meta);
+              log(`[ImageEditorDialog] 成功将块 ${targetBlockId} 的元数据自愈迁移至 Sidecar: ${props.assetName}.json`);
+            } catch (migErr) {}
+          }
+        } catch (err) {
+          warn('[ImageEditorDialog] 查询块二次编辑元数据失败:', err);
+        }
+      }
+    }
+
+    // 3. 属性自愈：若当前交互块尚未写入 custom-asset-reedit 标记，自动回写
+    if (meta && props.blockId) {
       try {
-        const assetInfo = await getAssetInfoByName(props.assetName);
-        if (assetInfo?.reEditBlockId) {
-          targetBlockId = assetInfo.reEditBlockId;
-        } else if (assetInfo?.references && assetInfo.references.length === 1) {
-          targetBlockId = assetInfo.references[0].id;
+        const currentBlockMeta = await getImageBlockReEditData(props.blockId);
+        if (!currentBlockMeta) {
+          await setImageBlockReEditData(props.blockId, meta);
         }
       } catch (e) {}
     }
 
-    if (targetBlockId) {
-      try {
-        const meta = await getImageBlockReEditData(targetBlockId);
-        if (meta) {
-          isReEditMode.value = true;
-          reEditMetadata.value = meta;
-          originalStoragePath.value = meta.originalStoragePath;
+    // 4. 加载二次编辑底图
+    if (meta) {
+      isReEditMode.value = true;
+      reEditMetadata.value = meta;
+      originalStoragePath.value = meta.originalStoragePath;
 
-          // 尝试从隔离存储中读取干净原始底图
-          imageBlob = await readOriginalImage(meta.originalStoragePath);
-          if (!imageBlob) {
-            warn(`[ImageEditorDialog] 未能从隔离目录读取底图 ${meta.originalStoragePath}，尝试降级读取当前 assets`);
-          }
-        }
-      } catch (err) {
-        warn('[ImageEditorDialog] 查询二次编辑元数据失败:', err);
+      // 尝试从隔离存储中读取干净原始底图
+      imageBlob = await readOriginalImage(meta.originalStoragePath);
+      if (!imageBlob) {
+        warn(`[ImageEditorDialog] 未能从隔离目录读取底图 ${meta.originalStoragePath}，尝试降级读取当前 assets`);
       }
     }
 

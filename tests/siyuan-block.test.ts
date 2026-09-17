@@ -65,6 +65,63 @@ describe('siyuan block asset updates', () => {
     )
   })
 
+  it('atomically updates re-edit metadata renderedAssetName when updateReEditMeta option is set', async () => {
+    sqlMock.mockResolvedValue([
+      { markdown: '![img](assets/old.png)' },
+    ])
+    getBlockAttrsMock.mockResolvedValue({
+      [CUSTOM_ATTR_REEDIT]: JSON.stringify({
+        version: 1,
+        originalStoragePath: 'storage/petal/siyuan-assets-manager/originals/old_orig.png',
+        renderedAssetName: 'old.png',
+        canvasSize: { width: 800, height: 600 },
+        compressed: false,
+        vectorData: { objects: [] },
+        updatedAt: 100,
+      }),
+    })
+    setBlockAttrsMock.mockResolvedValue({} as any)
+
+    await replaceAssetInBlocks([ref('block-1')], 'old.png', 'new.png', {
+      updateReEditMeta: true,
+    })
+
+    expect(updateBlockMock).toHaveBeenCalledWith('markdown', '![img](assets/new.png)', 'block-1')
+    expect(setBlockAttrsMock).toHaveBeenCalledWith(
+      'block-1',
+      expect.objectContaining({
+        [CUSTOM_ATTR_REEDIT]: expect.stringContaining('"renderedAssetName":"new.png"'),
+      }),
+    )
+  })
+
+  it('atomically writes new re-edit metadata to affected blocks and additional blocks', async () => {
+    sqlMock.mockResolvedValue([
+      { markdown: '![img](assets/old.png)' },
+    ])
+    setBlockAttrsMock.mockResolvedValue({} as any)
+
+    const newMeta: IAssetReEditMetadata = {
+      version: 1,
+      originalStoragePath: 'storage/petal/siyuan-assets-manager/originals/foo.png',
+      renderedAssetName: 'new.png',
+      canvasSize: { width: 400, height: 300 },
+      compressed: false,
+      vectorData: { objects: [] },
+      updatedAt: 200,
+    }
+
+    await replaceAssetInBlocks([ref('block-1')], 'old.png', 'new.png', {
+      newReEditMetadata: newMeta,
+      additionalBlockIds: ['block-extra'],
+    })
+
+    expect(updateBlockMock).toHaveBeenCalledWith('markdown', '![img](assets/new.png)', 'block-1')
+    expect(setBlockAttrsMock).toHaveBeenCalledTimes(2)
+    expect(setBlockAttrsMock).toHaveBeenCalledWith('block-1', expect.anything())
+    expect(setBlockAttrsMock).toHaveBeenCalledWith('block-extra', expect.anything())
+  })
+
   it('removes asset references and updates non-empty blocks', async () => {
     sqlMock.mockResolvedValue([
       {

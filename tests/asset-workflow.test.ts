@@ -19,6 +19,8 @@ describe('asset workflow', () => {
     const saveOriginalImage = vi.fn().mockResolvedValue('storage/petal/siyuan-assets-manager/originals/foo_orig.png')
     const setImageBlockReEditData = vi.fn().mockResolvedValue(true)
     const deleteAssetFile = vi.fn().mockResolvedValue(undefined)
+    const saveAssetMetadata = vi.fn().mockResolvedValue(undefined)
+    const deleteAssetMetadata = vi.fn().mockResolvedValue(true)
 
     const deps: SaveEditedWorkflowDeps = {
       saveAssetFile,
@@ -28,6 +30,8 @@ describe('asset workflow', () => {
       saveOriginalImage,
       setImageBlockReEditData,
       deleteAssetFile,
+      saveAssetMetadata,
+      deleteAssetMetadata,
     }
 
     const result = await executeSaveEditedAssetWorkflow(
@@ -57,7 +61,15 @@ describe('asset workflow', () => {
     )
     expect(saveOriginalImage).toHaveBeenCalledTimes(1)
     expect(setImageBlockReEditData).toHaveBeenCalledTimes(2) // block-2 and block-1
+    expect(saveAssetMetadata).toHaveBeenCalledWith(
+      result.newName,
+      expect.objectContaining({
+        renderedAssetName: result.newName,
+        originalStoragePath: 'storage/petal/siyuan-assets-manager/originals/foo_orig.png',
+      }),
+    )
     expect(deleteAssetFile).toHaveBeenCalledWith('foo.png')
+    expect(deleteAssetMetadata).toHaveBeenCalledWith('foo.png')
     expect(result.deletedOld).toBe(true)
   })
 
@@ -122,6 +134,17 @@ describe('asset workflow', () => {
       updatedAt: 100,
     })
     const setImageBlockReEditData = vi.fn().mockResolvedValue(true)
+    const readAssetMetadata = vi.fn().mockResolvedValue({
+      version: 1,
+      originalStoragePath: 'storage/petal/siyuan-assets-manager/originals/old.png',
+      renderedAssetName: 'old.png',
+      canvasSize: { width: 800, height: 600 },
+      compressed: false,
+      vectorData: { objects: [] },
+      updatedAt: 100,
+    })
+    const saveAssetMetadata = vi.fn().mockResolvedValue(undefined)
+    const deleteAssetMetadata = vi.fn().mockResolvedValue(true)
 
     const asset: AssetInfo = {
       name: 'old.png',
@@ -140,6 +163,9 @@ describe('asset workflow', () => {
       replaceAssetInBlocks,
       getImageBlockReEditData,
       setImageBlockReEditData,
+      readAssetMetadata,
+      saveAssetMetadata,
+      deleteAssetMetadata,
     }
 
     const result = await executeRenameAssetWorkflow(
@@ -166,5 +192,13 @@ describe('asset workflow', () => {
         renderedAssetName: 'renamed.png',
       }),
     )
+    expect(readAssetMetadata).toHaveBeenCalledWith('old.png')
+    expect(saveAssetMetadata).toHaveBeenCalledWith(
+      'renamed.png',
+      expect.objectContaining({
+        renderedAssetName: 'renamed.png',
+      }),
+    )
+    expect(deleteAssetMetadata).toHaveBeenCalledWith('old.png')
   })
 })

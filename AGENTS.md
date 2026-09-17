@@ -31,9 +31,12 @@
 | `src/utils/asset-workflow.ts` | 保存编辑与重命名长业务编排服务层 |
 | `src/utils/reedit-data.ts` | 二次编辑元数据自适应压缩/解压、HTML 实体兼容与校验 |
 | `src/utils/tui-image-editor-bridge.ts` | Fabric 矢量图层抽取、反序列化注入、序号-形状双向关联恢复 |
-| `src/utils/file-system.ts` | 资源文件与隔离原始底图存储（Electron FS 直写 / Web API 回退） |
-| `src/utils/siyuan-block.ts` | 块引用替换/清理、`custom-asset-reedit` 块属性读写与批量查询 |
-| `src/utils/siyuan-db.ts` | 资源文件聚合、引用统计、二次编辑元数据绑定、孤立底图扫描与清理 |
+| `src/utils/storage/` | 统一存储门面与 Seam 抽象（`IStorageAdapter`、`ElectronStorageAdapter`、`HttpStorageAdapter`、`MemoryStorageAdapter`） |
+| `src/utils/file-system.ts` | 存储门面兼容桥接层（资源文件读写、重命名与隔离原始底图持久化） |
+| `src/utils/siyuan-block.ts` | 块引用原子替换/清理、`custom-asset-reedit` 块属性原子维护与批量查询 |
+| `src/utils/asset-catalog.ts` | 统一资产目录装配流水线（`resolveCatalogPipeline`、`fetchCatalogInventory`）：关联映射与孤立底图判定 |
+| `src/utils/siyuan-db.ts` | 资源文件聚合、引用统计门面、二次编辑元数据绑定与孤立底图扫描清理 |
+| `src/utils/host-isolation.ts` | 宿主视口滚动锁定拦截与 TUI 隐式 SVG 节点物理脱标清理 |
 | `src/utils/image-editor.ts` | 导出流水线（`prepareCanvasExport`）、画布重置、100% 分辨率换算、Alpha 切边 |
 | `src/utils/asset-list.ts` | 资源过滤、排序、扩展名拆分、图标徽章（`getAssetBadgeText`）、大小格式化与清理统计 |
 | `src/utils/asset-actions.ts` | 编辑后命名生成、重命名校验与扩展名决策 |
@@ -43,7 +46,7 @@
 ## 4. 开发与测试命令
 
 - `npm install` — 安装依赖。
-- `npm test` — 运行 Vitest 单元测试（14 套件 / 66+ 测试，jsdom 环境）。
+- `npm test` — 运行 Vitest 单元测试（20 套件 / 129 测试，jsdom 环境）。
 - `npx vitest run tests/asset-workflow.test.ts` — 运行指定测试文件。
 - `npm run build` — 生产构建，输出到 `dist/` 并生成 `package.zip`。
 - `npm run dev` — Watch 构建至 `.env` 中 `VITE_SIYUAN_WORKSPACE_PATH` 配置的插件目录。
