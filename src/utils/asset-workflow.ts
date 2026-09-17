@@ -148,16 +148,11 @@ export async function executeSaveEditedAssetWorkflow(
         updatedAt: Date.now(),
       }
 
-      // 4.1 持久化到资产级 Sidecar 元数据（全局真理源）
+      // 4.1 持久化到资产级 Sidecar 元数据（全局真理源，零块属性污染）
       try {
         await saveAssetMetadata(newName, metadata)
       } catch (sidecarErr) {
         error('[asset-workflow] 保存 Sidecar 元数据失败:', sidecarErr)
-      }
-
-      // 4.2 双写维护所有关联块的 custom-asset-reedit 自定义属性（向前兼容与菜单极速展示）
-      for (const bId of targetBlockIds) {
-        await setImageBlockReEditData(bId, metadata)
       }
     }
   }

@@ -260,10 +260,7 @@ describe('deduplicate utils', () => {
       expect(replaceAssetInBlocksMock).toHaveBeenCalledWith(
         redundant.references,
         'copy.png',
-        'main.png',
-        {
-          newReEditMetadata: mockReEditMeta,
-        }
+        'main.png'
       );
       expect(deleteAssetMock).toHaveBeenCalledWith('copy.png');
       expect(stats.affectedBlocksCount).toBe(1);

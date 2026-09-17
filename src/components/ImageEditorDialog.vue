@@ -49,7 +49,7 @@ import { RotateCcw, Layers } from 'lucide-vue-next';
 import { getImageEditor, extractVectorDataFromTui, applyVectorDataToTui, getFabricCanvasFromTui } from '../utils/tui-image-editor-bridge';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile, readOriginalImage, readAssetMetadataFile, saveAssetMetadataFile } from '../utils/file-system';
-import { getImageBlockReEditData, removeImageBlockReEditData, setImageBlockReEditData } from '../utils/siyuan-block';
+import { getImageBlockReEditData, removeImageBlockReEditData } from '../utils/siyuan-block';
 import { getAssetInfoByName } from '../utils/siyuan-db';
 import localeZhCN from '../i18n/tui-locale-zh';
 import { calculateDialogSize, getEditorShortcutAction, prepareCanvasExport, resetCanvasObjects, trimAndScaleDataUrl } from '../utils/image-editor';
@@ -187,17 +187,7 @@ watch(() => props.visible, async (newVal) => {
       }
     }
 
-    // 3. 属性自愈：若当前交互块尚未写入 custom-asset-reedit 标记，自动回写
-    if (meta && props.blockId) {
-      try {
-        const currentBlockMeta = await getImageBlockReEditData(props.blockId);
-        if (!currentBlockMeta) {
-          await setImageBlockReEditData(props.blockId, meta);
-        }
-      } catch (e) {}
-    }
-
-    // 4. 加载二次编辑底图
+    // 3. 加载二次编辑底图
     if (meta) {
       isReEditMode.value = true;
       reEditMetadata.value = meta;

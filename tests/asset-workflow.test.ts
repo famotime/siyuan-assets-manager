@@ -60,7 +60,7 @@ describe('asset workflow', () => {
       result.newName,
     )
     expect(saveOriginalImage).toHaveBeenCalledTimes(1)
-    expect(setImageBlockReEditData).toHaveBeenCalledTimes(2) // block-2 and block-1
+    expect(setImageBlockReEditData).not.toHaveBeenCalled()
     expect(saveAssetMetadata).toHaveBeenCalledWith(
       result.newName,
       expect.objectContaining({
@@ -84,6 +84,8 @@ describe('asset workflow', () => {
     const saveOriginalImage = vi.fn()
     const setImageBlockReEditData = vi.fn().mockResolvedValue(true)
     const deleteAssetFile = vi.fn().mockResolvedValue(undefined)
+    const saveAssetMetadata = vi.fn().mockResolvedValue(undefined)
+    const deleteAssetMetadata = vi.fn().mockResolvedValue(true)
 
     const deps: SaveEditedWorkflowDeps = {
       saveAssetFile,
@@ -93,6 +95,8 @@ describe('asset workflow', () => {
       saveOriginalImage,
       setImageBlockReEditData,
       deleteAssetFile,
+      saveAssetMetadata,
+      deleteAssetMetadata,
     }
 
     const result = await executeSaveEditedAssetWorkflow(
@@ -111,8 +115,9 @@ describe('asset workflow', () => {
 
     expect(result.success).toBe(true)
     expect(saveOriginalImage).not.toHaveBeenCalled()
-    expect(setImageBlockReEditData).toHaveBeenCalledWith(
-      'block-1',
+    expect(setImageBlockReEditData).not.toHaveBeenCalled()
+    expect(saveAssetMetadata).toHaveBeenCalledWith(
+      result.newName,
       expect.objectContaining({
         originalStoragePath: 'storage/petal/siyuan-assets-manager/originals/foo_orig.png',
       }),

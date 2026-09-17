@@ -646,10 +646,8 @@ export async function normalizeDuplicateGroup(
     const refs: BlockRef[] = redundant.references || [];
 
     if (refs.length > 0) {
-      // 1. 替换文档块中的引用，若主资源具备二次编辑元数据则原子同步写入
-      await replaceAssetInBlocks(refs, redundant.name, canonicalName, {
-        newReEditMetadata: canonicalReEditMeta || undefined,
-      });
+      // 1. 替换文档块中的引用
+      await replaceAssetInBlocks(refs, redundant.name, canonicalName);
       stats.affectedBlocksCount += refs.length;
       for (const r of refs) {
         if (r.root_id) affectedRootIds.add(r.root_id);

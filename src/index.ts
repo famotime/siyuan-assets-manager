@@ -266,20 +266,13 @@ export default class AssetsManagerPlugin extends Plugin {
       const menu = detail.menu || (window as any).siyuan?.menus?.menu;
       if (!menu) return;
 
-      // 同步判断 DOM 属性是否存在二次编辑标记
-      const blockEl = detail.element?.closest('[data-node-id]') || ((detail as any).nodeElement ? (detail as any).nodeElement.closest('[data-node-id]') : null);
-      const hasReEditAttr = Boolean(
-        blockEl?.getAttribute('custom-asset-reedit') ||
-        blockEl?.getAttribute('data-custom-asset-reedit')
-      );
-
       menu.addItem({
         label: "资源管家",
         icon: "iconAssetsManager",
         type: "submenu",
         submenu: [
           {
-            label: hasReEditAttr ? "编辑标注（已含历史标注）" : "编辑标注",
+            label: "编辑标注",
             click: () => {
               if ((window as any)._siyuan_assets_manager_open_editor) {
                 (window as any)._siyuan_assets_manager_open_editor(assetName, blockId || undefined);
