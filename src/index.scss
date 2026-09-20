@@ -35,6 +35,10 @@ $z-modal: 200;
 $z-modal-nested: 300;
 $z-tooltip: 400;
 $z-preview: 500;
+$z-editor: 1000;
+$z-deduplicate: 1050;
+$z-rename: 1100;
+$z-confirm: 3000;
 
 // 动画
 $transition-fast: 0.15s ease;
@@ -483,7 +487,26 @@ svg.lucide {
   border: none !important;
   overflow: visible !important;
   pointer-events: none !important;
-  z-index: $z-modal !important;
+  z-index: $z-modal;
+}
+
+// ===== 模态确认与警告弹窗（最高优先级浮层，严格置于所有视图之上） =====
+.am-confirm-dialog-overlay {
+  z-index: $z-confirm !important;
+}
+
+.am-confirm-dialog {
+  width: 480px;
+  max-width: 90vw;
+  max-height: 85vh;
+
+  .am-dialog__body {
+    white-space: pre-wrap;
+    line-height: 1.6;
+    font-size: 14px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
 }
 
 // ===== TUI 注入到 document.body 的 SVG 图标库隔离保护 =====

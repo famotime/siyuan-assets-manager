@@ -321,6 +321,6 @@ async function submitGlobalRename() {
   border: none !important;
   overflow: visible !important;
   pointer-events: none !important;
-  z-index: 200 !important;
+  z-index: 200;
 }
 </style>
