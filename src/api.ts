@@ -103,8 +103,25 @@ export async function setBlockAttrs(
   return request(url, { id, attrs });
 }
 
+// **************************************** 块详情 (Kramdown) ****************************************
+export async function getBlockKramdown(id: BlockId): Promise<{ id: string; kramdown: string } | null> {
+  const url = "/api/block/getBlockKramdown";
+  return request(url, { id });
+}
+
+// **************************************** 数据库事务同步 ****************************************
+/**
+ * 强制思源内核立即将未落盘的内存事务和 SQLite 异步写入队列同步刷新进数据库
+ * 避免在 updateBlock 后立即进行 SQL 查库时因 3 秒批处理队列时延导致读到脏数据
+ */
+export async function flushTransaction(): Promise<any> {
+  const url = "/api/sqlite/flushTransaction";
+  return request(url, {});
+}
+
 // **************************************** 笔记本 ****************************************
 export async function lsNotebooks(): Promise<IReslsNotebooks> {
   const url = "/api/notebook/lsNotebooks";
   return request(url, {});
 }
+

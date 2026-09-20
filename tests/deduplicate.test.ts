@@ -9,6 +9,7 @@ vi.mock('../src/utils/file-system', () => ({
 vi.mock('../src/utils/siyuan-block', () => ({
   replaceAssetInBlocks: vi.fn(),
   queryCurrentAssetBlockReferences: vi.fn().mockResolvedValue([]),
+  verifyAssetZeroReferences: vi.fn().mockResolvedValue({ isClean: true, remainingBlocks: [] }),
   getImageBlockReEditData: vi.fn(),
   setImageBlockReEditData: vi.fn(),
 }));
@@ -18,7 +19,7 @@ vi.mock('../src/utils/attribute-view', () => ({
 }));
 
 import { readAssetFile, deleteAsset } from '../src/utils/file-system';
-import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, getImageBlockReEditData, setImageBlockReEditData } from '../src/utils/siyuan-block';
+import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, verifyAssetZeroReferences, getImageBlockReEditData, setImageBlockReEditData } from '../src/utils/siyuan-block';
 import { replaceAssetInAttributeViews } from '../src/utils/attribute-view';
 import {
   isImageFile,
@@ -45,6 +46,7 @@ const readAssetFileMock = vi.mocked(readAssetFile);
 const deleteAssetMock = vi.mocked(deleteAsset);
 const replaceAssetInBlocksMock = vi.mocked(replaceAssetInBlocks);
 const queryCurrentAssetBlockReferencesMock = vi.mocked(queryCurrentAssetBlockReferences);
+const verifyAssetZeroReferencesMock = vi.mocked(verifyAssetZeroReferences);
 const replaceAssetInAttributeViewsMock = vi.mocked(replaceAssetInAttributeViews);
 const getImageBlockReEditDataMock = vi.mocked(getImageBlockReEditData);
 const setImageBlockReEditDataMock = vi.mocked(setImageBlockReEditData);
@@ -79,6 +81,7 @@ describe('deduplicate utils', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryCurrentAssetBlockReferencesMock.mockResolvedValue([]);
+    verifyAssetZeroReferencesMock.mockResolvedValue({ isClean: true, remainingBlocks: [] });
     replaceAssetInAttributeViewsMock.mockResolvedValue(0);
   });
 
@@ -298,10 +301,11 @@ describe('deduplicate utils', () => {
         redundantSize: 4000,
       };
 
-      // 模拟情况：第一次查询引用（合并不变），第二次在删除前二次复核时发现思源库中还有残留引用未清干净
-      queryCurrentAssetBlockReferencesMock
-        .mockResolvedValueOnce([]) // 步骤 1: 动态全库实时查询最新引用
-        .mockResolvedValueOnce([   // 步骤 4: Pre-delete Double Check 发现残留
+      // 模拟情况：第一次查询引用（合并不变），第二次在删除前二次复核时发现真实仍有残留引用未清干净
+      queryCurrentAssetBlockReferencesMock.mockResolvedValueOnce([]); // 步骤 1: 动态全库实时查询最新引用
+      verifyAssetZeroReferencesMock.mockResolvedValueOnce({
+        isClean: false,
+        remainingBlocks: [
           {
             id: 'residual-block-id',
             root_id: 'doc-1',
@@ -310,7 +314,8 @@ describe('deduplicate utils', () => {
             markdown: '![residual](assets/copy.png)',
             path: '/doc.sy',
           },
-        ]);
+        ],
+      });
 
       await expect(normalizeDuplicateGroup(group)).rejects.toThrow('去重安全拦截');
 
@@ -360,6 +365,36 @@ describe('deduplicate utils', () => {
       expect(deleteAssetMock).toHaveBeenCalledWith('copy.png');
       expect(stats.affectedBlocksCount).toBe(1);
       expect(stats.affectedDocsCount).toBe(1);
+      expect(stats.deletedFilesCount).toBe(1);
+    });
+
+    it('successfully normalizes when verifyAssetZeroReferences confirms zero real references despite SQLite index delay', async () => {
+      const canonical = makeAsset('main.png', 4000, 1);
+      const redundant = makeAsset('copy.png', 4000, 1);
+
+      const group: IDuplicateGroup = {
+        id: 'exact_sqlite_delay',
+        mode: 'exact',
+        similarity: 1.0,
+        canonicalAssetName: 'main.png',
+        items: [
+          { asset: canonical, score: 500, isCanonical: true },
+          { asset: redundant, score: 100, isCanonical: false },
+        ],
+        redundantCount: 1,
+        redundantSize: 4000,
+      };
+
+      // 模拟经过 AST 真实验证确认无真实残留
+      verifyAssetZeroReferencesMock.mockResolvedValueOnce({
+        isClean: true,
+        remainingBlocks: [],
+      });
+
+      const stats = await normalizeDuplicateGroup(group);
+
+      expect(deleteAssetMock).toHaveBeenCalledWith('copy.png');
+      expect(group.isProcessed).toBe(true);
       expect(stats.deletedFilesCount).toBe(1);
     });
 

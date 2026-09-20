@@ -1,5 +1,5 @@
 import { readAssetFile, deleteAsset, readAssetMetadataFile, saveAssetMetadataFile, isTrashSupported } from './file-system';
-import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
+import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, verifyAssetZeroReferences, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
 import { replaceAssetInAttributeViews } from './attribute-view';
 import type { AssetInfo, BlockRef } from './siyuan-db';
 import type { IAssetReEditMetadata } from '../types/reedit';
@@ -683,9 +683,10 @@ export async function normalizeDuplicateGroup(
     }
 
     // 4. 【核心生死线】删除前强制二次安全复核 (Pre-delete Double Check)
-    // 实时查库确认全库旧文件引用数确已为 0，若仍有残留引用，坚决禁止删除物理文件！
-    const remainingBlocks = await queryCurrentAssetBlockReferences(redundant.name);
-    if (remainingBlocks.length > 0) {
+    // 结合思源内核事务主动刷新与内存 AST 树穿透核查，确认全库旧文件引用数确已为 0。
+    // 若经真实 AST 深度核查后仍有真实残留引用，坚决禁止删除物理文件！
+    const { isClean, remainingBlocks } = await verifyAssetZeroReferences(redundant.name);
+    if (!isClean && remainingBlocks.length > 0) {
       const errMsg = `[去重安全拦截] 冗余资源 [${redundant.name}] 尚有 ${remainingBlocks.length} 处文档引用未完成替换，已终止删除该物理文件！受影响块ID: ${remainingBlocks.map(b => b.id).slice(0, 3).join(', ')}`;
       error(errMsg);
       throw new Error(errMsg);

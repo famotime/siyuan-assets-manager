@@ -1,4 +1,4 @@
-import { updateBlock, deleteBlock, sql, getBlockAttrs, setBlockAttrs } from "../api";
+import { updateBlock, deleteBlock, sql, getBlockAttrs, setBlockAttrs, flushTransaction, getBlockKramdown } from "../api";
 import { BlockRef } from "./siyuan-db";
 import {
   removeAssetFromMarkdown,
@@ -170,6 +170,13 @@ export async function replaceAssetInBlocks(
     warn(`[siyuan-block] 同步更新属性视图资源 ${oldAssetName} -> ${newAssetName} 失败:`, avErr);
     throw avErr;
   }
+
+  // 主动触发思源内核将待落盘内存事务与 SQLite 异步队列同步写入数据库
+  try {
+    await flushTransaction();
+  } catch (flushErr) {
+    warn(`[siyuan-block] replaceAssetInBlocks flushTransaction 失败:`, flushErr);
+  }
 }
 
 /**
@@ -205,7 +212,100 @@ export async function removeAssetFromBlocks(
       }
     }
   }
+
+  // 主动触发思源内核同步落库
+  try {
+    await flushTransaction();
+  } catch (flushErr) {
+    warn(`[siyuan-block] removeAssetFromBlocks flushTransaction 失败:`, flushErr);
+  }
 }
+
+/**
+ * 高可靠二次复核：确认指定资产在全库中的引用数确已为 0
+ * 融合主动内核事务同步、异步时延重试与内存 AST 树穿透核查（Deep Truth Check），
+ * 杜绝因 SQLite 批处理队列时延导致的虚假残留误拦截，同时确保真实未替换块 100% 坚决拦截。
+ */
+export async function verifyAssetZeroReferences(
+  assetName: string
+): Promise<{ isClean: boolean; remainingBlocks: BlockRef[] }> {
+  if (!assetName) return { isClean: true, remainingBlocks: [] };
+
+  // 1. 主动触发思源内核事务落库，刷新 SQLite blocks 表
+  try {
+    await flushTransaction();
+  } catch (flushErr) {
+    warn(`[siyuan-block] verifyAssetZeroReferences 触发 flushTransaction 失败:`, flushErr);
+  }
+
+  // 2. 首次实时查库
+  let remainingBlocks = await queryCurrentAssetBlockReferences(assetName);
+
+  // 3. 若查出残留，进行短暂重试等待内核异步队列 flush（最多重试 3 次，间隔 150ms）
+  if (remainingBlocks.length > 0) {
+    for (let retry = 0; retry < 3 && remainingBlocks.length > 0; retry++) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      try {
+        await flushTransaction();
+      } catch {}
+      remainingBlocks = await queryCurrentAssetBlockReferences(assetName);
+    }
+  }
+
+  // 4. 若重试后依然查到残留块，启动深度真相核查 (Deep Truth Check)：穿透向内存 AST 树核验
+  if (remainingBlocks.length > 0) {
+    const realRemainingBlocks: BlockRef[] = [];
+    const encodedOld = encodeURIComponent(assetName);
+
+    for (const block of remainingBlocks) {
+      let isRealReference = false;
+      try {
+        // 直接获取内核内存 AST 树上的实时最新 Kramdown
+        const kramdownRes = await getBlockKramdown(block.id);
+        const currentKramdown = kramdownRes?.kramdown || '';
+        if (
+          currentKramdown.includes(`assets/${assetName}`) ||
+          (encodedOld !== assetName && currentKramdown.includes(`assets/${encodedOld}`))
+        ) {
+          isRealReference = true;
+        } else {
+          // 检查当前块属性 attrs
+          const attrs = await getBlockAttrs(block.id);
+          if (attrs && typeof attrs === 'object') {
+            for (const v of Object.values(attrs)) {
+              if (
+                typeof v === 'string' &&
+                (v.includes(`assets/${assetName}`) ||
+                  (encodedOld !== assetName && v.includes(`assets/${encodedOld}`)))
+              ) {
+                isRealReference = true;
+                break;
+              }
+            }
+          }
+        }
+      } catch (checkErr) {
+        // 若读取内存 AST 异常，秉持安全第一原则，保守判定为真实引用
+        warn(`[siyuan-block] 获取块 ${block.id} 实时 Kramdown/attrs 失败，保守视为真实引用:`, checkErr);
+        isRealReference = true;
+      }
+
+      if (isRealReference) {
+        realRemainingBlocks.push(block);
+      } else {
+        log(`[siyuan-block] 块 ${block.id} 在 SQLite 中显示有残留，但真实 AST 已无引用，排除虚假残留`);
+      }
+    }
+
+    remainingBlocks = realRemainingBlocks;
+  }
+
+  return {
+    isClean: remainingBlocks.length === 0,
+    remainingBlocks,
+  };
+}
+
 
 /**
  * 获取指定图像块的二次编辑元数据

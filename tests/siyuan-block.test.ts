@@ -6,6 +6,8 @@ vi.mock('../src/api', () => ({
   updateBlock: vi.fn(),
   getBlockAttrs: vi.fn(),
   setBlockAttrs: vi.fn(),
+  flushTransaction: vi.fn().mockResolvedValue({ code: 0 }),
+  getBlockKramdown: vi.fn(),
 }))
 
 import {
@@ -14,11 +16,14 @@ import {
   updateBlock,
   getBlockAttrs,
   setBlockAttrs,
+  flushTransaction,
+  getBlockKramdown,
 } from '../src/api'
 import {
   removeAssetFromBlocks,
   replaceAssetInBlocks,
   queryCurrentAssetBlockReferences,
+  verifyAssetZeroReferences,
   getImageBlockReEditData,
   setImageBlockReEditData,
   removeImageBlockReEditData,
@@ -33,6 +38,8 @@ const updateBlockMock = vi.mocked(updateBlock)
 const deleteBlockMock = vi.mocked(deleteBlock)
 const getBlockAttrsMock = vi.mocked(getBlockAttrs)
 const setBlockAttrsMock = vi.mocked(setBlockAttrs)
+const flushTransactionMock = vi.mocked(flushTransaction)
+const getBlockKramdownMock = vi.mocked(getBlockKramdown)
 
 function ref(id: string): BlockRef {
   return {
@@ -266,5 +273,65 @@ describe('siyuan block asset updates', () => {
     expect(results).toHaveLength(1)
     expect(results[0].id).toBe('block-live-1')
     expect(results[0].readablePath).toBe('/实时文档')
+  })
+
+  describe('verifyAssetZeroReferences', () => {
+    it('returns isClean: true when there are no references in DB', async () => {
+      sqlMock.mockResolvedValue([])
+
+      const result = await verifyAssetZeroReferences('clean.png')
+      expect(result.isClean).toBe(true)
+      expect(result.remainingBlocks).toEqual([])
+      expect(flushTransactionMock).toHaveBeenCalled()
+    })
+
+    it('filters out stale SQLite references when real Kramdown is already updated', async () => {
+      // 模拟 SQLite 延迟返回旧块，但真实 AST 节点的 kramdown 已经不含 clean.png
+      sqlMock.mockResolvedValue([
+        {
+          id: 'stale-block',
+          root_id: 'root-1',
+          box: 'box-1',
+          content: '',
+          markdown: '![pic](assets/clean.png)',
+          path: '/doc.sy',
+          ial: '',
+        },
+      ])
+
+      getBlockKramdownMock.mockResolvedValue({
+        id: 'stale-block',
+        kramdown: '![pic](assets/replaced.png)\n{: id="stale-block"}',
+      })
+      getBlockAttrsMock.mockResolvedValue({})
+
+      const result = await verifyAssetZeroReferences('clean.png')
+      expect(result.isClean).toBe(true)
+      expect(result.remainingBlocks).toHaveLength(0)
+    })
+
+    it('identifies real remaining references when real Kramdown still contains old asset', async () => {
+      sqlMock.mockResolvedValue([
+        {
+          id: 'real-stale-block',
+          root_id: 'root-1',
+          box: 'box-1',
+          content: '',
+          markdown: '![pic](assets/unreplaced.png)',
+          path: '/doc.sy',
+          ial: '',
+        },
+      ])
+
+      getBlockKramdownMock.mockResolvedValue({
+        id: 'real-stale-block',
+        kramdown: '![pic](assets/unreplaced.png)\n{: id="real-stale-block"}',
+      })
+
+      const result = await verifyAssetZeroReferences('unreplaced.png')
+      expect(result.isClean).toBe(false)
+      expect(result.remainingBlocks).toHaveLength(1)
+      expect(result.remainingBlocks[0].id).toBe('real-stale-block')
+    })
   })
 })
