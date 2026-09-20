@@ -7,12 +7,18 @@ vi.mock('../src/utils/file-system', () => ({
 
 vi.mock('../src/utils/siyuan-block', () => ({
   replaceAssetInBlocks: vi.fn(),
+  queryCurrentAssetBlockReferences: vi.fn().mockResolvedValue([]),
   getImageBlockReEditData: vi.fn(),
   setImageBlockReEditData: vi.fn(),
 }));
 
+vi.mock('../src/utils/attribute-view', () => ({
+  replaceAssetInAttributeViews: vi.fn().mockResolvedValue(0),
+}));
+
 import { readAssetFile, deleteAsset } from '../src/utils/file-system';
-import { replaceAssetInBlocks, getImageBlockReEditData, setImageBlockReEditData } from '../src/utils/siyuan-block';
+import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, getImageBlockReEditData, setImageBlockReEditData } from '../src/utils/siyuan-block';
+import { replaceAssetInAttributeViews } from '../src/utils/attribute-view';
 import {
   isImageFile,
   groupBySize,
@@ -37,6 +43,8 @@ import type { AssetInfo, BlockRef } from '../src/utils/siyuan-db';
 const readAssetFileMock = vi.mocked(readAssetFile);
 const deleteAssetMock = vi.mocked(deleteAsset);
 const replaceAssetInBlocksMock = vi.mocked(replaceAssetInBlocks);
+const queryCurrentAssetBlockReferencesMock = vi.mocked(queryCurrentAssetBlockReferences);
+const replaceAssetInAttributeViewsMock = vi.mocked(replaceAssetInAttributeViews);
 const getImageBlockReEditDataMock = vi.mocked(getImageBlockReEditData);
 const setImageBlockReEditDataMock = vi.mocked(setImageBlockReEditData);
 
@@ -69,6 +77,8 @@ function makeAsset(name: string, size: number, refCount = 0, opts: Partial<Asset
 describe('deduplicate utils', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    queryCurrentAssetBlockReferencesMock.mockResolvedValue([]);
+    replaceAssetInAttributeViewsMock.mockResolvedValue(0);
   });
 
   describe('isImageFile', () => {
@@ -268,6 +278,88 @@ describe('deduplicate utils', () => {
       expect(stats.deletedFilesCount).toBe(1);
       expect(stats.freedBytes).toBe(4000);
       expect(group.isProcessed).toBe(true);
+    });
+
+    it('aborts and does not delete file if pre-delete double check finds remaining references', async () => {
+      const canonical = makeAsset('main.png', 4000, 1);
+      const redundant = makeAsset('copy.png', 4000, 1);
+
+      const group: IDuplicateGroup = {
+        id: 'exact_safe_check',
+        mode: 'exact',
+        similarity: 1.0,
+        canonicalAssetName: 'main.png',
+        items: [
+          { asset: canonical, score: 500, isCanonical: true },
+          { asset: redundant, score: 100, isCanonical: false },
+        ],
+        redundantCount: 1,
+        redundantSize: 4000,
+      };
+
+      // 模拟情况：第一次查询引用（合并不变），第二次在删除前二次复核时发现思源库中还有残留引用未清干净
+      queryCurrentAssetBlockReferencesMock
+        .mockResolvedValueOnce([]) // 步骤 1: 动态全库实时查询最新引用
+        .mockResolvedValueOnce([   // 步骤 4: Pre-delete Double Check 发现残留
+          {
+            id: 'residual-block-id',
+            root_id: 'doc-1',
+            box: 'box-1',
+            content: '',
+            markdown: '![residual](assets/copy.png)',
+            path: '/doc.sy',
+          },
+        ]);
+
+      await expect(normalizeDuplicateGroup(group)).rejects.toThrow('去重安全拦截');
+
+      // 绝不能调用物理文件删除！
+      expect(deleteAssetMock).not.toHaveBeenCalled();
+      expect(group.isProcessed).toBeFalsy();
+    });
+
+    it('combines fresh block references from live query when cached references are empty or stale', async () => {
+      const canonical = makeAsset('main.png', 4000, 1);
+      // 模拟快照中 references 为空（例如新写文档引用了 copy.png）
+      const redundant = makeAsset('copy.png', 4000, 0);
+
+      const group: IDuplicateGroup = {
+        id: 'exact_live_query',
+        mode: 'exact',
+        similarity: 1.0,
+        canonicalAssetName: 'main.png',
+        items: [
+          { asset: canonical, score: 500, isCanonical: true },
+          { asset: redundant, score: 100, isCanonical: false },
+        ],
+        redundantCount: 1,
+        redundantSize: 4000,
+      };
+
+      const liveRef: BlockRef = {
+        id: 'live-block-99',
+        root_id: 'doc-live',
+        box: 'box-1',
+        content: '',
+        markdown: '![img](assets/copy.png)',
+        path: '/live.sy',
+      };
+
+      queryCurrentAssetBlockReferencesMock
+        .mockResolvedValueOnce([liveRef]) // 实时动态补充
+        .mockResolvedValueOnce([]);        // 删除前复核无残留
+
+      const stats = await normalizeDuplicateGroup(group);
+
+      expect(replaceAssetInBlocksMock).toHaveBeenCalledWith(
+        [liveRef],
+        'copy.png',
+        'main.png'
+      );
+      expect(deleteAssetMock).toHaveBeenCalledWith('copy.png');
+      expect(stats.affectedBlocksCount).toBe(1);
+      expect(stats.affectedDocsCount).toBe(1);
+      expect(stats.deletedFilesCount).toBe(1);
     });
 
     it('batchNormalizeDuplicateGroups aggregates stats across multiple groups', async () => {

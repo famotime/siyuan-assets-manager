@@ -1,5 +1,6 @@
 import { readAssetFile, deleteAsset, readAssetMetadataFile, saveAssetMetadataFile } from './file-system';
-import { replaceAssetInBlocks, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
+import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
+import { replaceAssetInAttributeViews } from './attribute-view';
 import type { AssetInfo, BlockRef } from './siyuan-db';
 import type { IAssetReEditMetadata } from '../types/reedit';
 import { usePlugin } from './plugin-context';
@@ -643,25 +644,53 @@ export async function normalizeDuplicateGroup(
     if (item.asset.name === canonicalName) continue;
 
     const redundant = item.asset;
-    const refs: BlockRef[] = redundant.references || [];
 
-    if (refs.length > 0) {
-      // 1. 替换文档块中的引用
-      await replaceAssetInBlocks(refs, redundant.name, canonicalName);
-      stats.affectedBlocksCount += refs.length;
-      for (const r of refs) {
+    // 1. 动态全库实时查询最新引用块，防止读取过期缓存导致漏掉后来新建或修改的文档
+    const latestRefs = await queryCurrentAssetBlockReferences(redundant.name);
+    const refMap = new Map<string, BlockRef>();
+    for (const r of (redundant.references || [])) {
+      if (r.id) refMap.set(r.id, r);
+    }
+    for (const r of latestRefs) {
+      if (r.id) refMap.set(r.id, r);
+    }
+    const combinedRefs = Array.from(refMap.values());
+
+    if (combinedRefs.length > 0) {
+      // 2. 替换正文 Markdown 及 IAL 块属性（如封面图 title-img、custom-data-assets）
+      await replaceAssetInBlocks(combinedRefs, redundant.name, canonicalName);
+      stats.affectedBlocksCount += combinedRefs.length;
+      for (const r of combinedRefs) {
         if (r.root_id) affectedRootIds.add(r.root_id);
       }
     }
 
-    // 3. 删除多余冗余物理文件
+    // 3. 属性视图 (Attribute View) 全局无条件原子替换（即便正文未引用，AV 中仍可能有引用）
+    try {
+      await replaceAssetInAttributeViews(redundant.name, canonicalName);
+    } catch (avErr) {
+      error(`[deduplicate] 归一化更新数据库属性视图失败:`, avErr);
+      throw avErr;
+    }
+
+    // 4. 【核心生死线】删除前强制二次安全复核 (Pre-delete Double Check)
+    // 实时查库确认全库旧文件引用数确已为 0，若仍有残留引用，坚决禁止删除物理文件！
+    const remainingBlocks = await queryCurrentAssetBlockReferences(redundant.name);
+    if (remainingBlocks.length > 0) {
+      const errMsg = `[去重安全拦截] 冗余资源 [${redundant.name}] 尚有 ${remainingBlocks.length} 处文档引用未完成替换，已终止删除该物理文件！受影响块ID: ${remainingBlocks.map(b => b.id).slice(0, 3).join(', ')}`;
+      error(errMsg);
+      throw new Error(errMsg);
+    }
+
+    // 5. 确认 0 引用后，安全删除多余冗余物理文件
     try {
       await deleteAsset(redundant.name);
       stats.deletedFilesCount += 1;
       stats.freedBytes += redundant.size || 0;
-      log(`[deduplicate] 成功归一化并删除冗余资源: ${redundant.name}`);
+      log(`[deduplicate] 成功归一化并安全删除冗余资源: ${redundant.name}`);
     } catch (delErr) {
       error(`[deduplicate] 删除冗余文件 ${redundant.name} 失败:`, delErr);
+      throw delErr;
     }
   }
 

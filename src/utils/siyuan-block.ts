@@ -22,7 +22,51 @@ export interface ReplaceAssetOptions {
 }
 
 /**
- * 替换给定 Block 集合中的资源引用，并原子同步维护二次编辑元数据
+ * 实时从思源 SQLite 数据库中查询当前所有引用指定资产的文档块与根块
+ * 支持原始名称与 URI 编码名称，防止读取到过期的持久化缓存导致漏替
+ */
+export async function queryCurrentAssetBlockReferences(assetName: string): Promise<BlockRef[]> {
+  if (!assetName) return [];
+  const refs: BlockRef[] = [];
+  const encodedName = encodeURIComponent(assetName);
+
+  try {
+    const safeOld = assetName.replace(/'/g, "''");
+    const safeEnc = encodedName.replace(/'/g, "''");
+
+    const query = `
+      SELECT id, root_id, box, content, markdown, path, hpath, ial 
+      FROM blocks 
+      WHERE markdown LIKE '%assets/${safeOld}%' 
+         OR markdown LIKE '%assets/${safeEnc}%' 
+         OR ial LIKE '%assets/${safeOld}%' 
+         OR ial LIKE '%assets/${safeEnc}%'
+      LIMIT 100000
+    `;
+    const rows = await sql(query);
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        refs.push({
+          id: row.id,
+          root_id: row.root_id,
+          box: row.box,
+          content: row.content,
+          markdown: row.markdown,
+          path: row.path,
+          hpath: row.hpath,
+          readablePath: row.hpath || row.path,
+        });
+      }
+    }
+  } catch (err) {
+    warn(`[siyuan-block] 实时查询资产 [${assetName}] 引用块失败:`, err);
+  }
+
+  return refs;
+}
+
+/**
+ * 替换给定 Block 集合中的资源引用，并原子同步维护二次编辑元数据与块属性（如封面图 title-img）
  * @param references 涉及该资源的所有 Block 引用信息
  * @param oldAssetName 旧资源名称（如 123.png）
  * @param newAssetName 新资源名称（如 123_edited.png）
@@ -35,19 +79,58 @@ export async function replaceAssetInBlocks(
   options?: ReplaceAssetOptions
 ): Promise<void> {
   const affectedBlockIds = new Set<string>();
+  const encodedOld = encodeURIComponent(oldAssetName);
 
   for (const ref of references) {
     if (ref.id) {
       affectedBlockIds.add(ref.id);
     }
-    // 重新获取最新的 markdown，防止并发修改导致丢失
-    const blocks = await sql(`SELECT markdown FROM blocks WHERE id = '${ref.id}'`);
+    // 重新获取最新的 markdown 与 ial，防止并发修改导致丢失
+    const blocks = await sql(`SELECT id, markdown, ial FROM blocks WHERE id = '${ref.id}'`);
     if (blocks && blocks.length > 0) {
-      const currentMarkdown = blocks[0].markdown;
-      if (currentMarkdown.includes(`assets/${oldAssetName}`)) {
+      const currentMarkdown = blocks[0].markdown || "";
+      const currentIal = blocks[0].ial || "";
+
+      // 1. 替换正文 Markdown 中的引用（兼容普通与 URI 编码路径）
+      const hasMdOld = currentMarkdown.includes(`assets/${oldAssetName}`) ||
+                       (encodedOld !== oldAssetName && currentMarkdown.includes(`assets/${encodedOld}`));
+      if (hasMdOld) {
         const newMarkdown = replaceAssetInMarkdown(currentMarkdown, oldAssetName, newAssetName);
-        // 使用 Siyuan API 更新 Block，注意：更新时需要包含 data
-        await updateBlock("markdown", newMarkdown, ref.id);
+        const updateRes = await updateBlock("markdown", newMarkdown, ref.id);
+        if (updateRes === null) {
+          throw new Error(`[siyuan-block] 替换正文资源失败: updateBlock 返回异常 (块ID: ${ref.id})`);
+        }
+      }
+
+      // 2. 检查并替换块属性 IAL 中的引用（如文档题头图 title-img、custom-data-assets 等）
+      const hasIalOld = currentIal.includes(`assets/${oldAssetName}`) ||
+                        (encodedOld !== oldAssetName && currentIal.includes(`assets/${encodedOld}`));
+      if (hasIalOld) {
+        try {
+          const attrs = await getBlockAttrs(ref.id);
+          if (attrs && typeof attrs === 'object') {
+            let attrChanged = false;
+            const updatedAttrs: { [key: string]: string } = {};
+
+            for (const [k, v] of Object.entries(attrs)) {
+              if (typeof v === 'string' && (v.includes(`assets/${oldAssetName}`) || (encodedOld !== oldAssetName && v.includes(`assets/${encodedOld}`)))) {
+                updatedAttrs[k] = replaceAssetInMarkdown(v, oldAssetName, newAssetName);
+                attrChanged = true;
+              }
+            }
+
+            if (attrChanged) {
+              const setRes = await setBlockAttrs(ref.id, updatedAttrs);
+              if (setRes === null) {
+                throw new Error(`[siyuan-block] 更新块属性失败: setBlockAttrs 返回异常 (块ID: ${ref.id})`);
+              }
+              log(`[siyuan-block] 成功更新块 ${ref.id} 属性中的资源引用: ${oldAssetName} -> ${newAssetName}`);
+            }
+          }
+        } catch (attrErr) {
+          error(`[siyuan-block] 获取或更新块 ${ref.id} 属性失败:`, attrErr);
+          throw attrErr;
+        }
       }
     }
   }
@@ -85,6 +168,7 @@ export async function replaceAssetInBlocks(
     await replaceAssetInAttributeViews(oldAssetName, newAssetName);
   } catch (avErr) {
     warn(`[siyuan-block] 同步更新属性视图资源 ${oldAssetName} -> ${newAssetName} 失败:`, avErr);
+    throw avErr;
   }
 }
 

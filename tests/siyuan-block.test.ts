@@ -18,6 +18,7 @@ import {
 import {
   removeAssetFromBlocks,
   replaceAssetInBlocks,
+  queryCurrentAssetBlockReferences,
   getImageBlockReEditData,
   setImageBlockReEditData,
   removeImageBlockReEditData,
@@ -206,5 +207,64 @@ describe('siyuan block asset updates', () => {
 
     await replaceAssetInBlocks([], 'old-photo.png', 'new-photo.png')
     expect(spy).toHaveBeenCalledWith('old-photo.png', 'new-photo.png')
+  })
+
+  it('replaces URI-encoded asset paths and updates root block IAL title-img', async () => {
+    sqlMock.mockResolvedValue([
+      {
+        id: 'root-doc-1',
+        markdown: '这是正文 ![封面](assets/%E6%9E%B6%E6%9E%84%E5%9B%BE.png)',
+        ial: '{: id="root-doc-1" title-img="background-image: url(&quot;assets/%E6%9E%B6%E6%9E%84%E5%9B%BE.png&quot;)"}',
+      },
+    ])
+
+    getBlockAttrsMock.mockResolvedValue({
+      'title-img': 'background-image: url("assets/架构图.png")',
+    })
+    setBlockAttrsMock.mockResolvedValue({} as any)
+    updateBlockMock.mockResolvedValue({} as any)
+
+    await replaceAssetInBlocks([ref('root-doc-1')], '架构图.png', '新架构.png')
+
+    // 1. 验证正文 markdown 被正确替换（包括编码格式）
+    expect(updateBlockMock).toHaveBeenCalledWith('markdown', expect.stringContaining('assets/新架构.png'), 'root-doc-1')
+
+    // 2. 验证根块 IAL 属性 title-img 被 setBlockAttrs 原子替换
+    expect(setBlockAttrsMock).toHaveBeenCalledWith('root-doc-1', {
+      'title-img': expect.stringContaining('assets/新架构.png'),
+    })
+  })
+
+  it('throws error and halts when updateBlock fails (returns null)', async () => {
+    sqlMock.mockResolvedValue([
+      {
+        id: 'block-fail',
+        markdown: '![img](assets/fail.png)',
+        ial: '',
+      },
+    ])
+    updateBlockMock.mockResolvedValue(null)
+
+    await expect(replaceAssetInBlocks([ref('block-fail')], 'fail.png', 'new.png')).rejects.toThrow('updateBlock 返回异常')
+  })
+
+  it('queries current asset references from database accurately', async () => {
+    sqlMock.mockResolvedValue([
+      {
+        id: 'block-live-1',
+        root_id: 'doc-live',
+        box: 'box-1',
+        content: '',
+        markdown: '![pic](assets/live.png)',
+        path: '/live.sy',
+        hpath: '/实时文档',
+        ial: '',
+      },
+    ])
+
+    const results = await queryCurrentAssetBlockReferences('live.png')
+    expect(results).toHaveLength(1)
+    expect(results[0].id).toBe('block-live-1')
+    expect(results[0].readablePath).toBe('/实时文档')
   })
 })

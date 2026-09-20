@@ -743,15 +743,18 @@ async function handleBatchMerge() {
     }
   }
 
+  const isSimilarMode = activeTab.value === 'similar';
   const confirmMsg = [
-    '【去重归一化预检明细】',
+    `【${isSimilarMode ? '视觉相似图片' : '完全相同资源'} 归一化预检明细】`,
     `• 处理重复组数: ${groupsToMerge.length} 组`,
     `• 涉及影响文档: ${allDocIds.size} 篇`,
     `• 自动调整引用: ${totalRefs} 处`,
     `• 删除冗余文件: ${totalRedundantCount.value} 个`,
     `• 预计释放空间: ${totalReclaimableSizeText.value}`,
     '',
-    '注意：冗余文件将被物理删除，文档中对应的引用将无缝指向唯一主资源。',
+    isSimilarMode
+      ? '⚠️ 风险提醒：当前为【视觉相似】模式！视觉相似图片虽构图相近但内容可能不完全相同，合并后非主资源将被永久物理删除，请确保已核对右侧比对视图。'
+      : '注意：冗余文件将被物理删除，文档中对应的引用将无缝指向唯一主资源。',
     '是否确认执行一键批量归一化？',
   ].join('\n');
 
