@@ -27,6 +27,15 @@ export interface BlockRef {
   readablePath?: string; // 易读路径 (如 笔记本名称/前端/Vue)
 }
 
+/**
+ * 思源内核系统关键保留文件白名单
+ * 对齐思源官方 UnusedAssets: 无论是否有文档引用，此类系统文件绝对禁止作为孤儿删除
+ */
+export const SYSTEM_PROTECTED_ASSETS = new Set([
+  'ocr-texts.json',
+  'android-notification-texts.txt',
+]);
+
 export interface AssetInfo {
   name: string;
   size: number;
@@ -39,6 +48,8 @@ export interface AssetInfo {
   reEditBlockId?: string; // 关联的二次编辑文档块 ID
   originalStoragePath?: string; // 关联的隔离原始底图路径
   isOriginal?: boolean; // 是否为隔离存储的原始底图
+  isSystemProtected?: boolean; // 是否为思源系统保留受保护文件 (如 ocr-texts.json)
+  isCompanion?: boolean; // 是否为伴生文件 (如 xxx.pdf.sya)
 }
 
 export function createAssetInfoMap(files: any[]): Map<string, AssetInfo> {
@@ -206,6 +217,9 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
  * 删除资产文件
  */
 export async function deleteAssetFile(fileName: string): Promise<void> {
+  if (SYSTEM_PROTECTED_ASSETS.has(fileName)) {
+    throw new Error(`系统关键文件 [${fileName}] 受保护，禁止删除`);
+  }
   await removeFile("/data/assets/" + fileName);
   try {
     await deleteAssetMetadataFile(fileName);

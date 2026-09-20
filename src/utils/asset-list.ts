@@ -264,7 +264,7 @@ export function filterAssets(assets: AssetInfo[], options: AssetFilterOptions): 
     if (filterType === 'reeditable' && !asset.isReEditable) {
       return false
     }
-    if (filterType === 'unreferenced' && asset.docCount > 0) {
+    if (filterType === 'unreferenced' && (asset.docCount > 0 || asset.isSystemProtected)) {
       return false
     }
     if (filterType === 'large' && asset.size < 1024 * 1024) {
@@ -292,7 +292,7 @@ export function sortAssets(assets: AssetInfo[], sortField: AssetSortField, sortO
 }
 
 export function calculateUnreferencedCleanup(assets: AssetInfo[]): AssetCleanupSummary {
-  const unreferencedAssets = assets.filter((asset) => !asset.isOriginal && asset.docCount === 0)
+  const unreferencedAssets = assets.filter((asset) => !asset.isOriginal && !asset.isSystemProtected && asset.docCount === 0)
   const totalSize = unreferencedAssets.reduce((sum, asset) => sum + asset.size, 0)
 
   return {
@@ -313,7 +313,7 @@ export function calculateOrphanCleanup(orphans: OrphanOriginalInfo[]): { count: 
 }
 
 export function calculateTotalCleanup(assets: AssetInfo[]): TotalCleanupSummary {
-  const unreferencedAssets = assets.filter((asset) => !asset.isOriginal && asset.docCount === 0)
+  const unreferencedAssets = assets.filter((asset) => !asset.isOriginal && !asset.isSystemProtected && asset.docCount === 0)
   const orphanOriginals = assets.filter((asset) => asset.isOriginal && asset.docCount === 0)
 
   const unreferencedSize = unreferencedAssets.reduce((sum, asset) => sum + asset.size, 0)

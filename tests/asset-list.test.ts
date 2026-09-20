@@ -317,4 +317,27 @@ describe('groupReferencesByDoc', () => {
     expect(vueContent).toMatch(/被以下文档引用\s*\(\{\{\s*docGroups\(/)
     expect(vueContent).not.toMatch(/被以下文档引用\s*\(\{\{\s*item\.asset\.references\.length/)
   })
+
+  it('excludes system protected assets from unreferenced filter and cleanup calculation', () => {
+    const mixedAssets: any[] = [
+      { name: 'normal_orphan.png', size: 1000, docCount: 0, isOriginal: false },
+      { name: 'ocr-texts.json', size: 8000, docCount: 0, isOriginal: false, isSystemProtected: true },
+      { name: 'referenced.png', size: 2000, docCount: 1, isOriginal: false },
+    ]
+
+    // 1. 过滤 unreferenced 时，受保护文件不出现
+    const filtered = filterAssets(mixedAssets, { searchQuery: '', filterType: 'unreferenced' })
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0].name).toBe('normal_orphan.png')
+
+    // 2. 清理统计时，受保护文件不被计入清理列表和释放体积
+    const cleanup = calculateUnreferencedCleanup(mixedAssets)
+    expect(cleanup.count).toBe(1)
+    expect(cleanup.assets[0].name).toBe('normal_orphan.png')
+    expect(cleanup.totalSize).toBe(1000)
+
+    const totalCleanup = calculateTotalCleanup(mixedAssets)
+    expect(totalCleanup.unreferencedCount).toBe(1)
+    expect(totalCleanup.unreferencedAssets[0].name).toBe('normal_orphan.png')
+  })
 })

@@ -2,27 +2,46 @@ export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function unescapeHtmlEntities(str: string): string {
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
 export function extractAssetNamesFromMarkdown(markdown: string): string[] {
+  if (!markdown) return []
   const assets: string[] = []
 
+  // 1. 常规 Markdown 括号链接：](assets/...)
   for (const raw of extractMarkdownLinkAssets(markdown)) {
     assets.push(...cleanAndDecodeAssetName(raw))
   }
 
-  // 引号包裹的路径（HTML 属性形式，如 src="assets/x.png"）按配对的引号收尾。
-  // 思源对视频/音频/HTML 块导出的就是这种形式，文件名里的单引号、方括号
-  // 不能被当成终止符，否则会截出一个并不存在的名字，把资源误判成孤儿。
+  // 解码 HTML 实体（针对 IAL 属性中的 title-img、inline-memo 等）
+  const normalized = unescapeHtmlEntities(markdown)
+
+  // 2. 引号包裹的路径（HTML 属性形式，如 src="assets/x.png" 或 data-id="assets/x.pdf/..."）
   const quotedPathRegex = /(["'])assets\/(.*?)\1/g
   let quotedMatch: RegExpExecArray | null
-  while ((quotedMatch = quotedPathRegex.exec(markdown)) !== null) {
+  while ((quotedMatch = quotedPathRegex.exec(normalized)) !== null) {
     assets.push(...cleanAndDecodeAssetName(quotedMatch[2]))
   }
 
-  // 裸路径只认行首/空白分隔的情形；引号包裹的已经由上面的 quotedPathRegex 处理，
-  // 交叠匹配会因字符集把 it's.png 这类名字截成 "it"，产生指向不存在文件的假名字
-  const barePathRegex = /(?:^|\s)assets\/([^\s"'\]\?#]+)/g
+  // 3. CSS url(...) 形式（如 background-image: url("assets/x.png") 或 url(assets/x.png)）
+  const cssUrlRegex = /url\(\s*(?:['"]?)(?:(?:\/data\/)?assets\/)([^'")]+)(?:['"]?)\s*\)/gi
+  let urlMatch: RegExpExecArray | null
+  while ((urlMatch = cssUrlRegex.exec(normalized)) !== null) {
+    assets.push(...cleanAndDecodeAssetName(urlMatch[1]))
+  }
+
+  // 4. 裸路径只认行首/空白/思源标注 << 分隔的情形；引号包裹与 url() 的已分别由上面处理
+  const barePathRegex = /(?:^|[\s<])assets\/([^\s"'\]\?#>]+)/g
   let bareMatch: RegExpExecArray | null
-  while ((bareMatch = barePathRegex.exec(markdown)) !== null) {
+  while ((bareMatch = barePathRegex.exec(normalized)) !== null) {
     assets.push(...cleanAndDecodeAssetName(bareMatch[1]))
   }
 
@@ -38,6 +57,13 @@ function cleanAndDecodeAssetName(rawPath: string): string[] {
   // 剥离两端可能包裹的引号及尾部标点
   clean = clean.replace(/^['"]+|['"]+$/g, '').replace(/[),.;:]+$/, '')
   if (!clean) return []
+
+  // 对齐思源官方 util.SplitFileAnnotationRef:
+  // 识别形如 `xxx.pdf/20240101000000-abcdefg` 的 PDF 标注锚点引用，提取出真实的母体 PDF 文件名
+  const pdfAnnotationMatch = clean.match(/^(.+?\.pdf)\/(\d{14}-[a-z0-9]{7}|[a-zA-Z0-9_-]+)$/i)
+  if (pdfAnnotationMatch) {
+    clean = pdfAnnotationMatch[1]
+  }
 
   const names = [clean]
   try {
@@ -107,7 +133,7 @@ function findMarkdownLinkTargetEnd(markdown: string, assetStart: number): number
  * 资源路径合法终止符断言：必须紧跟闭合括号、引号、空白、URL 参数/哈希、属性块、HTML 标签结束、中英文标点或文本结尾。
  * 避免如 `pic.png` 误替换 `pic.png.bak` 或 `pic.png_thumb.jpg` 等具有相同前缀的文件名。
  */
-const ASSET_PATH_TERMINATOR = '(?=[)"\'\\s?#{}\\]>，。、；：！？,!;:|]|$)'
+const ASSET_PATH_TERMINATOR = '(?=[)"\'\\s?#{}\\]>，。、；：！？,!;:|/]|$)'
 
 export function replaceAssetInMarkdown(markdown: string, oldAssetName: string, newAssetName: string): string {
   let res = markdown

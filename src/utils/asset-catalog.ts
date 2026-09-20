@@ -7,13 +7,14 @@ import {
   listAllAssetMetadataFiles,
   saveAssetMetadataFile,
 } from './file-system';
-import { defaultStorage } from './storage';
+import { defaultStorage, blobToText } from './storage';
 import type { IAssetReEditMetadata } from '../types/reedit';
 import { log, warn, error } from './logger';
 import {
   type BlockRef,
   type AssetInfo,
   type OrphanOriginalInfo,
+  SYSTEM_PROTECTED_ASSETS,
   createAssetInfoMap,
   attachBlockReferences,
   attachAttributeViewReferences,
@@ -22,6 +23,53 @@ import {
   getNotebookMap,
 } from './siyuan-db';
 import { resolveAttributeViewReferences } from './attribute-view';
+import { extractAssetNamesFromMarkdown } from './asset-markdown';
+
+export { SYSTEM_PROTECTED_ASSETS };
+
+/**
+ * 判定是否为操作系统生成的临时/隐藏垃圾文件（如 .DS_Store, Thumbs.db 等）
+ */
+export function isIgnoredSystemAsset(fileName: string): boolean {
+  if (!fileName) return true;
+  const baseName = fileName.split('/').pop() || fileName;
+  if (baseName.startsWith('.')) return true;
+  const lower = baseName.toLowerCase();
+  return lower === 'thumbs.db' || lower === 'desktop.ini' || lower === '$recycle.bin';
+}
+
+/** 思源 AI Agent 会话历史存储目录 */
+export const AGENT_SESSIONS_STORAGE_DIR = '/data/storage/ai/agent/sessions';
+
+/**
+ * 扫描思源内置 AI Agent 的会话存储目录，提取对话上下文中引用的图片资产
+ * 对齐思源官方 UnusedAssets 中的 agentSessionImageAssetDests
+ */
+export async function scanAgentSessionAssets(): Promise<Set<string>> {
+  const agentAssets = new Set<string>();
+  try {
+    const entries = await defaultStorage.list(AGENT_SESSIONS_STORAGE_DIR).catch(() => []);
+    const sessionDirs = entries.filter((e) => e.isDir);
+    for (const sDir of sessionDirs) {
+      for (const jsonName of ['session.json', 'runtime.json']) {
+        try {
+          const filePath = `${AGENT_SESSIONS_STORAGE_DIR}/${sDir.name}/${jsonName}`;
+          const blob = await defaultStorage.read(filePath);
+          if (blob) {
+            const text = await blobToText(blob);
+            if (text) {
+              const names = extractAssetNamesFromMarkdown(text);
+              for (const name of names) {
+                agentAssets.add(name);
+              }
+            }
+          }
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+  return agentAssets;
+}
 
 export interface CatalogInventory {
   allAssets: AssetInfo[];
@@ -42,7 +90,8 @@ export function resolveCatalogPipeline(
   originalFiles: Array<{ name: string; path: string; size: number; updated: number }>,
   notebookMap: Map<string, string>,
   sidecarMetadataList: Array<{ assetName: string; metadata: IAssetReEditMetadata }> = [],
-  avReferencesMap: Map<string, BlockRef[]> = new Map()
+  avReferencesMap: Map<string, BlockRef[]> = new Map(),
+  agentAssets: Set<string> = new Set()
 ): CatalogInventory {
   // 1. 构建常规资产 Map 并挂载文档块引用
   const assetsMap = createAssetInfoMap(files);
@@ -57,7 +106,49 @@ export function resolveCatalogPipeline(
 
   updateAssetDocCounts(assetsMap.values());
 
-  // 1.1 挂载 Sidecar 元数据（优先全局真理源）
+  // 1.1 标记思源系统关键保护文件（如 ocr-texts.json），免于孤儿判定与误清理
+  for (const asset of assetsMap.values()) {
+    if (SYSTEM_PROTECTED_ASSETS.has(asset.name)) {
+      asset.isSystemProtected = true;
+    }
+  }
+
+  // 1.2 PDF 标注伴生文件 (.pdf.sya) 联动拓扑保活
+  // 对齐思源官方 UnusedAssets: 只要母体 xxx.pdf 存在有效文档引用，其标注伴生文件 xxx.pdf.sya 自动保活，绝不能被当作孤儿误删
+  for (const [name, asset] of assetsMap.entries()) {
+    if (name.toLowerCase().endsWith('.pdf.sya')) {
+      asset.isCompanion = true;
+      const parentPdfName = name.slice(0, -4);
+      const parentAsset = assetsMap.get(parentPdfName);
+      if (parentAsset && parentAsset.docCount > 0) {
+        asset.references = [...parentAsset.references];
+        asset.refCount = parentAsset.refCount;
+        asset.docCount = parentAsset.docCount;
+      }
+    }
+  }
+
+  // 1.3 AI Agent 会话上下文中的资源保活
+  if (agentAssets && agentAssets.size > 0) {
+    for (const agentAssetName of agentAssets) {
+      const asset = assetsMap.get(agentAssetName);
+      if (asset && asset.docCount === 0) {
+        asset.docCount = 1;
+        asset.refCount = (asset.refCount || 0) + 1;
+        asset.references.push({
+          id: 'ai-agent-session',
+          root_id: 'ai-agent-session',
+          box: '',
+          content: '思源 AI Agent 会话上下文引用',
+          markdown: '',
+          path: '',
+          readablePath: '思源 AI 对话',
+        });
+      }
+    }
+  }
+
+  // 1.4 挂载 Sidecar 元数据（优先全局真理源）
   if (sidecarMetadataList && sidecarMetadataList.length > 0) {
     for (const item of sidecarMetadataList) {
       const renderedName = item.metadata.renderedAssetName || item.assetName;
@@ -72,7 +163,7 @@ export function resolveCatalogPipeline(
     }
   }
 
-  // 1.2 补充挂载块级元数据（向前兼容历史数据）
+  // 1.5 补充挂载块级元数据（向前兼容历史数据）
   if (reEditBlocks && reEditBlocks.length > 0) {
     attachReEditMetadata(assetsMap, reEditBlocks);
   }
@@ -208,14 +299,15 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
     };
   }
 
-  const files = rawFiles;
+  const files = (rawFiles || []).filter((f) => !isIgnoredSystemAsset(f.name));
   const notebookMap = await getNotebookMap().catch(() => new Map<string, string>());
-  const [blocks, reEditBlocks, originalFiles, sidecarMetadataList, avReferencesMap] = await Promise.all([
+  const [blocks, reEditBlocks, originalFiles, sidecarMetadataList, avReferencesMap, agentAssets] = await Promise.all([
     sql(`SELECT id, root_id, box, content, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`).catch(() => []),
     queryAllReEditableBlocks().catch(() => []),
     listOriginalImages().catch(() => []),
     listAllAssetMetadataFiles().catch(() => []),
     resolveAttributeViewReferences(notebookMap).catch(() => new Map<string, BlockRef[]>()),
+    scanAgentSessionAssets().catch(() => new Set<string>()),
   ]);
 
   // 自动平滑向后迁移：将存在于块 IAL 但尚未落盘 Sidecar 的元数据自动持久化到 Sidecar
@@ -243,7 +335,8 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
     originalFiles,
     notebookMap,
     sidecarMetadataList,
-    avReferencesMap
+    avReferencesMap,
+    agentAssets
   );
 
   // 批量通过 storage stat 补全缺失的 size 与 updated

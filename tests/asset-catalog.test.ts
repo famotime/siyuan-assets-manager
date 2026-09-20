@@ -211,4 +211,78 @@ describe('AssetCatalog Resolution Pipeline', () => {
     expect(realOrphan?.refCount).toBe(0);
     expect(realOrphan?.docCount).toBe(0);
   });
+
+  it('protects companion PDF annotation file (.pdf.sya) when parent PDF is referenced and leaves orphan .sya when parent is orphan', () => {
+    const files = [
+      { name: 'active.pdf', size: 50000, updated: 100, isDir: false },
+      { name: 'active.pdf.sya', size: 5000, updated: 100, isDir: false },
+      { name: 'orphan.pdf', size: 30000, updated: 100, isDir: false },
+      { name: 'orphan.pdf.sya', size: 3000, updated: 100, isDir: false },
+    ];
+
+    const blocks = [
+      {
+        id: 'block-pdf-1',
+        root_id: 'doc-pdf',
+        box: 'box-1',
+        content: '',
+        markdown: '[查看手册](assets/active.pdf)',
+        path: '/manual.sy',
+        hpath: '/手册',
+      },
+    ];
+
+    const result = resolveCatalogPipeline(files, blocks, [], [], new Map([['box-1', '文档库']]));
+
+    // 1. active.pdf 有引用
+    const activePdf = result.assetsMap.get('active.pdf');
+    expect(activePdf?.docCount).toBe(1);
+
+    // 2. active.pdf.sya 伴生文件自动保活并继承母体引用
+    const activeSya = result.assetsMap.get('active.pdf.sya');
+    expect(activeSya).toBeDefined();
+    expect(activeSya?.isCompanion).toBe(true);
+    expect(activeSya?.docCount).toBe(1);
+    expect(activeSya?.references.length).toBe(1);
+    expect(activeSya?.references[0].id).toBe('block-pdf-1');
+
+    // 3. orphan.pdf 与 orphan.pdf.sya 均为孤儿
+    const orphanPdf = result.assetsMap.get('orphan.pdf');
+    expect(orphanPdf?.docCount).toBe(0);
+    const orphanSya = result.assetsMap.get('orphan.pdf.sya');
+    expect(orphanSya?.docCount).toBe(0);
+  });
+
+  it('marks system protected assets (like ocr-texts.json) so they never become cleanup targets', () => {
+    const files = [
+      { name: 'ocr-texts.json', size: 8000, updated: 100, isDir: false },
+      { name: 'android-notification-texts.txt', size: 2000, updated: 100, isDir: false },
+      { name: 'regular_orphan.png', size: 3000, updated: 100, isDir: false },
+    ];
+
+    const result = resolveCatalogPipeline(files, [], [], [], new Map());
+
+    const ocrAsset = result.assetsMap.get('ocr-texts.json');
+    expect(ocrAsset?.isSystemProtected).toBe(true);
+
+    const notificationAsset = result.assetsMap.get('android-notification-texts.txt');
+    expect(notificationAsset?.isSystemProtected).toBe(true);
+
+    const orphanAsset = result.assetsMap.get('regular_orphan.png');
+    expect(orphanAsset?.isSystemProtected).toBeFalsy();
+  });
+
+  it('keeps AI agent session image assets active when referenced in chat context', () => {
+    const files = [
+      { name: 'ai_chat_upload.png', size: 15000, updated: 100, isDir: false },
+    ];
+
+    const agentAssets = new Set(['ai_chat_upload.png']);
+    const result = resolveCatalogPipeline(files, [], [], [], new Map(), [], new Map(), agentAssets);
+
+    const aiAsset = result.assetsMap.get('ai_chat_upload.png');
+    expect(aiAsset).toBeDefined();
+    expect(aiAsset?.docCount).toBe(1);
+    expect(aiAsset?.references[0].content).toContain('AI Agent');
+  });
 });

@@ -131,4 +131,39 @@ describe('asset markdown helpers', () => {
 
     expect(removeAssetFromMarkdown(markdown, 'movie.mp4').trim()).toBe('')
   })
+
+  it('extracts parent PDF asset name from PDF annotation references', () => {
+    const markdown = [
+      '<span data-type="file-annotation-ref" data-id="assets/my-guide.pdf/20240101000000-abcdefg">标注文本</span>',
+      '<<assets/manual.pdf/20240101000001-bcdefgh "annotation">>',
+      '<span data-type="file-annotation-ref" data-id="assets/with_params.pdf/20240101000002-cdefghi?box=2021">锚点</span>',
+    ].join('\n')
+
+    expect(extractAssetNamesFromMarkdown(markdown)).toEqual([
+      'my-guide.pdf',
+      'with_params.pdf',
+      'manual.pdf',
+    ])
+  })
+
+  it('extracts title image and CSS url references with or without quotes and with HTML entities', () => {
+    const markdown = [
+      'title-img="background-image: url(&quot;assets/cover_img.png&quot;)"',
+      'style="background-image: url(assets/cover_noquote.jpg)"',
+      'style="background-image: url(\'/data/assets/cover_data.png\')"',
+    ].join('\n')
+
+    expect(extractAssetNamesFromMarkdown(markdown)).toEqual([
+      'cover_img.png',
+      'cover_noquote.jpg',
+      'cover_data.png',
+    ])
+  })
+
+  it('replaces PDF asset name in annotation references while keeping the annotation id subpath', () => {
+    const markdown = '<span data-type="file-annotation-ref" data-id="assets/old_book.pdf/20240101-123456">批注</span>'
+    expect(replaceAssetInMarkdown(markdown, 'old_book.pdf', 'new_book.pdf')).toBe(
+      '<span data-type="file-annotation-ref" data-id="assets/new_book.pdf/20240101-123456">批注</span>',
+    )
+  })
 })
