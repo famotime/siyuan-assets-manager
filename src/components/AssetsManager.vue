@@ -3,16 +3,39 @@
     <div class="header" :class="{ 'header--tab': isTabMode }">
       <h2>资源管家</h2>
       <div class="stats">
-        <span>当前显示: {{ sortedAssets.length }} / {{ assets.length }} 个资源</span>
+        <span v-if="viewMode === 'flat'">当前显示: {{ sortedAssets.length }} / {{ assets.length }} 个资源</span>
+        <span v-else>当前显示: {{ docModeStats.docCount }} 篇文档 · {{ docModeStats.assetCount }} / {{ assets.length }} 个资源</span>
         <span v-if="selectedNames.size > 0" class="selected-badge">
           已选 {{ selectedNames.size }} 项 ({{ selectedSummary.sizeText }})
         </span>
       </div>
       <div class="actions">
+        <!-- 视图切换模式按钮组 (平铺视图 vs 文档归类) -->
+        <div class="view-mode-toggle" title="切换视图模式">
+          <button
+            type="button"
+            class="am-btn am-btn--icon"
+            :class="{ 'is-active': viewMode === 'flat' }"
+            @click="setViewMode('flat')"
+            title="平铺列表视图"
+          >
+            <LayoutList :size="15" />
+          </button>
+          <button
+            type="button"
+            class="am-btn am-btn--icon"
+            :class="{ 'is-active': viewMode === 'doc' }"
+            @click="setViewMode('doc')"
+            title="按文档归类视图"
+          >
+            <FolderTree :size="15" />
+          </button>
+        </div>
+
         <input 
           v-model="searchQuery" 
           type="text" 
-          placeholder="搜索资源名称..." 
+          :placeholder="viewMode === 'doc' ? '搜索资源或文档名称...' : '搜索资源名称...'" 
           class="am-input"
         />
         <select v-model="filterType" class="am-input">
@@ -22,6 +45,34 @@
           <option value="unreferenced">未引用 (孤儿/孤立)</option>
           <option value="large">大文件 (>1MB)</option>
         </select>
+
+        <!-- 文档归类模式专属控制器：文档排序与全部展开/折叠 -->
+        <template v-if="viewMode === 'doc'">
+          <select v-model="docSortField" class="am-input doc-sort-select" title="文档卡片排序依据">
+            <option value="totalSize">按文档总大小</option>
+            <option value="assetCount">按文档资源数</option>
+            <option value="name">按文档名称</option>
+          </select>
+          <button
+            type="button"
+            class="am-btn am-btn--icon"
+            @click="toggleDocSortOrder"
+            :title="docSortOrder === 'desc' ? '文档排序：降序 (点击切换升序)' : '文档排序：升序 (点击切换降序)'"
+          >
+            <ArrowDownNarrowWide v-if="docSortOrder === 'desc'" :size="15" />
+            <ArrowUpNarrowWide v-else :size="15" />
+          </button>
+          <button
+            type="button"
+            class="am-btn am-btn--icon"
+            @click="toggleAllDocGroups"
+            :title="isAllGroupsCollapsed ? '一键全部展开所有文档' : '一键全部折叠所有文档'"
+          >
+            <ChevronsDownUp v-if="!isAllGroupsCollapsed" :size="15" />
+            <ChevronsUpDown v-else :size="15" />
+          </button>
+        </template>
+
         <template v-if="selectedNames.size > 0">
           <button
             class="am-btn am-btn--danger"
@@ -93,6 +144,7 @@
 
     <div class="main-content" v-if="!loading">
       <VirtualAssetList 
+        v-if="viewMode === 'flat'"
         ref="virtualListRef"
         :assets="sortedAssets"
         :sortField="sortField"
@@ -101,6 +153,26 @@
         @update:selectedNames="handleSelectionChange"
         @sort="handleSortChange"
         @open-docs="handleOpenDocs"
+        @edit="handleEdit"
+        @rename="handleRename"
+        @delete="handleDelete"
+        @show-preview="handleShowPreview"
+        @update-preview="handleUpdatePreview"
+        @hide-preview="handleHidePreview"
+      />
+
+      <DocumentAssetGroupList
+        v-else-if="viewMode === 'doc'"
+        ref="docListRef"
+        :groups="groupedDocAssets"
+        :sortField="sortField"
+        :sortOrder="sortOrder"
+        :selectedNames="selectedNames"
+        :searchQuery="searchQuery"
+        @update:selectedNames="handleSelectionChange"
+        @sort="handleSortChange"
+        @open-docs="handleOpenDocs"
+        @open-doc-id="handleOpenSingleDoc"
         @edit="handleEdit"
         @rename="handleRename"
         @delete="handleDelete"
@@ -234,7 +306,26 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
-import { Files, Image, FileText, Music, Video, Archive, Volume2, VolumeX, Play, Pause, AlertCircle, History } from 'lucide-vue-next';
+import {
+  Files,
+  Image,
+  FileText,
+  Music,
+  Video,
+  Archive,
+  Volume2,
+  VolumeX,
+  Play,
+  Pause,
+  AlertCircle,
+  History,
+  LayoutList,
+  FolderTree,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
+} from 'lucide-vue-next';
 import { getAllAssetsInfo, deleteAssetFile, countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
 import { deleteOriginalImage, readOriginalImage, normalizeOriginalStoragePath, isTrashSupported } from '../utils/file-system';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
@@ -251,10 +342,14 @@ import {
   sortAssets,
   splitFileName,
   groupReferencesByDoc,
+  groupAssetsByDocument,
   type AssetCategory,
   type AssetFilterType,
   type AssetSortField,
   type AssetSortOrder,
+  type DocAssetGroup,
+  type DocSortField,
+  type DocSortOrder,
 } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg, sql } from '../api';
@@ -262,6 +357,7 @@ import { usePlugin } from '../utils/plugin-context';
 import { error } from '../utils/logger';
 import { captureAssetThumbnail } from '../utils/image-editor';
 import VirtualAssetList from './VirtualAssetList.vue';
+import DocumentAssetGroupList from './DocumentAssetGroupList.vue';
 import DeduplicateDialog from './DeduplicateDialog.vue';
 import DeletionHistoryDialog from './DeletionHistoryDialog.vue';
 
@@ -306,9 +402,39 @@ function handleCategoryClick(cat: AssetCategory) {
   }
 }
 
+// 视图模式与持久化偏好
+const VIEW_MODE_STORAGE_KEY = 'siyuan-assets-manager-view-mode';
+const viewMode = ref<'flat' | 'doc'>((localStorage.getItem(VIEW_MODE_STORAGE_KEY) as 'flat' | 'doc') || 'flat');
+
+function setViewMode(mode: 'flat' | 'doc') {
+  viewMode.value = mode;
+  try {
+    localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  } catch (e) {}
+}
+
 // 排序状态
 const sortField = ref<AssetSortField>('size');
 const sortOrder = ref<AssetSortOrder>('desc');
+
+// 文档卡片排序与折叠状态
+const docSortField = ref<DocSortField>('totalSize');
+const docSortOrder = ref<DocSortOrder>('desc');
+const isAllGroupsCollapsed = ref(false);
+
+function toggleDocSortOrder() {
+  docSortOrder.value = docSortOrder.value === 'desc' ? 'asc' : 'desc';
+}
+
+function toggleAllDocGroups() {
+  if (isAllGroupsCollapsed.value) {
+    docListRef.value?.expandAll();
+    isAllGroupsCollapsed.value = false;
+  } else {
+    docListRef.value?.collapseAll();
+    isAllGroupsCollapsed.value = true;
+  }
+}
 
 // 多选状态
 const selectedNames = ref<Set<string>>(new Set());
@@ -316,6 +442,7 @@ const selectedSummary = computed(() => calculateBatchDeleteSummary(assets.value,
 
 const containerEl = ref<HTMLElement | null>(null);
 const virtualListRef = ref<any>(null);
+const docListRef = ref<any>(null);
 
 // 悬浮大图与音视频预览相关状态
 const previewType = ref<'image' | 'video' | 'audio' | null>(null);
@@ -597,7 +724,17 @@ function handleKeyDown(event: KeyboardEvent) {
   // Ctrl+A / Cmd+A 全选当前已过滤的全部资源
   if ((event.ctrlKey || event.metaKey) && (event.key === 'a' || event.key === 'A')) {
     event.preventDefault();
-    selectedNames.value = new Set(sortedAssets.value.map(a => a.name));
+    if (viewMode.value === 'doc') {
+      const set = new Set<string>();
+      for (const g of groupedDocAssets.value) {
+        for (const a of g.assets) {
+          set.add(a.name);
+        }
+      }
+      selectedNames.value = set;
+    } else {
+      selectedNames.value = new Set(sortedAssets.value.map(a => a.name));
+    }
     return;
   }
 
@@ -658,6 +795,8 @@ function applyTargetedAssetUpdate(detail: AssetTargetedUpdateDetail) {
   // 释放并失效旧的缩略图缓存
   virtualListRef.value?.invalidateAssetThumbnail?.(oldName);
   virtualListRef.value?.invalidateAssetThumbnail?.(newName);
+  docListRef.value?.invalidateAssetThumbnail?.(oldName);
+  docListRef.value?.invalidateAssetThumbnail?.(newName);
 
   const docCount = countReferencedDocs(references);
   const list = [...assets.value];
@@ -812,6 +951,57 @@ const sortedAssets = computed(() => {
   return sortAssets(filteredAssets.value, sortField.value, sortOrder.value);
 });
 
+// 在文档归类视图下：上游先按分类与属性过滤，搜索与排序交由 groupAssetsByDocument 处理
+const categoryAndTypeFilteredAssets = computed(() => {
+  return filterAssets(assets.value, {
+    searchQuery: '',
+    filterType: filterType.value,
+    category: activeCategory.value,
+  });
+});
+
+const groupedDocAssets = computed(() => {
+  return groupAssetsByDocument(categoryAndTypeFilteredAssets.value, {
+    searchQuery: searchQuery.value,
+    docSortField: docSortField.value,
+    docSortOrder: docSortOrder.value,
+    assetSortField: sortField.value,
+    assetSortOrder: sortOrder.value,
+  });
+});
+
+const docModeStats = computed(() => {
+  const docCount = groupedDocAssets.value.filter((g) => !g.isUnreferenced).length;
+  const assetNames = new Set<string>();
+  for (const g of groupedDocAssets.value) {
+    for (const a of g.assets) {
+      assetNames.add(a.name);
+    }
+  }
+  return {
+    docCount,
+    assetCount: assetNames.size,
+  };
+});
+
+async function handleOpenSingleDoc(rootId: string, firstBlockId?: string) {
+  const plugin = usePlugin();
+  try {
+    await openTab({
+      app: plugin.app,
+      doc: {
+        id: firstBlockId || rootId,
+        action: ["cb-get-hl", "cb-get-focus", "cb-get-context"]
+      },
+      keepCursor: true
+    });
+    pushMsg("已在后台打开文档");
+  } catch (e) {
+    error("Failed to open document", e);
+    pushMsg("打开文档失败");
+  }
+}
+
 function handleSortChange(field: AssetSortField) {
   if (sortField.value === field) {
     sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
@@ -910,9 +1100,13 @@ async function handleDelete(asset: AssetInfo) {
     return;
   }
 
-  const confirmMsg = isTrashSupported()
+  let confirmMsg = isTrashSupported()
     ? `确定要删除 ${asset.name} 吗？\n注意：文件将移入操作系统回收站，且文档中的对应引用块也将被清理。`
     : `【高危警告】当前运行环境不支持系统回收站，确定要永久删除 ${asset.name} 吗？\n注意：物理文件将被直接抹除且不可撤销，文档中的对应引用块也将被清理。`;
+
+  if (asset.docCount > 1) {
+    confirmMsg = `【多文档共享警告】此资源正被 ${asset.docCount} 篇不同的文档共同引用！\n删除后将同步清理所有 ${asset.docCount} 篇文档中的引用块。\n\n` + confirmMsg;
+  }
 
   const confirmDelete = await showConfirm({
     title: '确认删除',
@@ -1373,8 +1567,39 @@ async function handleUnifiedCleanup() {
 }
 .actions {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+}
+.view-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--b3-theme-surface-lighter);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--b3-theme-surface);
+
+  .am-btn {
+    border: none;
+    border-radius: 0;
+    padding: 6px 8px;
+    background: transparent;
+    color: var(--b3-theme-on-surface-light);
+    margin: 0;
+
+    &:hover {
+      background: var(--b3-theme-background-light);
+      color: var(--b3-theme-primary);
+    }
+
+    &.is-active {
+      background: var(--b3-theme-primary);
+      color: #fff;
+    }
+  }
+}
+.doc-sort-select {
+  width: 125px;
 }
 .spinning {
   animation: spin 1s linear infinite;
@@ -1385,6 +1610,9 @@ async function handleUnifiedCleanup() {
 @keyframes spin { 100% { transform: rotate(360deg); } }
 .main-content {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--b3-theme-surface-lighter);
   border-radius: 4px;

@@ -14,5 +14,12 @@
   "deletionHistoryLimitTitle": "Deletion History Limit",
   "deletionHistoryLimitDesc": "Maximum number of recent deletion operation batches to retain (0-100, default 10; 0 disables history logging)",
   "openRecycleBin": "Open OS Recycle Bin",
-  "openRecycleBinDesc": "Open OS Recycle Bin window to search and restore files"
+  "openRecycleBinDesc": "Open OS Recycle Bin window to search and restore files",
+  "viewModeFlat": "Flat View",
+  "viewModeDoc": "Group by Document",
+  "docSortBySize": "By Total Asset Size",
+  "docSortByCount": "By Asset Count",
+  "docSortByName": "By Document Name",
+  "expandAllDocs": "Expand All",
+  "collapseAllDocs": "Collapse All"
 }

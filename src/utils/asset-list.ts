@@ -370,3 +370,218 @@ function getSortValue(asset: AssetInfo, sortField: AssetSortField): string | num
 
   return asset[sortField]
 }
+
+export type DocSortField = 'totalSize' | 'assetCount' | 'name'
+export type DocSortOrder = 'asc' | 'desc'
+
+export interface DocAssetGroup {
+  id: string
+  title: string
+  readablePath: string
+  boxName?: string
+  hpath?: string
+  assets: AssetInfo[]
+  totalSize: number
+  assetCount: number
+  isUnreferenced?: boolean
+  firstBlockId?: string
+  matchedByDocName?: boolean
+}
+
+export interface GroupAssetsByDocumentOptions {
+  searchQuery?: string
+  docSortField?: DocSortField
+  docSortOrder?: DocSortOrder
+  assetSortField?: AssetSortField
+  assetSortOrder?: AssetSortOrder
+}
+
+export function extractDocTitle(ref: BlockRef): string {
+  if (ref.hpath) {
+    const parts = ref.hpath.split('/').filter(Boolean)
+    if (parts.length > 0) {
+      return parts[parts.length - 1]
+    }
+  }
+  if (ref.readablePath) {
+    const parts = ref.readablePath.split('/').filter(Boolean)
+    if (parts.length > 0) {
+      return parts[parts.length - 1]
+    }
+  }
+  return ref.root_id || '未命名文档'
+}
+
+/**
+ * 将资产列表按引用文档聚合分组，支持未引用专属分组、双重搜索与多维排序
+ */
+export function groupAssetsByDocument(
+  assets: AssetInfo[],
+  options: GroupAssetsByDocumentOptions = {}
+): DocAssetGroup[] {
+  const {
+    searchQuery = '',
+    docSortField = 'totalSize',
+    docSortOrder = 'desc',
+    assetSortField = 'size',
+    assetSortOrder = 'desc',
+  } = options
+
+  const cleanQuery = searchQuery.trim().toLowerCase()
+
+  // 1. 按文档 root_id 收集资产（通过 Map<root_id, { docInfo, assetMap }> 去重）
+  const docGroupsMap = new Map<
+    string,
+    {
+      id: string
+      title: string
+      readablePath: string
+      boxName?: string
+      hpath?: string
+      firstBlockId?: string
+      assetMap: Map<string, AssetInfo>
+    }
+  >()
+
+  const unreferencedAssetMap = new Map<string, AssetInfo>()
+
+  for (const asset of assets) {
+    const refs = asset.references || []
+    if (refs.length === 0 || asset.docCount === 0) {
+      unreferencedAssetMap.set(asset.name, asset)
+    } else {
+      for (const ref of refs) {
+        if (!ref.root_id) continue
+
+        let group = docGroupsMap.get(ref.root_id)
+        if (!group) {
+          const title = extractDocTitle(ref)
+          const readablePath = ref.readablePath || (ref.boxName ? `${ref.boxName}/${ref.hpath || ''}` : ref.hpath || title)
+          group = {
+            id: ref.root_id,
+            title,
+            readablePath,
+            boxName: ref.boxName,
+            hpath: ref.hpath,
+            firstBlockId: ref.id,
+            assetMap: new Map(),
+          }
+          docGroupsMap.set(ref.root_id, group)
+        } else if (!group.firstBlockId && ref.id) {
+          group.firstBlockId = ref.id
+        }
+
+        group.assetMap.set(asset.name, asset)
+      }
+    }
+  }
+
+  // 2. 处理常规文档分组：应用双重搜索
+  const normalDocGroups: DocAssetGroup[] = []
+
+  for (const group of docGroupsMap.values()) {
+    const allGroupAssets = Array.from(group.assetMap.values())
+    let matchedAssets: AssetInfo[] = []
+    let matchedByDocName = false
+
+    if (!cleanQuery) {
+      matchedAssets = allGroupAssets
+    } else {
+      const docMatch =
+        group.title.toLowerCase().includes(cleanQuery) ||
+        group.readablePath.toLowerCase().includes(cleanQuery) ||
+        (group.boxName ? group.boxName.toLowerCase().includes(cleanQuery) : false)
+
+      if (docMatch) {
+        // 文档名/路径命中：保留该文档下的所有资产
+        matchedByDocName = true
+        matchedAssets = allGroupAssets
+      } else {
+        // 仅筛选匹配文件名的资产
+        matchedAssets = allGroupAssets.filter((a) => a.name.toLowerCase().includes(cleanQuery))
+      }
+    }
+
+    if (matchedAssets.length > 0) {
+      const sortedInnerAssets = sortAssets(matchedAssets, assetSortField, assetSortOrder)
+      const totalSize = sortedInnerAssets.reduce((sum, a) => sum + (a.size || 0), 0)
+      normalDocGroups.push({
+        id: group.id,
+        title: group.title,
+        readablePath: group.readablePath,
+        boxName: group.boxName,
+        hpath: group.hpath,
+        firstBlockId: group.firstBlockId,
+        assets: sortedInnerAssets,
+        totalSize,
+        assetCount: sortedInnerAssets.length,
+        isUnreferenced: false,
+        matchedByDocName,
+      })
+    }
+  }
+
+  // 3. 对常规文档分组排序
+  normalDocGroups.sort((a, b) => {
+    let cmp = 0
+    if (docSortField === 'totalSize') {
+      cmp = a.totalSize - b.totalSize
+    } else if (docSortField === 'assetCount') {
+      cmp = a.assetCount - b.assetCount
+    } else if (docSortField === 'name') {
+      cmp = a.title.localeCompare(b.title, 'zh-CN')
+    }
+
+    return docSortOrder === 'desc' ? -cmp : cmp
+  })
+
+  // 4. 处理未引用资产分组
+  const allUnrefAssets = Array.from(unreferencedAssetMap.values())
+  let unrefGroup: DocAssetGroup | null = null
+
+  if (allUnrefAssets.length > 0) {
+    let matchedUnrefAssets: AssetInfo[] = []
+    let unrefMatchedByDoc = false
+
+    if (!cleanQuery) {
+      matchedUnrefAssets = allUnrefAssets
+    } else {
+      const unrefNameMatch =
+        '未被任何文档引用'.includes(cleanQuery) ||
+        '未引用'.includes(cleanQuery) ||
+        '孤立'.includes(cleanQuery) ||
+        'unreferenced'.includes(cleanQuery) ||
+        'orphan'.includes(cleanQuery)
+
+      if (unrefNameMatch) {
+        unrefMatchedByDoc = true
+        matchedUnrefAssets = allUnrefAssets
+      } else {
+        matchedUnrefAssets = allUnrefAssets.filter((a) => a.name.toLowerCase().includes(cleanQuery))
+      }
+    }
+
+    if (matchedUnrefAssets.length > 0) {
+      const sortedUnrefAssets = sortAssets(matchedUnrefAssets, assetSortField, assetSortOrder)
+      const totalSize = sortedUnrefAssets.reduce((sum, a) => sum + (a.size || 0), 0)
+      unrefGroup = {
+        id: 'unreferenced',
+        title: '未被任何文档引用',
+        readablePath: '未引用 / 孤立资源',
+        assets: sortedUnrefAssets,
+        totalSize,
+        assetCount: sortedUnrefAssets.length,
+        isUnreferenced: true,
+        matchedByDocName: unrefMatchedByDoc,
+      }
+    }
+  }
+
+  // 5. 组合最终列表：常规文档卡片在前，未引用分组置底展示
+  const result: DocAssetGroup[] = [...normalDocGroups]
+  if (unrefGroup) {
+    result.push(unrefGroup)
+  }
+
+  return result
+}
