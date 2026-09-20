@@ -145,6 +145,18 @@
                 <strong>{{ batch.items.length }}</strong> 个文件 · 释放 <strong>{{ formatSize(batch.freedBytes) }}</strong>
               </span>
 
+              <!-- 跳转到文档按钮（每张卡片内提供，无论是否已回退） -->
+              <button
+                class="am-btn am-btn--secondary btn-compact btn-jump-doc"
+                :class="{ 'is-disabled': !hasRelatedDocs(batch) }"
+                :disabled="!hasRelatedDocs(batch)"
+                @click.stop="handleJumpToDoc(batch)"
+                :title="getJumpToDocTitle(batch)"
+              >
+                <FileText :size="13" />
+                <span>跳转到文档</span>
+              </button>
+
               <!-- 回退主按钮（支持去重批次与带引用的单文件/批量删除） -->
               <button
                 v-if="batch.canRollback && !batch.isRolledBack"
@@ -184,6 +196,7 @@
                     <th style="width: 100px;">大小</th>
                     <th v-if="batch.actionType === 'deduplicate'">合并替换为主保留项</th>
                     <th v-if="batch.actionType === 'deduplicate'" style="width: 120px;">受影响引用</th>
+                    <th v-else style="width: 130px;">关联文档</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -209,9 +222,27 @@
                       <span v-else class="text-muted">-</span>
                     </td>
                     <td v-if="batch.actionType === 'deduplicate'" class="refs-cell">
-                      <span v-if="item.affectedBlocks && item.affectedBlocks.length > 0" class="refs-tag">
-                        {{ item.affectedBlocks.length }} 处块引用
-                      </span>
+                      <button
+                        v-if="item.affectedBlocks && item.affectedBlocks.length > 0"
+                        class="am-link-btn"
+                        @click.stop="handleJumpToItemDoc(item)"
+                        title="点击跳转到引用所在的文档"
+                      >
+                        <FileText :size="11" />
+                        <span>{{ item.affectedBlocks.length }} 处引用</span>
+                      </button>
+                      <span v-else class="text-muted">无引用</span>
+                    </td>
+                    <td v-else class="doc-link-cell">
+                      <button
+                        v-if="item.affectedBlocks && item.affectedBlocks.length > 0"
+                        class="am-link-btn"
+                        @click.stop="handleJumpToItemDoc(item)"
+                        title="点击跳转到该文件所在文档"
+                      >
+                        <FileText :size="11" />
+                        <span>跳转文档 ({{ getItemDocCount(item) }})</span>
+                      </button>
                       <span v-else class="text-muted">无引用</span>
                     </td>
                   </tr>
@@ -347,6 +378,7 @@ import {
   AlertCircle,
   ExternalLink,
   Image,
+  FileText,
 } from 'lucide-vue-next';
 import {
   getDeletionHistory,
@@ -363,8 +395,11 @@ import {
 } from '../utils/rollback-engine';
 import { formatAssetSize } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
-import { showMessage } from 'siyuan';
+import { showMessage, openTab } from 'siyuan';
 import { openOSRecycleBin } from '../utils/file-system';
+import { usePlugin } from '../utils/plugin-context';
+import { sql } from '../api';
+import { warn } from '../utils/logger';
 
 const props = defineProps<{
   visible: boolean;
@@ -594,6 +629,169 @@ async function executeRollback() {
     isRollingBack.value = false;
   }
 }
+
+/**
+ * 提取批次关联的文档根块 ID 列表（去重）
+ */
+function getBatchAffectedDocIds(batch: IDeletionBatch): string[] {
+  const docIdSet = new Set<string>();
+  for (const item of batch.items) {
+    if (item.affectedBlocks && item.affectedBlocks.length > 0) {
+      for (const ref of item.affectedBlocks) {
+        if (ref.root_id) {
+          docIdSet.add(ref.root_id);
+        } else if (ref.id) {
+          docIdSet.add(ref.id);
+        }
+      }
+    }
+  }
+  return Array.from(docIdSet);
+}
+
+/**
+ * 判断卡片是否有可跳转的关联文档
+ */
+function hasRelatedDocs(batch: IDeletionBatch): boolean {
+  return getBatchAffectedDocIds(batch).length > 0;
+}
+
+/**
+ * 按钮 hover 提示文案
+ */
+function getJumpToDocTitle(batch: IDeletionBatch): string {
+  const docIds = getBatchAffectedDocIds(batch);
+  if (docIds.length === 0) {
+    return '该记录中的文件未被任何文档引用，无关联文档可跳转';
+  }
+  if (docIds.length === 1) {
+    return '点击跳转到被删除文件所在文档';
+  }
+  return `点击在后台打开所有关联文档（共 ${docIds.length} 篇）`;
+}
+
+/**
+ * 获取单个文件涉及的关联文档数量
+ */
+function getItemDocCount(item: IDeletedItemRecord): number {
+  if (!item.affectedBlocks || item.affectedBlocks.length === 0) return 0;
+  const docIds = new Set<string>();
+  for (const ref of item.affectedBlocks) {
+    if (ref.root_id) docIds.add(ref.root_id);
+    else if (ref.id) docIds.add(ref.id);
+  }
+  return docIds.size;
+}
+
+/**
+ * 打开文档的核心通用方法
+ */
+async function openDocumentByIds(docIds: string[]) {
+  if (docIds.length === 0) {
+    showMessage('未找到关联文档', 4000, 'info');
+    return;
+  }
+
+  const plugin = usePlugin();
+  if (!plugin || !plugin.app) {
+    showMessage('插件上下文未就绪，无法跳转', 4000, 'error');
+    return;
+  }
+
+  const openedTitles: string[] = [];
+  try {
+    for (const docId of docIds) {
+      let targetId = docId;
+      let docTitle = docId;
+
+      try {
+        const rows = await sql(
+          `SELECT id, root_id, hpath, content FROM blocks WHERE id = '${docId}' OR root_id = '${docId}' LIMIT 1`
+        );
+        if (rows && rows.length > 0) {
+          const row = rows[0];
+          targetId = row.root_id || row.id || docId;
+          docTitle = row.hpath || row.content || targetId;
+        }
+      } catch {}
+
+      await openTab({
+        app: plugin.app,
+        doc: {
+          id: targetId,
+          action: ['cb-get-hl', 'cb-get-focus', 'cb-get-context'],
+        },
+        keepCursor: true,
+      });
+
+      openedTitles.push(docTitle);
+    }
+
+    if (openedTitles.length === 1) {
+      showMessage(`已在后台打开文档: ${openedTitles[0]}`);
+    } else {
+      showMessage(`已在后台打开 ${openedTitles.length} 篇关联文档`);
+    }
+  } catch (err: any) {
+    warn('[DeletionHistory] 跳转文档失败:', err);
+    showMessage(`跳转文档失败: ${err.message || err}`, 5000, 'error');
+  }
+}
+
+/**
+ * 点击卡片头部的“跳转到文档”
+ */
+async function handleJumpToDoc(batch: IDeletionBatch) {
+  let docIds = getBatchAffectedDocIds(batch);
+
+  // 若没有记录的 affectedBlocks，尝试按文件名在思源数据库中检索潜在引用
+  if (docIds.length === 0 && batch.items.length > 0) {
+    try {
+      for (const item of batch.items) {
+        const queryFile = item.fileName.replace(/'/g, "''");
+        const rows = await sql(
+          `SELECT root_id FROM blocks WHERE (markdown LIKE '%assets/${queryFile}%' OR ial LIKE '%assets/${queryFile}%') AND root_id != '' LIMIT 1`
+        );
+        if (rows && rows.length > 0 && rows[0].root_id) {
+          docIds.push(rows[0].root_id);
+          break;
+        }
+      }
+    } catch {}
+  }
+
+  if (docIds.length === 0) {
+    showMessage('该记录中的文件未被任何文档引用，无关联文档可跳转', 4000, 'info');
+    return;
+  }
+
+  await openDocumentByIds(docIds);
+}
+
+/**
+ * 点击明细表格中的单个文件“跳转文档”
+ */
+async function handleJumpToItemDoc(item: IDeletedItemRecord) {
+  if (!item.affectedBlocks || item.affectedBlocks.length === 0) {
+    showMessage('该文件未记录关联文档', 4000, 'info');
+    return;
+  }
+
+  const docIds = Array.from(
+    new Set(
+      item.affectedBlocks
+        .map((r) => r.root_id || r.id)
+        .filter(Boolean) as string[]
+    )
+  );
+
+  if (docIds.length === 0) {
+    showMessage('该文件未记录关联文档', 4000, 'info');
+    return;
+  }
+
+  await openDocumentByIds(docIds);
+}
 </script>
 
 <style scoped lang="scss">
@@ -722,7 +920,8 @@ async function executeRollback() {
 }
 
 .dialog-body {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px 20px;
   display: flex;
@@ -731,6 +930,7 @@ async function executeRollback() {
 }
 
 .history-card {
+  flex-shrink: 0;
   border: 1px solid var(--b3-border-color);
   border-radius: 6px;
   background: var(--b3-theme-surface, var(--b3-theme-background));
@@ -1121,11 +1321,41 @@ async function executeRollback() {
       background: rgba(239, 68, 68, 0.1);
     }
   }
+
+  &.is-disabled,
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
 }
 
 .btn-compact {
   padding: 3px 8px;
   font-size: 12px;
+}
+
+.doc-link-cell {
+  text-align: left;
+}
+
+.am-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--b3-theme-surface-lighter, rgba(128, 128, 128, 0.12));
+  border: 1px solid transparent;
+  color: var(--b3-theme-primary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: var(--b3-theme-primary);
+    color: var(--b3-theme-on-primary, #fff);
+  }
 }
 
 .am-icon-btn {

@@ -111,5 +111,124 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
 
     expect(openTrashSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('handles jump to document when batch has affected blocks and disables when orphaned', async () => {
+    const siyuan = await import('siyuan');
+    const openTabSpy = vi.spyOn(siyuan, 'openTab').mockResolvedValue(undefined as any);
+
+    const { usePlugin } = await import('../src/utils/plugin-context');
+    usePlugin({
+      app: { appId: 'mock-app' },
+    } as any);
+
+    const mockBatches: deletionLogger.IDeletionBatch[] = [
+      {
+        id: 'batch_with_ref',
+        timestamp: Date.now(),
+        actionType: 'single-delete',
+        destination: 'os-trash',
+        items: [
+          {
+            fileName: 'with_ref.png',
+            originalRelativePath: 'data/assets/with_ref.png',
+            size: 2048,
+            affectedBlocks: [
+              {
+                id: 'block_123',
+                root_id: 'doc_root_456',
+              },
+            ],
+          },
+        ],
+        freedBytes: 2048,
+        canRollback: true,
+        isRolledBack: false,
+      },
+      {
+        id: 'batch_orphan',
+        timestamp: Date.now() - 1000,
+        actionType: 'orphan-cleanup',
+        destination: 'os-trash',
+        items: [
+          {
+            fileName: 'orphan.png',
+            originalRelativePath: 'data/assets/orphan.png',
+            size: 512,
+          },
+        ],
+        freedBytes: 512,
+        canRollback: false,
+        isRolledBack: false,
+      },
+    ];
+
+    vi.spyOn(deletionLogger, 'getDeletionHistory').mockResolvedValue(mockBatches);
+    vi.spyOn(deletionLogger, 'getDeletionHistoryLimit').mockResolvedValue(10);
+
+    const isVisible = ref(true);
+    const Wrapper = {
+      components: { DeletionHistoryDialog },
+      setup() {
+        return { isVisible };
+      },
+      template: `<DeletionHistoryDialog :visible="isVisible" />`,
+    };
+
+    app = createApp(Wrapper);
+    app.mount(mountContainer);
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await nextTick();
+
+    const jumpBtns = mountContainer.querySelectorAll<HTMLButtonElement>('.btn-jump-doc');
+    expect(jumpBtns.length).toBe(2);
+
+    // 第一张卡片有引用：可点击且不带 disabled
+    const firstJumpBtn = jumpBtns[0];
+    expect(firstJumpBtn.classList.contains('is-disabled')).toBe(false);
+    expect(firstJumpBtn.disabled).toBe(false);
+
+    // 第二张卡片为孤儿清理：置灰且带 is-disabled 和 disabled
+    const secondJumpBtn = jumpBtns[1];
+    expect(secondJumpBtn.classList.contains('is-disabled')).toBe(true);
+    expect(secondJumpBtn.disabled).toBe(true);
+
+    // 点击第一张卡片的跳转到文档
+    firstJumpBtn.click();
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(openTabSpy).toHaveBeenCalled();
+    const lastCall = openTabSpy.mock.calls[0][0] as any;
+    expect(lastCall.doc.id).toBe('doc_root_456');
+
+    // 展开第一张卡片，检查明细表格中的“关联文档”列与跳转文档按钮
+    const firstCardHeader = mountContainer.querySelector<HTMLDivElement>('.history-card .card-header');
+    firstCardHeader?.click();
+    await nextTick();
+
+    const itemJumpBtn = mountContainer.querySelector<HTMLButtonElement>('.doc-link-cell .am-link-btn');
+    expect(itemJumpBtn).not.toBeNull();
+    expect(itemJumpBtn?.textContent).toContain('跳转文档');
+
+    openTabSpy.mockClear();
+    itemJumpBtn?.click();
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(openTabSpy).toHaveBeenCalled();
+  });
+
+  it('verifies that DeletionHistoryDialog SFC style contains flex-shrink: 0 and min-height: 0 to prevent card crushing', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const sfcPath = path.resolve(__dirname, '../src/components/DeletionHistoryDialog.vue');
+    const content = fs.readFileSync(sfcPath, 'utf-8');
+
+    // 验证 .dialog-body 包含 min-height: 0，防止 Flex 滚动容器尺寸计算坍塌
+    expect(content).toMatch(/\.dialog-body\s*\{[^}]*min-height:\s*0/s);
+    // 验证 .history-card 包含 flex-shrink: 0，防止卡片数量较多或展开时被压缩挤扁
+    expect(content).toMatch(/\.history-card\s*\{[^}]*flex-shrink:\s*0/s);
+  });
 });
 
