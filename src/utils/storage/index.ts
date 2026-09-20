@@ -77,9 +77,17 @@ export function detectStorageAdapter(): IStorageAdapter {
   let pathLib: any;
   let dataDir = '';
   try {
-    fs = (window as any).require('fs');
-    pathLib = (window as any).require('path');
+    const req =
+      (typeof window !== 'undefined' && (window as any).require) ||
+      (typeof require !== 'undefined' ? require : null);
+    if (req) {
+      fs = req('fs');
+      pathLib = req('path');
+    }
     dataDir = (window as any).siyuan?.config?.system?.dataDir;
+    if (!dataDir && (window as any).siyuan?.workspaceDir && pathLib) {
+      dataDir = pathLib.join((window as any).siyuan.workspaceDir, 'data');
+    }
   } catch (e) {}
 
   if (fs && pathLib && dataDir) {
@@ -133,6 +141,20 @@ export class StorageClient {
     return this.delete(`/data/assets/${fileName}`);
   }
 
+  isTrashSupported(): boolean {
+    return typeof (this.adapter as any).isTrashSupported === 'function'
+      ? (this.adapter as any).isTrashSupported()
+      : false;
+  }
+
+  async deleteAssetToTrash(fileName: string): Promise<boolean> {
+    const absolutePath = `/data/assets/${fileName}`;
+    if (typeof (this.adapter as any).deleteToTrash === 'function') {
+      return (this.adapter as any).deleteToTrash(absolutePath);
+    }
+    return this.delete(absolutePath);
+  }
+
   async statAsset(fileName: string): Promise<FileStat | null> {
     return this.stat(`/data/assets/${fileName}`);
   }
@@ -155,6 +177,14 @@ export class StorageClient {
 
   async deleteOriginal(storagePathOrName: string): Promise<boolean> {
     const absolutePath = getOriginalAbsoluteDataPath(storagePathOrName);
+    return this.delete(absolutePath);
+  }
+
+  async deleteOriginalToTrash(storagePathOrName: string): Promise<boolean> {
+    const absolutePath = getOriginalAbsoluteDataPath(storagePathOrName);
+    if (typeof (this.adapter as any).deleteToTrash === 'function') {
+      return (this.adapter as any).deleteToTrash(absolutePath);
+    }
     return this.delete(absolutePath);
   }
 

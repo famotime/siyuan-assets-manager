@@ -79,6 +79,15 @@ export class HttpStorageAdapter implements IStorageAdapter {
     }
   }
 
+  isTrashSupported(): boolean {
+    return false;
+  }
+
+  async deleteToTrash(absolutePath: string): Promise<boolean> {
+    // Web / HTTP 模式下无操作系统回收站，直接执行底层删除
+    return this.delete(absolutePath);
+  }
+
   async list(dirPath: string): Promise<StorageEntry[]> {
     try {
       const files: any[] = await readDir(dirPath);

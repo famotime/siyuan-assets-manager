@@ -10,5 +10,9 @@
   "openInTabTitle": "Open in Tab",
   "openInTabDesc": "When enabled, opens the Assets Manager in a tab instead of a dialog",
   "imageEditorToolsTitle": "Image Editor Tools",
-  "imageEditorToolsDesc": "Control tools displayed in the image editor toolbar (mask and filter are disabled by default)"
+  "imageEditorToolsDesc": "Control tools displayed in the image editor toolbar (mask and filter are disabled by default)",
+  "deletionHistoryLimitTitle": "Deletion History Limit",
+  "deletionHistoryLimitDesc": "Maximum number of recent deletion operation batches to retain (0-100, default 10; 0 disables history logging)",
+  "openRecycleBin": "Open OS Recycle Bin",
+  "openRecycleBinDesc": "Open OS Recycle Bin window to search and restore files"
 }

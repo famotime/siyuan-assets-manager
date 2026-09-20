@@ -3,6 +3,7 @@ import { extractAssetNamesFromMarkdown } from "./asset-markdown";
 import { warn, error } from "./logger";
 import { queryAllReEditableBlocks } from "./siyuan-block";
 import {
+  deleteAsset,
   listOriginalImages,
   deleteOriginalImage,
   normalizeOriginalStoragePath,
@@ -214,13 +215,18 @@ export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
 }
 
 /**
- * 删除资产文件
+ * 删除资产文件（优先移入系统回收站）
+ * @param fileName 资产文件名
+ * @param moveToTrash 是否移入回收站（默认 true）
  */
-export async function deleteAssetFile(fileName: string): Promise<void> {
+export async function deleteAssetFile(fileName: string, moveToTrash: boolean = true): Promise<void> {
   if (SYSTEM_PROTECTED_ASSETS.has(fileName)) {
     throw new Error(`系统关键文件 [${fileName}] 受保护，禁止删除`);
   }
-  await removeFile("/data/assets/" + fileName);
+  const ok = await deleteAsset(fileName, moveToTrash);
+  if (!ok) {
+    throw new Error(`删除资产文件 [${fileName}] 失败`);
+  }
   try {
     await deleteAssetMetadataFile(fileName);
   } catch (e) {}

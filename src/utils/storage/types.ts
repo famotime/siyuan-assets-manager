@@ -17,6 +17,8 @@ export interface IStorageAdapter {
   write(absolutePath: string, content: Blob): Promise<void>;
   delete(absolutePath: string): Promise<boolean>;
   list(dirPath: string): Promise<StorageEntry[]>;
+  isTrashSupported?(): boolean;
+  deleteToTrash?(absolutePath: string): Promise<boolean>;
 }
 
 export async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {

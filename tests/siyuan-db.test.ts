@@ -680,4 +680,32 @@ describe('siyuan asset database helpers', () => {
     expect(info?.docCount).toBe(1)
     expect(info?.references[0].content).toBe('[数据库] 素材表 (图片)')
   })
+
+  it('delegates deleteAssetFile to deleteAsset with trash support and cleans metadata', async () => {
+    const fsModule = await import('../src/utils/file-system')
+    const deleteAssetSpy = vi.spyOn(fsModule, 'deleteAsset').mockResolvedValue(true)
+    const deleteMetaSpy = vi.spyOn(fsModule, 'deleteAssetMetadataFile').mockResolvedValue(true)
+    const { deleteAssetFile } = await import('../src/utils/siyuan-db')
+
+    await deleteAssetFile('my-image.png')
+
+    expect(deleteAssetSpy).toHaveBeenCalledWith('my-image.png', true)
+    expect(deleteMetaSpy).toHaveBeenCalledWith('my-image.png')
+  })
+
+  it('rejects deleteAssetFile when trying to delete system protected asset', async () => {
+    const { deleteAssetFile } = await import('../src/utils/siyuan-db')
+
+    await expect(deleteAssetFile('ocr-texts.json')).rejects.toThrow('受保护')
+    await expect(deleteAssetFile('android-notification-texts.txt')).rejects.toThrow('受保护')
+  })
+
+  it('throws error when deleteAsset fails in deleteAssetFile', async () => {
+    const fsModule = await import('../src/utils/file-system')
+    vi.spyOn(fsModule, 'deleteAsset').mockResolvedValue(false)
+    const { deleteAssetFile } = await import('../src/utils/siyuan-db')
+
+    await expect(deleteAssetFile('failed-asset.png')).rejects.toThrow('失败')
+  })
 })
+

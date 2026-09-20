@@ -563,3 +563,120 @@ export {
   removeTuiSvgArtifacts,
 } from './host-isolation';
 
+/**
+ * 为指定图片快速生成轻量 WebP 缩略图 DataURL（供删除后在日志列表中悬浮预览）
+ * 宽/高自动等比缩放至最大边 maxSize 像素内（默认 160px），体积仅约 1.5~3KB
+ * @param srcUrlOrBlob 图片 URL、DataURL 或二进制 Blob
+ * @param maxSize 最大边长像素，默认 160
+ */
+export async function captureAssetThumbnail(
+  srcUrlOrBlob: string | Blob,
+  maxSize: number = 160
+): Promise<string | undefined> {
+  if (!srcUrlOrBlob) return undefined;
+
+  let objectUrlToRevoke: string | null = null;
+  let srcUrl: string;
+
+  if (typeof srcUrlOrBlob === 'string') {
+    srcUrl = srcUrlOrBlob;
+  } else {
+    try {
+      srcUrl = URL.createObjectURL(srcUrlOrBlob);
+      objectUrlToRevoke = srcUrl;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const cleanup = () => {
+      if (objectUrlToRevoke) {
+        try {
+          URL.revokeObjectURL(objectUrlToRevoke);
+        } catch {}
+        objectUrlToRevoke = null;
+      }
+    };
+
+    const done = (result?: string) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(result);
+    };
+
+    // 1500ms 超时保护，避免大图或损坏资源悬挂
+    const timer = setTimeout(() => {
+      done(undefined);
+    }, 1500);
+
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        clearTimeout(timer);
+        try {
+          let { naturalWidth: width, naturalHeight: height } = img;
+          if (!width || !height) {
+            width = img.width || 0;
+            height = img.height || 0;
+          }
+          if (width <= 0 || height <= 0) {
+            done(undefined);
+            return;
+          }
+
+          if (width > height) {
+            if (width > maxSize) {
+              height = Math.max(1, Math.round((height * maxSize) / width));
+              width = maxSize;
+            }
+          } else {
+            if (height > maxSize) {
+              width = Math.max(1, Math.round((width * maxSize) / height));
+              height = maxSize;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            done(undefined);
+            return;
+          }
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'medium';
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // 优先使用高压缩比的 webp，降级为 jpeg
+          let dataUrl = '';
+          try {
+            dataUrl = canvas.toDataURL('image/webp', 0.65);
+          } catch {
+            dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+          }
+          done(dataUrl || undefined);
+        } catch {
+          done(undefined);
+        }
+      };
+
+      img.onerror = () => {
+        clearTimeout(timer);
+        done(undefined);
+      };
+
+      img.src = srcUrl;
+    } catch {
+      clearTimeout(timer);
+      done(undefined);
+    }
+  });
+}
+
+

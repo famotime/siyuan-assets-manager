@@ -70,6 +70,25 @@ export async function deleteBlock(id: BlockId): Promise<any> {
   return request(url, { id });
 }
 
+export async function insertBlock(
+  dataType: "markdown" | "dom",
+  data: string,
+  options: {
+    nextID?: string;
+    previousID?: string;
+    parentID?: string;
+  }
+): Promise<any> {
+  const url = "/api/block/insertBlock";
+  return request(url, {
+    dataType,
+    data,
+    nextID: options.nextID || "",
+    previousID: options.previousID || "",
+    parentID: options.parentID || "",
+  });
+}
+
 // **************************************** 块属性 ****************************************
 export async function getBlockAttrs(id: BlockId): Promise<{ [key: string]: string }> {
   const url = "/api/attr/getBlockAttrs";

@@ -121,9 +121,12 @@ describe('Storage Module & Seam', () => {
 
       const adapter = new ElectronStorageAdapter(mockFs, mockPath, '/workspace/data');
 
+      const isWin = process.platform === 'win32';
+      const expectedFile1 = isWin ? '\\workspace\\data\\assets\\file1.png' : '/workspace/data/assets/file1.png';
+
       const stat = await adapter.stat('/data/assets/file1.png');
       expect(stat?.size).toBe(1234);
-      expect(mockFs.statSync).toHaveBeenCalledWith('/workspace/data/assets/file1.png');
+      expect(mockFs.statSync).toHaveBeenCalledWith(expectedFile1);
 
       const blob = await adapter.read('/data/assets/file1.png');
       expect(blob).not.toBeNull();
@@ -132,11 +135,119 @@ describe('Storage Module & Seam', () => {
       expect(mockFs.writeFileSync).toHaveBeenCalled();
 
       await adapter.delete('/data/assets/file1.png');
-      expect(mockFs.unlinkSync).toHaveBeenCalledWith('/workspace/data/assets/file1.png');
+      expect(mockFs.unlinkSync).toHaveBeenCalledWith(expectedFile1);
 
       const list = await adapter.list('/data/assets');
       expect(list.length).toBe(1);
       expect(list[0].name).toBe('file1.png');
     });
+
+    it('delegates deleteToTrash to electron shell.trashItem when available', async () => {
+      const mockFs = {
+        existsSync: vi.fn().mockReturnValue(true),
+        unlinkSync: vi.fn(),
+      };
+      const mockPath = {
+        join: (...parts: string[]) => parts.join('/'),
+      };
+      const mockTrashItem = vi.fn().mockResolvedValue(undefined);
+      (window as any).require = vi.fn((mod: string) => {
+        if (mod === 'electron') {
+          return { shell: { trashItem: mockTrashItem } };
+        }
+        return {};
+      });
+
+      const adapter = new ElectronStorageAdapter(mockFs, mockPath, '/workspace/data');
+      expect(adapter.isTrashSupported()).toBe(true);
+
+      const ok = await adapter.deleteToTrash('/data/assets/trashme.png');
+      expect(ok).toBe(true);
+      const isWin = process.platform === 'win32';
+      const expectedPath = isWin ? '\\workspace\\data\\assets\\trashme.png' : '/workspace/data/assets/trashme.png';
+      expect(mockTrashItem).toHaveBeenCalledWith(expectedPath);
+      expect(mockFs.unlinkSync).not.toHaveBeenCalled();
+
+      // 清理全局 mock
+      delete (window as any).require;
+    });
+
+    it('falls back to PowerShell DeleteFile on Windows when shell.trashItem throws', async () => {
+      if (process.platform !== 'win32') return;
+
+      const mockFs = {
+        existsSync: vi.fn().mockReturnValue(true),
+        unlinkSync: vi.fn(),
+      };
+      const mockPath = {
+        join: (...parts: string[]) => parts.join('/'),
+      };
+      const mockExec = vi.fn((cmd, cb) => cb(null));
+      (window as any).require = vi.fn((mod: string) => {
+        if (mod === 'electron') {
+          return {
+            shell: {
+              trashItem: vi.fn().mockRejectedValue(new Error('Failed to create FileOperation instance')),
+            },
+          };
+        }
+        if (mod === 'child_process') {
+          return { exec: mockExec };
+        }
+        return {};
+      });
+
+      const adapter = new ElectronStorageAdapter(mockFs, mockPath, '/workspace/data');
+      const ok = await adapter.deleteToTrash('/data/assets/fallback.png');
+      expect(ok).toBe(true);
+      expect(mockExec).toHaveBeenCalled();
+      expect(mockExec.mock.calls[0][0]).toContain('Microsoft.VisualBasic.FileIO.FileSystem');
+
+      delete (window as any).require;
+    });
+  });
+
+  describe('HttpStorageAdapter trash support', () => {
+    it('reports isTrashSupported as false', () => {
+      const adapter = new HttpStorageAdapter();
+      expect(adapter.isTrashSupported()).toBe(false);
+    });
+  });
+
+  describe('openOSRecycleBin', () => {
+    it('invokes electron.shell.openPath with shell:RecycleBinFolder on Windows', async () => {
+      const { openOSRecycleBin } = await import('../src/utils/storage');
+      const mockOpenPath = vi.fn().mockResolvedValue('');
+      (window as any).require = vi.fn((mod: string) => {
+        if (mod === 'electron') {
+          return { shell: { openPath: mockOpenPath } };
+        }
+        return {};
+      });
+
+      const ok = await openOSRecycleBin();
+      expect(ok).toBe(true);
+      expect(mockOpenPath).toHaveBeenCalledWith('shell:RecycleBinFolder');
+
+      delete (window as any).require;
+    });
+
+    it('falls back to child_process when electron.shell fails or unavailable', async () => {
+      const { openOSRecycleBin } = await import('../src/utils/storage');
+      const mockExec = vi.fn();
+      (window as any).require = vi.fn((mod: string) => {
+        if (mod === 'child_process') {
+          return { exec: mockExec };
+        }
+        return {};
+      });
+
+      const ok = await openOSRecycleBin();
+      expect(ok).toBe(true);
+      expect(mockExec).toHaveBeenCalledWith('start shell:RecycleBinFolder');
+
+      delete (window as any).require;
+    });
   });
 });
+

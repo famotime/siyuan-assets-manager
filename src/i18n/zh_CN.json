@@ -10,5 +10,9 @@
   "openInTabTitle": "页签中打开资源管家",
   "openInTabDesc": "开启时，将资源管理窗口在页签打开，而不是弹窗打开",
   "imageEditorToolsTitle": "图片编辑器工具栏",
-  "imageEditorToolsDesc": "控制在图片编辑器中显示的工具（默认不启用蒙版与滤镜）"
+  "imageEditorToolsDesc": "控制在图片编辑器中显示的工具（默认不启用蒙版与滤镜）",
+  "deletionHistoryLimitTitle": "删除历史保留上限",
+  "deletionHistoryLimitDesc": "保留最近执行的删除操作批次数（范围 0~100，默认 10，设为 0 则不记录日志）",
+  "openRecycleBin": "打开系统回收站",
+  "openRecycleBinDesc": "直接打开操作系统回收站窗口，以便检索与还原被删文件"
 }

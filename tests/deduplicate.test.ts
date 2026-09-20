@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../src/utils/file-system', () => ({
   readAssetFile: vi.fn(),
   deleteAsset: vi.fn(),
+  isTrashSupported: vi.fn().mockReturnValue(true),
 }));
 
 vi.mock('../src/utils/siyuan-block', () => ({

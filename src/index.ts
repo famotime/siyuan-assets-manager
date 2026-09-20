@@ -134,11 +134,13 @@ export default class AssetsManagerPlugin extends Plugin {
     enableLogging: boolean;
     openInTab: boolean;
     imageEditorTools: string[];
+    deletionHistoryLimit: number;
   } = {
     promptOnDeleteOriginal: true,
     enableLogging: false,
     openInTab: true,
     imageEditorTools: [...DEFAULT_IMAGE_EDITOR_TOOLS],
+    deletionHistoryLimit: 10,
   }
 
   async onload() {
@@ -377,6 +379,32 @@ export default class AssetsManagerPlugin extends Plugin {
             this.saveData("config.json", this.settings);
           },
         });
+      },
+    });
+
+    setting.addItem({
+      title: this.i18n.deletionHistoryLimitTitle || "删除历史保留上限",
+      description: this.i18n.deletionHistoryLimitDesc || "保留最近执行的删除操作批次数（范围 0~100，默认 10，设为 0 则不记录日志）",
+      direction: "row",
+      createActionElement: () => {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.max = "100";
+        input.className = "b3-text-field fn__flex-center";
+        input.style.width = "72px";
+        input.value = (this.settings.deletionHistoryLimit ?? 10).toString();
+
+        input.addEventListener("change", (e) => {
+          let val = parseInt((e.target as HTMLInputElement).value, 10);
+          if (isNaN(val) || val < 0) val = 0;
+          if (val > 100) val = 100;
+          input.value = val.toString();
+          this.settings.deletionHistoryLimit = val;
+          this.saveData("config.json", this.settings);
+        });
+
+        return input;
       },
     });
 

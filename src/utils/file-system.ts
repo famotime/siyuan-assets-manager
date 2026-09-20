@@ -1,5 +1,6 @@
 import {
   defaultStorage,
+  openOSRecycleBin,
   ORIGINALS_STORAGE_DIR,
   ORIGINALS_STORAGE_RELATIVE,
   normalizeOriginalStoragePath,
@@ -13,6 +14,7 @@ import type { IAssetReEditMetadata } from '../types/reedit';
 import { error } from './logger';
 
 export {
+  openOSRecycleBin,
   ORIGINALS_STORAGE_DIR,
   ORIGINALS_STORAGE_RELATIVE,
   normalizeOriginalStoragePath,
@@ -49,12 +51,22 @@ export async function saveAssetFile(blob: Blob, fileName: string): Promise<void>
 }
 
 /**
+ * 检查当前宿主环境是否支持操作系统回收站
+ */
+export function isTrashSupported(): boolean {
+  return defaultStorage.isTrashSupported();
+}
+
+/**
  * 删除资产文件
  * @param fileName 文件名
- * @param moveToTrash 是否移到回收站
+ * @param moveToTrash 是否移到操作系统回收站（默认 true）
  */
-export async function deleteAsset(fileName: string, moveToTrash: boolean = true): Promise<void> {
-  await defaultStorage.deleteAsset(fileName);
+export async function deleteAsset(fileName: string, moveToTrash: boolean = true): Promise<boolean> {
+  if (moveToTrash && defaultStorage.isTrashSupported()) {
+    return defaultStorage.deleteAssetToTrash(fileName);
+  }
+  return defaultStorage.deleteAsset(fileName);
 }
 
 export const deleteAssetFile = deleteAsset;
@@ -109,8 +121,13 @@ export async function readOriginalImage(storagePathOrName: string): Promise<Blob
 
 /**
  * 删除隔离存储目录中的原始底图
+ * @param storagePathOrName 底图路径或名称
+ * @param moveToTrash 是否移到操作系统回收站（默认 true）
  */
-export async function deleteOriginalImage(storagePathOrName: string): Promise<boolean> {
+export async function deleteOriginalImage(storagePathOrName: string, moveToTrash: boolean = true): Promise<boolean> {
+  if (moveToTrash && defaultStorage.isTrashSupported()) {
+    return defaultStorage.deleteOriginalToTrash(storagePathOrName);
+  }
   return defaultStorage.deleteOriginal(storagePathOrName);
 }
 

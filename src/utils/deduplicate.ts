@@ -1,9 +1,11 @@
-import { readAssetFile, deleteAsset, readAssetMetadataFile, saveAssetMetadataFile } from './file-system';
+import { readAssetFile, deleteAsset, readAssetMetadataFile, saveAssetMetadataFile, isTrashSupported } from './file-system';
 import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
 import { replaceAssetInAttributeViews } from './attribute-view';
 import type { AssetInfo, BlockRef } from './siyuan-db';
 import type { IAssetReEditMetadata } from '../types/reedit';
 import { usePlugin } from './plugin-context';
+import { recordDeletionBatch, type IDeletedItemRecord, type DeleteDestination } from './deletion-logger';
+import { captureAssetThumbnail } from './image-editor';
 import { log, warn, error } from './logger';
 
 export type DeduplicateMode = 'exact' | 'similar';
@@ -596,12 +598,18 @@ export async function scanDuplicates(
   return { exactGroups, similarGroups };
 }
 
+export interface INormalizeOptions {
+  skipRecordBatch?: boolean;
+  outRecords?: IDeletedItemRecord[];
+}
+
 /**
  * 对单个重复组执行归一化合并
  */
 export async function normalizeDuplicateGroup(
   group: IDuplicateGroup,
-  assetsMap?: Map<string, AssetInfo>
+  assetsMap?: Map<string, AssetInfo>,
+  options?: INormalizeOptions
 ): Promise<INormalizeStats> {
   const stats: INormalizeStats = {
     affectedDocsCount: 0,
@@ -639,6 +647,7 @@ export async function normalizeDuplicateGroup(
   }
 
   const affectedRootIds = new Set<string>();
+  const deletedItemRecords: IDeletedItemRecord[] = [];
 
   for (const item of group.items) {
     if (item.asset.name === canonicalName) continue;
@@ -684,10 +693,28 @@ export async function normalizeDuplicateGroup(
 
     // 5. 确认 0 引用后，安全删除多余冗余物理文件
     try {
+      let thumbnail: string | undefined;
+      try {
+        thumbnail = await captureAssetThumbnail(`/assets/${redundant.name}`);
+      } catch {}
+
       await deleteAsset(redundant.name);
       stats.deletedFilesCount += 1;
       stats.freedBytes += redundant.size || 0;
       log(`[deduplicate] 成功归一化并安全删除冗余资源: ${redundant.name}`);
+
+      const record: IDeletedItemRecord = {
+        fileName: redundant.name,
+        originalRelativePath: `data/assets/${redundant.name}`,
+        size: redundant.size || 0,
+        canonicalName,
+        thumbnail,
+        affectedBlocks: combinedRefs.map((r) => ({ id: r.id, root_id: r.root_id })),
+      };
+      deletedItemRecords.push(record);
+      if (options?.outRecords) {
+        options.outRecords.push(record);
+      }
     } catch (delErr) {
       error(`[deduplicate] 删除冗余文件 ${redundant.name} 失败:`, delErr);
       throw delErr;
@@ -696,6 +723,22 @@ export async function normalizeDuplicateGroup(
 
   stats.affectedDocsCount = affectedRootIds.size;
   group.isProcessed = true;
+
+  // 记录单组删除批次
+  if (!options?.skipRecordBatch && deletedItemRecords.length > 0) {
+    const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
+    try {
+      await recordDeletionBatch({
+        actionType: 'deduplicate',
+        destination,
+        items: deletedItemRecords,
+        freedBytes: stats.freedBytes,
+        canRollback: true,
+      });
+    } catch (logErr) {
+      warn('[deduplicate] 记录删除批次失败:', logErr);
+    }
+  }
 
   return stats;
 }
@@ -717,9 +760,13 @@ export async function batchNormalizeDuplicateGroups(
 
   const pendingGroups = groups.filter(g => !g.isProcessed && !g.isIgnored);
   let processed = 0;
+  const allBatchRecords: IDeletedItemRecord[] = [];
 
   for (const group of pendingGroups) {
-    const singleStats = await normalizeDuplicateGroup(group, assetsMap);
+    const singleStats = await normalizeDuplicateGroup(group, assetsMap, {
+      skipRecordBatch: true,
+      outRecords: allBatchRecords,
+    });
     totalStats.affectedDocsCount += singleStats.affectedDocsCount;
     totalStats.affectedBlocksCount += singleStats.affectedBlocksCount;
     totalStats.deletedFilesCount += singleStats.deletedFilesCount;
@@ -728,6 +775,22 @@ export async function batchNormalizeDuplicateGroups(
     processed++;
     if (onProgress) {
       onProgress(processed, pendingGroups.length);
+    }
+  }
+
+  // 批量记录统一去重批次
+  if (allBatchRecords.length > 0) {
+    const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
+    try {
+      await recordDeletionBatch({
+        actionType: 'deduplicate',
+        destination,
+        items: allBatchRecords,
+        freedBytes: totalStats.freedBytes,
+        canRollback: true,
+      });
+    } catch (logErr) {
+      warn('[deduplicate] 批量记录删除批次失败:', logErr);
     }
   }
 

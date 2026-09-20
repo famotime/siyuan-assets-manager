@@ -37,8 +37,8 @@ describe('setting auto save behavior and layout', () => {
     expect(settingOptions.width).toBe('680px');
     expect(settingOptions.confirmCallback).toBeUndefined();
 
-    // 验证 4 个设置项：页签打开、删除提示、开启日志、图片编辑器工具栏
-    expect(addedItems.length).toBe(4);
+    // 验证 5 个设置项：页签打开、删除提示、开启日志、删除历史保留上限、图片编辑器工具栏
+    expect(addedItems.length).toBe(5);
 
     // 前 3 项为开关卡片
     for (let i = 0; i < 3; i++) {
@@ -61,8 +61,21 @@ describe('setting auto save behavior and layout', () => {
       expect(card.classList.contains('is-checked')).toBe(!wasChecked);
     }
 
-    // 第 4 项为图片编辑器工具栏配置
-    const toolsItem = addedItems[3];
+    // 第 4 项为删除历史保留上限输入框 (0~100)
+    const limitItem = addedItems[3];
+    expect(limitItem.direction).toBe('row');
+    const limitInput = limitItem.createActionElement() as HTMLInputElement;
+    expect(limitInput.tagName.toLowerCase()).toBe('input');
+    expect(limitInput.type).toBe('number');
+    expect(limitInput.value).toBe('10');
+
+    // 模拟输入新的有效上限
+    limitInput.value = '25';
+    limitInput.dispatchEvent(new Event('change'));
+    expect(plugin.settings.deletionHistoryLimit).toBe(25);
+
+    // 第 5 项为图片编辑器工具栏配置
+    const toolsItem = addedItems[4];
     expect(toolsItem.direction).toBe('column');
     const toolsContainer = toolsItem.createActionElement() as HTMLElement;
     expect(toolsContainer.classList.contains('am-setting-tools-container')).toBe(true);
@@ -82,7 +95,7 @@ describe('setting auto save behavior and layout', () => {
     expect(maskChip!.classList.contains('is-checked')).toBe(true);
     expect(plugin.settings.imageEditorTools.includes('mask')).toBe(true);
 
-    expect(plugin.saveData).toHaveBeenCalledTimes(4);
+    expect(plugin.saveData).toHaveBeenCalledTimes(5);
     expect(plugin.saveData).toHaveBeenLastCalledWith("config.json", plugin.settings);
     expect(plugin.settings.openInTab).toBe(false);
   });

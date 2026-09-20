@@ -14,6 +14,7 @@ import {
   unlockHostScroll,
   cleanTuiSvgArtifacts,
   removeTuiSvgArtifacts,
+  captureAssetThumbnail,
 } from '../src/utils/image-editor'
 import { resolveImageEditorConstructor } from '../src/utils/tui-image-editor-bridge'
 
@@ -332,6 +333,18 @@ describe('image editor helpers', () => {
         removeTuiSvgArtifacts()
         expect(document.getElementById('tui-image-editor-svg-default-icons')).toBeNull()
       }
+    })
+  })
+
+  describe('captureAssetThumbnail', () => {
+    it('returns undefined for empty input gracefully', async () => {
+      const res = await captureAssetThumbnail('')
+      expect(res).toBeUndefined()
+    })
+
+    it('returns undefined when image load fails gracefully without throwing', async () => {
+      const res = await captureAssetThumbnail('http://invalid-url-that-does-not-exist.local/img.png')
+      expect(res).toBeUndefined()
     })
   })
 })

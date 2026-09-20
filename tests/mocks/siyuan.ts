@@ -13,3 +13,4 @@ export class Setting {
   open() {}
 }
 export function openTab() { return Promise.resolve(); }
+export function showMessage() {}
