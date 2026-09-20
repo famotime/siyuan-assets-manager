@@ -79,7 +79,7 @@
               文件名 <span v-if="sortField === 'name'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
             </div>
             <div class="col-ext sortable" :class="{ active: sortField === 'ext' }" @click="handleSort('ext')">
-              后缀 <span v-if="sortField === 'ext'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+              后缀名 <span v-if="sortField === 'ext'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
             </div>
             <div class="col-size sortable" :class="{ active: sortField === 'size' }" @click="handleSort('size')">
               大小 <span v-if="sortField === 'size'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
@@ -107,31 +107,33 @@
                 />
               </div>
 
-              <div
-                class="asset-preview"
-                @mouseenter="$emit('show-preview', { event: $event, asset, previewSrc: getThumbnailSrc(asset) })"
-                @mousemove="$emit('update-preview', { event: $event })"
-                @mouseleave="$emit('hide-preview')"
-              >
-                <template v-if="isImage(asset.name) || asset.isOriginal">
-                  <img v-if="getThumbnailSrc(asset)" :src="getThumbnailSrc(asset)" />
-                  <div v-else class="preview-loading">...</div>
-                  <span
-                    v-if="asset.isReEditable"
-                    class="preview-badge preview-badge--reedit"
-                    title="包含矢量二次编辑数据"
-                  >可编辑</span>
-                  <span
-                    v-else-if="asset.isOriginal"
-                    class="preview-badge preview-badge--original"
-                    title="隔离存储的干净原始底图"
-                  >底图</span>
-                </template>
-                <div v-else class="file-icon">{{ getAssetBadgeText(asset.name) }}</div>
+              <div class="col-preview">
+                <div
+                  class="asset-preview"
+                  @mouseenter="$emit('show-preview', { event: $event, asset, previewSrc: getThumbnailSrc(asset) })"
+                  @mousemove="$emit('update-preview', { event: $event })"
+                  @mouseleave="$emit('hide-preview')"
+                >
+                  <template v-if="isImage(asset.name) || asset.isOriginal">
+                    <img v-if="getThumbnailSrc(asset)" :src="getThumbnailSrc(asset)" />
+                    <div v-else class="preview-loading">...</div>
+                    <span
+                      v-if="asset.isReEditable"
+                      class="preview-badge preview-badge--reedit"
+                      title="包含矢量二次编辑数据"
+                    >可编辑</span>
+                    <span
+                      v-else-if="asset.isOriginal"
+                      class="preview-badge preview-badge--original"
+                      title="隔离存储的干净原始底图"
+                    >底图</span>
+                  </template>
+                  <div v-else class="file-icon">{{ getAssetBadgeText(asset.name) }}</div>
+                </div>
               </div>
 
               <div
-                class="asset-name"
+                class="col-name asset-name"
                 @mouseenter="$emit('show-preview', { event: $event, asset, previewSrc: getThumbnailSrc(asset) })"
                 @mousemove="$emit('update-preview', { event: $event })"
                 @mouseleave="$emit('hide-preview')"
@@ -747,58 +749,67 @@ onUnmounted(() => {
   }
 }
 
-/* 列宽分配 */
+/* 列宽分配与严格表头对齐 */
 .col-checkbox {
-  width: 28px;
+  width: 32px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  box-sizing: border-box;
 }
 
 .am-checkbox {
   cursor: pointer;
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   margin: 0;
   accent-color: var(--b3-theme-primary);
 }
 
 .col-preview {
-  width: 42px;
+  width: 48px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .col-name {
   flex: 1;
-  min-width: 140px;
+  min-width: 0;
+  padding-right: 14px;
+  box-sizing: border-box;
 }
 
 .col-ext {
-  width: 70px;
+  width: 75px;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .col-size {
-  width: 80px;
+  width: 85px;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .col-updated {
-  width: 145px;
+  width: 155px;
   flex-shrink: 0;
   font-size: 12px;
+  box-sizing: border-box;
 }
 
 .col-actions {
-  width: 160px;
+  width: 165px;
   flex-shrink: 0;
   text-align: right;
+  box-sizing: border-box;
 }
 
 .asset-preview {
   width: 36px;
   height: 36px;
-  margin-right: 10px;
   background: var(--b3-theme-background-light);
   display: flex;
   justify-content: center;
@@ -845,6 +856,10 @@ onUnmounted(() => {
   font-size: 10px;
   font-weight: bold;
   color: var(--b3-theme-on-surface-light);
+  border: 1px solid var(--b3-theme-surface-lighter);
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: var(--b3-theme-background);
   text-transform: uppercase;
 }
 
@@ -853,12 +868,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .asset-title-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 600;
+  min-width: 0;
+  transition: color 0.15s ease;
 }
 
 .multi-ref-badge {
@@ -897,6 +917,45 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 2px;
+  gap: 4px;
+}
+
+/* 操作图标按钮统一样式 */
+.am-btn--icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background-color: transparent;
+  color: var(--b3-theme-on-surface-light);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background-color: var(--b3-theme-surface-lighter);
+    color: var(--b3-theme-on-surface);
+  }
+
+  :deep(svg) {
+    fill: none !important;
+  }
+}
+
+.am-btn--icon-primary {
+  &:hover {
+    color: var(--b3-theme-primary);
+    background-color: rgba(66, 133, 244, 0.1);
+  }
+}
+
+.am-btn--icon-danger {
+  &:hover {
+    color: #ef4444;
+    background-color: rgba(239, 68, 68, 0.1);
+  }
 }
 </style>
