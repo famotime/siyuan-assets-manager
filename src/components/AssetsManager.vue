@@ -8,6 +8,9 @@
         <span v-if="selectedNames.size > 0" class="selected-badge">
           已选 {{ selectedNames.size }} 项 ({{ selectedSummary.sizeText }})
         </span>
+        <span class="refresh-time" title="资源列表最近一次从思源数据库重新载入的时间">
+          上次刷新：{{ lastRefreshText }}
+        </span>
       </div>
       <div class="actions">
         <!-- 视图切换模式按钮组 (平铺视图 vs 文档归类) -->
@@ -73,6 +76,11 @@
           </button>
         </template>
 
+        <!-- 主操作按钮从左至右固定为：刷新 · 去重 · 清理 · 日志 -->
+        <button class="am-btn" @click="handleRefreshClick" title="刷新资源列表">
+          <svg v-if="loading" class="icon spinning" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
+          <span v-else>刷新</span>
+        </button>
         <template v-if="selectedNames.size > 0">
           <button
             class="am-btn am-btn--danger"
@@ -93,7 +101,6 @@
           <button
             class="am-btn am-btn--outline"
             @click="handleOpenDeduplicate"
-            style="margin-right: 4px;"
             title="识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
           >
             去重
@@ -101,17 +108,12 @@
           <button
             class="am-btn am-btn--danger"
             @click="handleUnifiedCleanup"
-            style="margin-right: 4px;"
             title="综合清理所有未引用的孤儿资源与孤立底图"
           >
             清理
           </button>
         </template>
-        <button class="am-btn" @click="handleRefreshClick" title="刷新资源列表">
-          <svg v-if="loading" class="icon spinning" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
-          <span v-else>刷新</span>
-        </button>
-        <button class="am-btn" @click="historyDialogVisible = true" title="查看删除操作日志与回退历史" style="margin-left: 4px;">
+        <button class="am-btn" @click="historyDialogVisible = true" title="查看删除操作日志与回退历史">
           <History :size="14" style="margin-right: 4px;" />
           <span>日志</span>
         </button>
@@ -142,7 +144,8 @@
       </div>
     </div>
 
-    <div class="main-content" v-if="!loading">
+    <!-- 已有数据时刷新不卸载列表，否则每次刷新都会丢掉滚动位置并整表重建 -->
+    <div class="main-content" v-if="assets.length > 0 || !loading">
       <VirtualAssetList 
         v-if="viewMode === 'flat'"
         ref="virtualListRef"
@@ -338,6 +341,7 @@ import {
   calculateTotalCleanup,
   filterAssets,
   formatAssetSize,
+  formatAssetTime,
   isImageAsset,
   isPlayableAudioAsset,
   isPlayableVideoAsset,
@@ -375,6 +379,11 @@ const props = withDefaults(
 
 const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
+// 最近一次成功从数据库载入资源列表的时刻，首次载入完成前显示占位符
+const lastRefreshedAt = ref<number | null>(null);
+const lastRefreshText = computed(() =>
+  lastRefreshedAt.value ? formatAssetTime(lastRefreshedAt.value) : '—'
+);
 const deduplicateVisible = ref(false);
 const historyDialogVisible = ref(false);
 const searchQuery = ref('');
@@ -754,6 +763,8 @@ async function loadData(options: { resort?: boolean } = {}) {
   loading.value = true;
   try {
     assets.value = await getAllAssetsInfo();
+    // 载入成功才记账，失败的刷新不该让顶部显示出「刚刚刷新过」
+    lastRefreshedAt.value = Date.now();
     // 过滤掉已不存在的选中项
     const existingNames = new Set(assets.value.map(a => a.name));
     selectedNames.value = new Set([...selectedNames.value].filter(name => existingNames.has(name)));
@@ -1617,7 +1628,14 @@ async function handleUnifiedCleanup() {
   color: var(--b3-theme-on-surface-light);
   display: flex;
   align-items: center;
+  /* 窄面板下多出来的刷新时间会换行而不是撑破头部 */
+  flex-wrap: wrap;
   gap: 6px;
+}
+.refresh-time {
+  font-size: 12px;
+  opacity: 0.85;
+  white-space: nowrap;
 }
 .selected-badge {
   padding: 2px 8px;
