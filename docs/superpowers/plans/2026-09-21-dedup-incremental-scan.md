@@ -2038,6 +2038,18 @@ git commit -m "feat(dedup): default to incremental scan with index rebuild escap
 - **指纹复用安全性**: 去重扫描复用 `size + updated` 双判有效的指纹；`score`（依赖 refCount/docCount/isReEditable）必须每次重算，绝不复用，否则会给出过期的保留项推荐。
 ```
 
+- [ ] **Step 1b: 修正 `CLAUDE.md` 中已过时的测试规模**
+
+执行期间实测：全量套件为 **31 个测试文件 / 242 个测试**（命令 `npm test`）。而 `CLAUDE.md` 的构建命令表仍写着「运行全部 Vitest 单元测试（14 套件 / 66+ 测试）」——该数字已严重过时。
+
+把 Build & Test Commands 表中 `npm test` 一行的描述改为：
+
+```markdown
+| `npm test` | 运行全部 Vitest 单元测试（31 个测试文件 / 242+ 测试） |
+```
+
+注意保留「+」：后续任务还会继续新增用例，本任务的收尾时刻以当时的实际数字为准，但不必为此反复改文档。
+
 - [ ] **Step 2: 更新 `docs/changelog.md`**
 
 在文件顶部（最新条目位置）按既有格式加入本次改动条目，列出：增量指纹复用、两阶段并发化（并发度可配置）、分组 id 内容派生、`http-adapter` 的 `updated` 语义修正、缓存 schema 升 v2（旧缓存丢弃）。
