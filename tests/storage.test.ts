@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   StorageClient,
   MemoryStorageAdapter,
@@ -215,39 +215,66 @@ describe('Storage Module & Seam', () => {
   });
 
   describe('openOSRecycleBin', () => {
-    it('invokes electron.shell.openPath with shell:RecycleBinFolder on Windows', async () => {
-      const { openOSRecycleBin } = await import('../src/utils/storage');
-      const mockOpenPath = vi.fn().mockResolvedValue('');
-      (window as any).require = vi.fn((mod: string) => {
-        if (mod === 'electron') {
-          return { shell: { openPath: mockOpenPath } };
-        }
-        return {};
-      });
+    // 实现按 process.platform / navigator.platform 分支，测试必须显式指定平台，
+    // 否则断言结果会随宿主机操作系统漂移（此前只在 Windows 上恰好通过）。
+    function stubPlatform(platform: NodeJS.Platform, navigatorPlatform: string) {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
+      vi.spyOn(navigator, 'platform', 'get').mockReturnValue(navigatorPlatform);
+    }
 
-      const ok = await openOSRecycleBin();
-      expect(ok).toBe(true);
-      expect(mockOpenPath).toHaveBeenCalledWith('shell:RecycleBinFolder');
-
+    afterEach(() => {
       delete (window as any).require;
     });
 
-    it('falls back to child_process when electron.shell fails or unavailable', async () => {
-      const { openOSRecycleBin } = await import('../src/utils/storage');
-      const mockExec = vi.fn();
-      (window as any).require = vi.fn((mod: string) => {
-        if (mod === 'child_process') {
-          return { exec: mockExec };
-        }
-        return {};
-      });
+    const SHELL_CASES = [
+      { platform: 'win32' as NodeJS.Platform, nav: 'Win32', expected: 'shell:RecycleBinFolder' },
+      { platform: 'darwin' as NodeJS.Platform, nav: 'MacIntel', expected: '~/.Trash' },
+      { platform: 'linux' as NodeJS.Platform, nav: 'Linux x86_64', expected: 'trash:///' },
+    ];
 
-      const ok = await openOSRecycleBin();
-      expect(ok).toBe(true);
-      expect(mockExec).toHaveBeenCalledWith('start shell:RecycleBinFolder');
+    it.each(SHELL_CASES)(
+      'invokes electron.shell.openPath with the $platform recycle bin target',
+      async ({ platform, nav, expected }) => {
+        stubPlatform(platform, nav);
+        const { openOSRecycleBin } = await import('../src/utils/storage');
+        const mockOpenPath = vi.fn().mockResolvedValue('');
+        (window as any).require = vi.fn((mod: string) => {
+          if (mod === 'electron') {
+            return { shell: { openPath: mockOpenPath } };
+          }
+          return {};
+        });
 
-      delete (window as any).require;
-    });
+        const ok = await openOSRecycleBin();
+        expect(ok).toBe(true);
+        expect(mockOpenPath).toHaveBeenCalledWith(expected);
+      }
+    );
+
+    const FALLBACK_CASES = [
+      { platform: 'win32' as NodeJS.Platform, nav: 'Win32', expected: 'start shell:RecycleBinFolder' },
+      { platform: 'darwin' as NodeJS.Platform, nav: 'MacIntel', expected: 'open ~/.Trash' },
+      { platform: 'linux' as NodeJS.Platform, nav: 'Linux x86_64', expected: 'xdg-open trash:///' },
+    ];
+
+    it.each(FALLBACK_CASES)(
+      'falls back to the $platform shell command when electron.shell is unavailable',
+      async ({ platform, nav, expected }) => {
+        stubPlatform(platform, nav);
+        const { openOSRecycleBin } = await import('../src/utils/storage');
+        const mockExec = vi.fn();
+        (window as any).require = vi.fn((mod: string) => {
+          if (mod === 'child_process') {
+            return { exec: mockExec };
+          }
+          return {};
+        });
+
+        const ok = await openOSRecycleBin();
+        expect(ok).toBe(true);
+        expect(mockExec).toHaveBeenCalledWith(expected);
+      }
+    );
   });
 });
 
