@@ -21,5 +21,9 @@
   "docSortByCount": "按文档资源数量",
   "docSortByName": "按文档名称",
   "expandAllDocs": "全部展开",
-  "collapseAllDocs": "全部折叠"
+  "collapseAllDocs": "全部折叠",
+  "dedupHashConcurrencyTitle": "去重扫描：哈希并发度",
+  "dedupHashConcurrencyDesc": "精确哈希阶段的并行文件数（范围 1~16，默认 8）。该阶段以磁盘读取与哈希计算为主，可适当调高",
+  "dedupDecodeConcurrencyTitle": "去重扫描：解码并发度",
+  "dedupDecodeConcurrencyDesc": "图片感知哈希阶段的并行解码数（范围 1~8，默认 3）。每张图解码后占用完整位图内存，图片较大或内存紧张时请调低"
 }

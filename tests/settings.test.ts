@@ -37,8 +37,9 @@ describe('setting auto save behavior and layout', () => {
     expect(settingOptions.width).toBe('680px');
     expect(settingOptions.confirmCallback).toBeUndefined();
 
-    // 验证 5 个设置项：页签打开、删除提示、开启日志、删除历史保留上限、图片编辑器工具栏
-    expect(addedItems.length).toBe(5);
+    // 验证 7 个设置项：页签打开、删除提示、开启日志、删除历史保留上限、
+    // 图片编辑器工具栏、去重哈希并发度、去重解码并发度
+    expect(addedItems.length).toBe(7);
 
     // 前 3 项为开关卡片
     for (let i = 0; i < 3; i++) {
@@ -95,9 +96,60 @@ describe('setting auto save behavior and layout', () => {
     expect(maskChip!.classList.contains('is-checked')).toBe(true);
     expect(plugin.settings.imageEditorTools.includes('mask')).toBe(true);
 
+    // 第 6 项为去重哈希并发度 (1~16)
+    const hashItem = addedItems[5];
+    expect(hashItem.direction).toBe('row');
+    const hashInput = hashItem.createActionElement() as HTMLInputElement;
+    expect(hashInput.type).toBe('number');
+    expect(hashInput.value).toBe('8');
+    expect(hashInput.min).toBe('1');
+    expect(hashInput.max).toBe('16');
+
+    // 第 7 项为去重解码并发度 (1~8)
+    const decodeItem = addedItems[6];
+    expect(decodeItem.direction).toBe('row');
+    const decodeInput = decodeItem.createActionElement() as HTMLInputElement;
+    expect(decodeInput.type).toBe('number');
+    expect(decodeInput.value).toBe('3');
+    expect(decodeInput.min).toBe('1');
+    expect(decodeInput.max).toBe('8');
+
     expect(plugin.saveData).toHaveBeenCalledTimes(5);
     expect(plugin.saveData).toHaveBeenLastCalledWith("config.json", plugin.settings);
     expect(plugin.settings.openInTab).toBe(false);
+  });
+
+  it('clamps dedup concurrency settings into range and persists them', () => {
+    const addedItems: any[] = [];
+    vi.spyOn(siyuan, 'Setting').mockImplementation(function (this: any) {
+      Object.assign(this, {
+        addItem: (item: any) => { addedItems.push(item); },
+        open: vi.fn(),
+      });
+      return this as any;
+    });
+
+    const plugin = new AssetsManagerPlugin();
+    plugin.saveData = vi.fn().mockResolvedValue(undefined);
+
+    expect(plugin.settings.dedupHashConcurrency).toBe(8);
+    expect(plugin.settings.dedupDecodeConcurrency).toBe(3);
+
+    plugin.openSetting();
+
+    const hashInput = addedItems[5].createActionElement() as HTMLInputElement;
+    hashInput.value = '999';
+    hashInput.dispatchEvent(new Event('change'));
+    expect(plugin.settings.dedupHashConcurrency).toBe(16);
+    expect(hashInput.value).toBe('16');
+
+    const decodeInput = addedItems[6].createActionElement() as HTMLInputElement;
+    decodeInput.value = '0';
+    decodeInput.dispatchEvent(new Event('change'));
+    expect(plugin.settings.dedupDecodeConcurrency).toBe(1);
+    expect(decodeInput.value).toBe('1');
+
+    expect(plugin.saveData).toHaveBeenCalled();
   });
 
   it('registers custom tab in onload and handles init / destroy correctly without contaminating custom.data', async () => {

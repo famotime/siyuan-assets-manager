@@ -21,5 +21,9 @@
   "docSortByCount": "By Asset Count",
   "docSortByName": "By Document Name",
   "expandAllDocs": "Expand All",
-  "collapseAllDocs": "Collapse All"
+  "collapseAllDocs": "Collapse All",
+  "dedupHashConcurrencyTitle": "Dedup scan: hash concurrency",
+  "dedupHashConcurrencyDesc": "Parallel file count for the exact-hash phase (range 1-16, default 8). This phase is dominated by disk reads and hashing, so a higher value is usually fine",
+  "dedupDecodeConcurrencyTitle": "Dedup scan: decode concurrency",
+  "dedupDecodeConcurrencyDesc": "Parallel decode count for the perceptual-hash phase (range 1-8, default 3). Each decoded image holds a full-resolution bitmap in memory; lower this if images are large or memory is tight"
 }

@@ -11,6 +11,7 @@ import { getAssetNameFromElement, getBlockIdFromElement } from '@/utils/plugin-e
 import { log } from '@/utils/logger'
 import { createApp } from 'vue'
 import AssetsManager from '@/components/AssetsManager.vue'
+import { DEFAULT_HASH_CONCURRENCY, DEFAULT_DECODE_CONCURRENCY } from '@/utils/deduplicate'
 
 export const ASSETS_MANAGER_TAB_TYPE = "assets_manager_tab";
 
@@ -135,12 +136,16 @@ export default class AssetsManagerPlugin extends Plugin {
     openInTab: boolean;
     imageEditorTools: string[];
     deletionHistoryLimit: number;
+    dedupHashConcurrency: number;
+    dedupDecodeConcurrency: number;
   } = {
     promptOnDeleteOriginal: true,
     enableLogging: false,
     openInTab: true,
     imageEditorTools: [...DEFAULT_IMAGE_EDITOR_TOOLS],
     deletionHistoryLimit: 10,
+    dedupHashConcurrency: DEFAULT_HASH_CONCURRENCY,
+    dedupDecodeConcurrency: DEFAULT_DECODE_CONCURRENCY,
   }
 
   async onload() {
@@ -242,6 +247,14 @@ export default class AssetsManagerPlugin extends Plugin {
       this.settings = Object.assign({}, this.settings, loaded);
       if (!Array.isArray(this.settings.imageEditorTools)) {
         this.settings.imageEditorTools = [...DEFAULT_IMAGE_EDITOR_TOOLS];
+      }
+      // 老用户 config.json 中无这两个字段，读出来是 undefined。
+      // 必须在此补默认：undefined 传进并发池会让池大小失效。
+      if (typeof this.settings.dedupHashConcurrency !== 'number') {
+        this.settings.dedupHashConcurrency = DEFAULT_HASH_CONCURRENCY;
+      }
+      if (typeof this.settings.dedupDecodeConcurrency !== 'number') {
+        this.settings.dedupDecodeConcurrency = DEFAULT_DECODE_CONCURRENCY;
       }
     }
 
@@ -457,6 +470,58 @@ export default class AssetsManagerPlugin extends Plugin {
 
         container.appendChild(grid);
         return container;
+      },
+    });
+
+    setting.addItem({
+      title: this.i18n.dedupHashConcurrencyTitle || "去重扫描：哈希并发度",
+      description: this.i18n.dedupHashConcurrencyDesc || "精确哈希阶段的并行文件数（范围 1~16，默认 8）",
+      direction: "row",
+      createActionElement: () => {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "1";
+        input.max = "16";
+        input.className = "b3-text-field fn__flex-center";
+        input.style.width = "72px";
+        input.value = (this.settings.dedupHashConcurrency ?? DEFAULT_HASH_CONCURRENCY).toString();
+
+        input.addEventListener("change", (e) => {
+          let val = parseInt((e.target as HTMLInputElement).value, 10);
+          if (isNaN(val) || val < 1) val = 1;
+          if (val > 16) val = 16;
+          input.value = val.toString();
+          this.settings.dedupHashConcurrency = val;
+          this.saveData("config.json", this.settings);
+        });
+
+        return input;
+      },
+    });
+
+    setting.addItem({
+      title: this.i18n.dedupDecodeConcurrencyTitle || "去重扫描：解码并发度",
+      description: this.i18n.dedupDecodeConcurrencyDesc || "图片感知哈希阶段的并行解码数（范围 1~8，默认 3）",
+      direction: "row",
+      createActionElement: () => {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "1";
+        input.max = "8";
+        input.className = "b3-text-field fn__flex-center";
+        input.style.width = "72px";
+        input.value = (this.settings.dedupDecodeConcurrency ?? DEFAULT_DECODE_CONCURRENCY).toString();
+
+        input.addEventListener("change", (e) => {
+          let val = parseInt((e.target as HTMLInputElement).value, 10);
+          if (isNaN(val) || val < 1) val = 1;
+          if (val > 8) val = 8;
+          input.value = val.toString();
+          this.settings.dedupDecodeConcurrency = val;
+          this.saveData("config.json", this.settings);
+        });
+
+        return input;
       },
     });
 
