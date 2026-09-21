@@ -252,7 +252,7 @@ export async function mapWithConcurrency<T, R>(
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run tests/concurrency.test.ts`
-Expected: PASS，8 个用例全绿
+Expected: PASS，7 个用例全绿（`normalizeConcurrency` 1 个 + `mapWithConcurrency` 6 个）
 
 - [ ] **Step 5: 跑全量测试确认无回归**
 
@@ -578,7 +578,7 @@ export async function clearFingerprintStore(): Promise<boolean> {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run tests/dedup-fingerprint-store.test.ts`
-Expected: PASS，11 个用例全绿
+Expected: PASS，12 个用例全绿（`isFingerprintValid` 5 个 + `pruneFingerprintStore` 2 个 + 持久化 5 个）
 
 - [ ] **Step 5: 验证模块边界未被破坏**
 
@@ -1846,7 +1846,10 @@ async function startScan(forceRescan = false, forceRehash = false) {
       fingerprintStore.value = await loadFingerprintStore();
     }
 
-    const plugin = usePlugin();
+    // usePlugin() 的返回类型是思源基类 Plugin，其上并无 settings 字段
+    // （settings 定义在 AssetsManagerPlugin 子类上）。此处 `as any` 是本仓库的既有写法，
+    // 见 src/utils/logger.ts:5 与 src/components/ImageEditorDialog.vue:306。
+    const plugin = usePlugin() as any;
     const res = await scanDuplicates(props.assets, {
       minSimilarity: similarityThreshold.value / 100,
       fingerprints: fingerprintStore.value || undefined,
@@ -1960,7 +1963,14 @@ async function handleRebuildIndex() {
 - [ ] **Step 4: 确认无类型与编译错误**
 
 Run: `npm test && npx tsc --noEmit`
-Expected: `npm test` PASS；`tsc` 若报错，仅允许出现本次改动之前就存在的既有告警（以改动前的 `npx tsc --noEmit` 输出为基线比对），不得出现 `DeduplicateDialog.vue` 或 `deduplicate.ts` 的新错误
+Expected: `npm test` PASS。`tsc` 的基线是 **17 个既有错误**，存于 `.superpowers/sdd/2026-09-21-dedup-incremental-scan/tsc-baseline.txt`。比对方式：
+
+```bash
+npx tsc --noEmit 2>&1 | grep "error TS" | sort > /tmp/tsc-after.txt
+diff .superpowers/sdd/2026-09-21-dedup-incremental-scan/tsc-baseline.txt /tmp/tsc-after.txt
+```
+
+Expected: `diff` 无输出。`DeduplicateDialog.vue` 不在基线中，故任何指向它的错误都是本次引入的，必须修掉（这正是 Step 2 里 `as any` 的原因）。
 
 - [ ] **Step 5: 手动核对**
 
