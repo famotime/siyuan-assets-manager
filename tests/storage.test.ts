@@ -214,6 +214,52 @@ describe('Storage Module & Seam', () => {
     });
   });
 
+  describe('HttpStorageAdapter stat timestamp honesty', () => {
+    it('reports updated as 0 when last-modified is absent, instead of Date.now()', async () => {
+      const { HttpStorageAdapter } = await import('../src/utils/storage/http-adapter');
+      const adapter = new HttpStorageAdapter();
+
+      vi.stubGlobal('fetch', vi.fn(async () => ({
+        ok: true,
+        headers: {
+          get: (key: string) => (key === 'content-length' ? '2048' : null),
+        },
+      })));
+
+      const stat = await adapter.stat('/data/assets/a.png');
+
+      expect(stat).not.toBeNull();
+      expect(stat!.size).toBe(2048);
+      // 未知时间戳必须是 0，绝不能是当前时间——后者的语义是"刚刚改过"，
+      // 会让依赖 mtime 做失效判定的增量缓存每次必然失配。
+      expect(stat!.updated).toBe(0);
+
+      vi.unstubAllGlobals();
+    });
+
+    it('parses last-modified into a real timestamp when present', async () => {
+      const { HttpStorageAdapter } = await import('../src/utils/storage/http-adapter');
+      const adapter = new HttpStorageAdapter();
+
+      vi.stubGlobal('fetch', vi.fn(async () => ({
+        ok: true,
+        headers: {
+          get: (key: string) => {
+            if (key === 'content-length') return '2048';
+            if (key === 'last-modified') return 'Tue, 14 Nov 2023 22:13:20 GMT';
+            return null;
+          },
+        },
+      })));
+
+      const stat = await adapter.stat('/data/assets/a.png');
+
+      expect(stat!.updated).toBe(Date.parse('Tue, 14 Nov 2023 22:13:20 GMT'));
+
+      vi.unstubAllGlobals();
+    });
+  });
+
   describe('openOSRecycleBin', () => {
     // 实现按 process.platform / navigator.platform 分支，测试必须显式指定平台，
     // 否则断言结果会随宿主机操作系统漂移（此前只在 Windows 上恰好通过）。

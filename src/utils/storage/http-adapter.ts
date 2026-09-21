@@ -15,7 +15,10 @@ export class HttpStorageAdapter implements IStorageAdapter {
       const lastModified = response.headers.get('last-modified');
       return {
         size: contentLength ? parseInt(contentLength, 10) : 0,
-        updated: lastModified ? Date.parse(lastModified) || Date.now() : Date.now(),
+        // 缺 last-modified 时返回 0（语义 = 未知），而非 Date.now()。
+        // Date.now() 谎称"刚刚修改过"，会让依赖 mtime 的失效判定每次必然失配，
+        // 使增量扫描静默退化为全量且无从排查。
+        updated: lastModified ? Date.parse(lastModified) || 0 : 0,
         isDir: false,
       };
     } catch (e) {
