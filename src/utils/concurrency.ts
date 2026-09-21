@@ -5,6 +5,13 @@
  * 池化则是每完成一项立刻补入下一项，吞吐不受最慢项拖累。
  */
 
+/**
+ * 并发池回调选项。
+ *
+ * 约束：回调**不得抛异常**。池只在 worker 外层捕获异常，onError / onProgress
+ * 自身抛错会拒绝整个池的 Promise，已算出的部分结果会一并被丢弃。
+ * 调用方需保证回调是"必定不抛"的（如非抛出的日志函数、ref 赋值）。
+ */
 export interface IConcurrencyOptions<T> {
   /** 中止信号。置位后不再启动新项，已启动的等待收敛 */
   abortSignal?: { aborted: boolean };

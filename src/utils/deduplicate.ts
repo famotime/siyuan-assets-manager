@@ -387,6 +387,33 @@ export function deriveGroupId(mode: DeduplicateMode, items: IDuplicateItem[]): s
 }
 
 /**
+ * 把上一轮分组的用户决策（已忽略 / 已处理）延续到本轮重算出的分组上。
+ *
+ * 组 id 由成员文件名集合派生，因此 id 相同即成员未变，用户的判断应当存活；
+ * 成员发生变动的组会拿到新 id，自然回到待处理状态——这正是内容派生 id 的意义。
+ * 没有这一步，重扫会把所有已忽略的组重新变回待处理，本特性等于没做。
+ *
+ * 刻意不延续 canonicalAssetName：那是与"忽略"不同的产品决策，另行讨论。
+ *
+ * @returns 实际延续了状态的分组数量
+ */
+export function carryOverGroupState(
+  next: IDuplicateGroup[],
+  prev: IDuplicateGroup[]
+): number {
+  const prevById = new Map(prev.map((g) => [g.id, g]));
+  let carried = 0;
+  for (const group of next) {
+    const previous = prevById.get(group.id);
+    if (!previous) continue;
+    if (previous.isProcessed) group.isProcessed = true;
+    if (previous.isIgnored) group.isIgnored = true;
+    if (previous.isProcessed || previous.isIgnored) carried++;
+  }
+  return carried;
+}
+
+/**
  * 计算重复组的冗余空间
  */
 export function calculateGroupRedundantSize(items: IDuplicateItem[], canonicalName: string): number {

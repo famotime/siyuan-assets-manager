@@ -35,6 +35,7 @@ import {
   normalizeDuplicateGroup,
   batchNormalizeDuplicateGroups,
   deriveGroupId,
+  carryOverGroupState,
   saveDeduplicateCache,
   loadDeduplicateCache,
   clearDeduplicateCache,
@@ -672,10 +673,56 @@ describe('deduplicate utils', () => {
     });
   });
 
+  describe('carryOverGroupState', () => {
+    const makeGroup = (
+      id: string,
+      flags: { isIgnored?: boolean; isProcessed?: boolean } = {}
+    ): IDuplicateGroup => ({
+      id,
+      mode: 'exact',
+      similarity: 1.0,
+      canonicalAssetName: 'a.png',
+      items: [
+        { asset: makeAsset('a.png', 100), score: 0, isCanonical: true },
+        { asset: makeAsset('b.png', 100), score: 0, isCanonical: false },
+      ],
+      redundantCount: 1,
+      redundantSize: 100,
+      ...flags,
+    });
+
+    it('copies ignored / processed flags onto groups whose id is unchanged', () => {
+      const prev = [
+        makeGroup('exact_aaaaaaaa', { isIgnored: true }),
+        makeGroup('exact_bbbbbbbb', { isProcessed: true }),
+      ];
+      const next = [makeGroup('exact_aaaaaaaa'), makeGroup('exact_bbbbbbbb')];
+
+      expect(carryOverGroupState(next, prev)).toBe(2);
+      expect(next[0].isIgnored).toBe(true);
+      expect(next[0].isProcessed).toBeFalsy();
+      expect(next[1].isProcessed).toBe(true);
+      expect(next[1].isIgnored).toBeFalsy();
+    });
+
+    it('leaves a group with a brand-new id pending and uncounted', () => {
+      const prev = [makeGroup('exact_aaaaaaaa', { isIgnored: true })];
+      const next = [makeGroup('exact_cccccccc')];
+
+      expect(carryOverGroupState(next, prev)).toBe(0);
+      expect(next[0].isIgnored).toBeFalsy();
+      expect(next[0].isProcessed).toBeFalsy();
+    });
+  });
+
   describe('deduplicate persistence cache', () => {
     let pluginStore: Map<string, any>;
 
     beforeEach(() => {
+      // loadDeduplicateCache 在 plugin.loadData 判定失败后会回落到 localStorage。
+      // 不在此清空，测试就依赖同组用例的执行顺序（上一个用例的 clearDeduplicateCache
+      // 恰好清了 localStorage）才能成立——单独跑本 describe 会读到陈旧条目。
+      localStorage.clear();
       pluginStore = new Map<string, any>();
       pluginContext.usePlugin({
         saveData: async (file: string, data: any) => { pluginStore.set(file, data); },

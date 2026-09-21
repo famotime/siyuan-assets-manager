@@ -82,7 +82,10 @@ describe('fingerprint store persistence', () => {
   it('round-trips through plugin.saveData / loadData', async () => {
     const store = new Map<string, any>();
     usePlugin({
-      saveData: vi.fn(async (file: string, data: any) => { store.set(file, data); }),
+      // 真实 plugin.saveData 会把数据序列化后落盘（思源内部走 JSON），
+      // 此处按引用存储只会证明"原样透传"。序列化后存，才能真正验证
+      // 写入的数据是可序列化的，读到的是副本而非同一对象。
+      saveData: vi.fn(async (file: string, data: any) => { store.set(file, JSON.parse(JSON.stringify(data))); }),
       loadData: vi.fn(async (file: string) => store.get(file) ?? null),
       removeData: vi.fn(async (file: string) => { store.delete(file); }),
     } as any);
@@ -93,10 +96,20 @@ describe('fingerprint store persistence', () => {
     expect(await saveFingerprintStore(fp)).toBe(true);
     expect(store.has(FINGERPRINT_STORE_FILE)).toBe(true);
 
+    // 落盘内容本身必须是完整的指纹结构，而不只是被调用过
+    const persisted = store.get(FINGERPRINT_STORE_FILE);
+    expect(persisted.version).toBe(FINGERPRINT_STORE_VERSION);
+    expect(persisted.entries['a.png'].width).toBe(9);
+    expect(persisted.entries['a.png'].height).toBe(8);
+
     const loaded = await loadFingerprintStore();
     expect(loaded.version).toBe(FINGERPRINT_STORE_VERSION);
     expect(loaded.entries['a.png'].sha256).toBe('deadbeef');
     expect(loaded.entries['a.png'].dHash).toBe('0101');
+    expect(loaded.entries['a.png'].width).toBe(9);
+    expect(loaded.entries['a.png'].height).toBe(8);
+    // 读回的是副本：后续对内存中指纹对象的改动不会污染"已落盘"的内容
+    expect(loaded.entries['a.png']).not.toBe(fp.entries['a.png']);
   });
 
   it('returns an empty store when the stored version does not match', async () => {

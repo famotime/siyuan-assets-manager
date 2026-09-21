@@ -392,6 +392,7 @@ import {
   batchNormalizeDuplicateGroups,
   saveDeduplicateCache,
   loadDeduplicateCache,
+  carryOverGroupState,
   DEDUP_CACHE_VERSION,
   type IDuplicateGroup,
   type IDuplicateItem,
@@ -603,7 +604,11 @@ async function startScan(forceRescan = false, forceRehash = false) {
   }
 
   isScanning.value = true;
-  abortController.value = { aborted: false };
+  // 本轮的控制器对象只此一份：handleCancelScan 改的是同一个对象的 aborted，
+  // 因此取消仍然生效；而后续只读这个局部量，绝不重新读 abortController.value
+  // （重扫会换掉 ref，读到新控制器便会让被作废的旧扫描误认为"未被中止"）。
+  const controller = { aborted: false };
+  abortController.value = controller;
 
   try {
     if (forceRehash) {
@@ -630,14 +635,27 @@ async function startScan(forceRescan = false, forceRehash = false) {
       onProgress: (prog) => {
         scanProgress.value = prog;
       },
-      abortSignal: abortController.value,
+      abortSignal: controller,
     });
 
     // 指纹始终落盘：中止路径下也是有效的部分成果
     fingerprintStore.value = res.fingerprints;
-    await saveFingerprintStore(res.fingerprints);
+    const persisted = await saveFingerprintStore(res.fingerprints);
+    log(
+      `[DeduplicateDialog] 扫描完成：复用 ${res.stats.reused} 项指纹，重算 ${res.stats.computed} 项；指纹落盘${persisted ? '成功' : '失败'}`
+    );
+    if (!persisted) {
+      // 只影响扫描速度，不动用户的任何资源文件——文案需与此一致，不夸大后果
+      pushMsg('指纹索引未能保存，下次扫描将重新计算（不影响资源文件）');
+    }
 
-    if (!abortController.value.aborted) {
+    if (!controller.aborted) {
+      // 必须先快照上一轮分组：下一行就会整体替换掉它们，
+      // 而"已忽略/已处理"需要按稳定组 id 延续到本轮。
+      const previousGroups = [...exactGroups.value, ...similarGroups.value];
+      carryOverGroupState(res.exactGroups, previousGroups);
+      carryOverGroupState(res.similarGroups, previousGroups);
+
       exactGroups.value = res.exactGroups;
       similarGroups.value = res.similarGroups;
       lastScanTime.value = Date.now();
@@ -682,8 +700,10 @@ async function handleRebuildIndex() {
   });
   if (!ok) return;
 
-  exactGroups.value = [];
-  similarGroups.value = [];
+  // 刻意不在此清空分组列表：startScan 会快照当前分组，把「已忽略/已处理」
+  // 按稳定组 id 延续到重建结果上。先清空就等于抹掉了这份快照，
+  // 用户手工忽略的组会在重建后全部复活并被 一键批量归一化 扫进去。
+  // 与「扫描」「重新扫描」保持一致，重建期间列表照常可见。
   await startScan(true, true);
 }
 
