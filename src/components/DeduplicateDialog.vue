@@ -52,7 +52,7 @@
             class="am-btn am-btn--outline am-btn--sm"
             @click="handleManualRefresh"
             :disabled="isScanning || isMerging"
-            title="手动重新扫描分析所有资源文件并更新比对数据"
+            title="增量扫描：仅重算新增或已变更的文件"
           >
             <svg class="icon" :class="{ spinning: isScanning }" width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
               <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
@@ -106,7 +106,7 @@
           <div class="empty-icon">✨</div>
           <h4>未发现{{ activeTab === 'exact' ? '精确相同' : '视觉相似' }}的重复资源</h4>
           <p>当前没有多余冗余文件需要归一化，您的资源库非常整洁。</p>
-          <button class="am-btn am-btn--primary" @click="startScan(true)">重新全量扫描</button>
+          <button class="am-btn am-btn--primary" @click="handleRebuildIndex">重建指纹索引</button>
         </div>
 
         <!-- 左右分栏视图 -->
@@ -342,9 +342,17 @@
             class="am-btn am-btn--ghost"
             @click="startScan(true)"
             :disabled="isScanning || isMerging"
-            title="重新扫描所有资产"
+            title="增量扫描：仅重算新增或已变更的文件"
           >
             重新扫描
+          </button>
+          <button
+            class="am-btn am-btn--ghost"
+            @click="handleRebuildIndex"
+            :disabled="isScanning || isMerging"
+            title="清空指纹缓存并重算全部文件（耗时较长，不会修改任何文件）"
+          >
+            重建索引
           </button>
           <button
             v-if="pendingGroups.length > 0"
@@ -384,11 +392,18 @@ import {
   batchNormalizeDuplicateGroups,
   saveDeduplicateCache,
   loadDeduplicateCache,
+  DEDUP_CACHE_VERSION,
   type IDuplicateGroup,
   type IDuplicateItem,
   type IDeduplicateScanProgress,
   type IDeduplicateCache,
 } from '../utils/deduplicate';
+import {
+  loadFingerprintStore,
+  saveFingerprintStore,
+  clearFingerprintStore,
+} from '../utils/dedup-fingerprint-store';
+import type { IFingerprintStore } from '../utils/dedup-fingerprint-store';
 import { formatAssetSize, formatAssetTime, getAssetBadgeText, groupReferencesByDoc } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
@@ -433,6 +448,9 @@ const scanProgress = ref<IDeduplicateScanProgress>({
   message: '',
 });
 const abortController = ref<{ aborted: boolean }>({ aborted: false });
+
+// 指纹存储：跨会话复用未变更文件的哈希与感知特征
+const fingerprintStore = ref<IFingerprintStore | null>(null);
 
 // 重复组数据
 const exactGroups = ref<IDuplicateGroup[]>([]);
@@ -562,7 +580,7 @@ async function initDialogData() {
 async function persistCurrentCache() {
   try {
     await saveDeduplicateCache({
-      version: 1,
+      version: DEDUP_CACHE_VERSION,
       lastScanTime: lastScanTime.value,
       similarityThreshold: similarityThreshold.value,
       exactGroups: exactGroups.value,
@@ -574,11 +592,13 @@ async function persistCurrentCache() {
 }
 
 /**
- * 启动全量扫描分析
+ * 启动扫描分析
+ * @param forceRescan 为 true 时忽略既有分组，重新构建
+ * @param forceRehash 为 true 时忽略全部指纹，全量重算（"重建索引"）
  */
-async function startScan(forceRescan = false) {
+async function startScan(forceRescan = false, forceRehash = false) {
   if (isScanning.value) return;
-  if (!forceRescan && (exactGroups.value.length > 0 || similarGroups.value.length > 0)) {
+  if (!forceRescan && !forceRehash && (exactGroups.value.length > 0 || similarGroups.value.length > 0)) {
     return;
   }
 
@@ -586,27 +606,48 @@ async function startScan(forceRescan = false) {
   abortController.value = { aborted: false };
 
   try {
+    if (forceRehash) {
+      await clearFingerprintStore();
+      fingerprintStore.value = null;
+    }
+
+    if (!fingerprintStore.value) {
+      fingerprintStore.value = await loadFingerprintStore();
+    }
+
+    // usePlugin() 的返回类型是思源基类 Plugin，其上并无 settings 字段
+    // （settings 定义在 AssetsManagerPlugin 子类上）。此处 `as any` 是本仓库的既有写法，
+    // 见 src/utils/logger.ts:5 与 src/components/ImageEditorDialog.vue:306。
+    const plugin = usePlugin() as any;
     const res = await scanDuplicates(props.assets, {
       minSimilarity: similarityThreshold.value / 100,
+      fingerprints: fingerprintStore.value || undefined,
+      forceRehash,
+      concurrency: {
+        hash: plugin?.settings?.dedupHashConcurrency,
+        decode: plugin?.settings?.dedupDecodeConcurrency,
+      },
       onProgress: (prog) => {
         scanProgress.value = prog;
       },
       abortSignal: abortController.value,
     });
 
+    // 指纹始终落盘：中止路径下也是有效的部分成果
+    fingerprintStore.value = res.fingerprints;
+    await saveFingerprintStore(res.fingerprints);
+
     if (!abortController.value.aborted) {
       exactGroups.value = res.exactGroups;
       similarGroups.value = res.similarGroups;
       lastScanTime.value = Date.now();
 
-      // 默认选中第一组
       const firstGroup = res.exactGroups[0] || res.similarGroups[0];
       if (firstGroup) {
         activeTab.value = res.exactGroups.length > 0 ? 'exact' : 'similar';
         selectedGroupId.value = firstGroup.id;
       }
 
-      // 扫描完成后自动持久化保存
       await persistCurrentCache();
     }
   } catch (err) {
@@ -618,10 +659,32 @@ async function startScan(forceRescan = false) {
 }
 
 /**
- * 用户手动点击“扫描”按钮
+ * 用户手动点击「扫描」按钮：增量刷新（未变更文件零读取）
  */
 async function handleManualRefresh() {
   await startScan(true);
+}
+
+/**
+ * 全量重建指纹索引：清空既有指纹并重算全部文件。
+ * 用于哈希算法升级、或怀疑指纹陈旧时的逃生入口。
+ */
+async function handleRebuildIndex() {
+  const ok = await showConfirm({
+    title: '重建指纹索引',
+    message: [
+      '将清空已缓存的全部文件指纹，并重新读取、解码所有资源文件。',
+      '此操作耗时较长（资源量大时可达数分钟），但不会修改或删除任何文件。',
+    ].join('\n'),
+    confirmText: '开始重建',
+    cancelText: '取消',
+    danger: false,
+  });
+  if (!ok) return;
+
+  exactGroups.value = [];
+  similarGroups.value = [];
+  await startScan(true, true);
 }
 
 /**
