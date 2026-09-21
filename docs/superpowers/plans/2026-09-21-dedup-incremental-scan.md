@@ -2078,6 +2078,17 @@ git commit -m "feat(dedup): default to incremental scan with index rebuild escap
 
 在文件顶部（最新条目位置）按既有格式加入本次改动条目，列出：增量指纹复用、两阶段并发化（并发度可配置）、分组 id 内容派生、`http-adapter` 的 `updated` 语义修正、缓存 schema 升 v2（旧缓存丢弃）。
 
+- [ ] **Step 2b: 修正测试中一处事实错误的注释**
+
+`tests/deduplicate.test.ts:357` 附近的注释写着「jsdom 下 Image 未定义」，这是错的——jsdom 里 `Image` 与 `URL.createObjectURL` 都存在。真实原因是 jsdom 不为 blob URL 触发 `onload`/`onerror`，且缺少 canvas 后端，于是 `computeImageDHash` 只能由自身的 1500ms 看门狗超时兜底、resolve 出 `null`。**同一条错误此前已误导过本计划的论证**（已在 commit fbd103a 中修正计划文本），故顺手把代码注释也改对，避免下次再被它带偏：
+
+```ts
+    // jsdom 不为 blob URL 触发 onload/onerror，且无 canvas 后端，
+    // 因此 computeImageDHash 只能由自身的 1500ms 看门狗超时兜底、resolve 出 null。
+```
+
+改完跑 `npx vitest run tests/deduplicate.test.ts` 确认仍全绿（纯注释改动）。
+
 - [ ] **Step 3: 跑全量测试**
 
 Run: `npm test`
@@ -2088,10 +2099,21 @@ Expected: PASS，全部套件
 Run: `npm run build`
 Expected: 构建成功，输出 `dist/` 与 `package.zip`
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 4b: 提交重新打包的 `package.zip`**
+
+`package.zip` 是**被 git 跟踪**的产物（`dist/` 被 gitignore，`package.zip` 不是），且仓库惯例是为它单独提交一次 `chore(build): repackage after ...`（见历史提交 `e3a92ed`）。`release.js` 不会重新打包它，所以若本步骤缺失，分支上的 `package.zip` 将仍是**不含本次功能**的旧产物——一个装了它的人会找不到增量扫描。
 
 ```bash
-git add docs/project-structure.md docs/changelog.md
+git add package.zip
+git commit -m "chore(build): repackage after incremental dedup scan"
+```
+
+不要把这个文件并入下面的文档提交：仓库惯例是构建产物单独一次提交，便于区分"代码变了"与"只是重新打包"。
+
+- [ ] **Step 5: 提交文档**
+
+```bash
+git add docs/project-structure.md docs/changelog.md CLAUDE.md tests/deduplicate.test.ts
 git commit -m "docs: record incremental dedup scan and concurrency knobs"
 ```
 
