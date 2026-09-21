@@ -13,19 +13,29 @@
       </div>
       <div class="col-preview"></div>
       <div class="col-name sortable" :class="{ active: sortField === 'name' }" @click="handleSort('name')">
-        文件名 <span v-if="sortField === 'name'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+        文件名
+        <ArrowUp v-if="sortField === 'name' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+        <ArrowDown v-else-if="sortField === 'name' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
       <div class="col-ext sortable" :class="{ active: sortField === 'ext' }" @click="handleSort('ext')">
-        后缀名 <span v-if="sortField === 'ext'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+        后缀名
+        <ArrowUp v-if="sortField === 'ext' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+        <ArrowDown v-else-if="sortField === 'ext' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
       <div class="col-size sortable" :class="{ active: sortField === 'size' }" @click="handleSort('size')">
-        大小 <span v-if="sortField === 'size'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+        大小
+        <ArrowUp v-if="sortField === 'size' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+        <ArrowDown v-else-if="sortField === 'size' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
       <div class="col-updated sortable" :class="{ active: sortField === 'updated' }" @click="handleSort('updated')">
-        更新时间 <span v-if="sortField === 'updated'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+        更新时间
+        <ArrowUp v-if="sortField === 'updated' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+        <ArrowDown v-else-if="sortField === 'updated' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
       <div class="col-refs sortable" :class="{ active: sortField === 'docCount' }" @click="handleSort('docCount')" title="引用此资源的文档篇数（同一文档内多处引用只计一篇）">
-        文档数 <span v-if="sortField === 'docCount'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+        文档数
+        <ArrowUp v-if="sortField === 'docCount' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+        <ArrowDown v-else-if="sortField === 'docCount' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
       <div class="col-actions">操作</div>
     </div>
@@ -87,6 +97,7 @@
               <Palette
                 :size="15"
                 class="asset-badge-icon asset-badge-icon--reedit"
+                style="fill: none !important;"
               />
             </span>
             <span
@@ -98,6 +109,7 @@
               <Layers
                 :size="15"
                 class="asset-badge-icon asset-badge-icon--original"
+                style="fill: none !important;"
               />
             </span>
           </div>
@@ -119,17 +131,36 @@
           </div>
 
           <div class="col-actions asset-actions" @click.stop>
-            <button v-if="item.data.docCount > 0" class="am-btn am-btn--icon" @click.stop="$emit('open-docs', item.data)" title="在后台打开并定位到所有引用此资源的文档">
-              <ExternalLink :size="16" />
+            <button
+              v-if="item.data.docCount > 0"
+              class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
+              @click.stop="$emit('open-docs', item.data)"
+              aria-label="在后台打开并定位引用此资源的文档"
+            >
+              <ExternalLink :size="15" style="fill: none !important;" />
             </button>
-            <button v-if="isImage(item.data.name) || item.data.isOriginal" class="am-btn am-btn--icon am-btn--icon-primary" @click.stop="$emit('edit', item.data)" title="编辑此图片">
-              <Pencil :size="16" />
+            <button
+              v-if="isImage(item.data.name) || item.data.isOriginal"
+              class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__s"
+              @click.stop="$emit('edit', item.data)"
+              aria-label="二次编辑与矢量标注"
+            >
+              <Pencil :size="15" style="fill: none !important;" />
             </button>
-            <button v-if="!item.data.isOriginal" class="am-btn am-btn--icon" @click.stop="$emit('rename', item.data)" title="重命名此资源，并自动更新所有文档引用">
-              <TextCursorInput :size="16" />
+            <button
+              v-if="!item.data.isOriginal"
+              class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
+              @click.stop="$emit('rename', item.data)"
+              aria-label="重命名此资源并自动更新引用"
+            >
+              <TextCursorInput :size="15" style="fill: none !important;" />
             </button>
-            <button class="am-btn am-btn--icon am-btn--icon-danger" @click.stop="$emit('delete', item.data)" :title="item.data.isOriginal ? '删除此原始底图' : '删除此资源及所有引用它的文档块'">
-              <Trash2 :size="16" />
+            <button
+              class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
+              @click.stop="$emit('delete', item.data)"
+              :aria-label="item.data.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
+            >
+              <Trash2 :size="15" style="fill: none !important;" />
             </button>
           </div>
         </div>
@@ -141,7 +172,7 @@
 
 <script setup lang="ts">
 import { useVirtualList } from '@vueuse/core';
-import { ExternalLink, Pencil, TextCursorInput, Trash2, Layers, Palette } from 'lucide-vue-next';
+import { ExternalLink, Pencil, TextCursorInput, Trash2, Layers, Palette, ArrowUp, ArrowDown } from 'lucide-vue-next';
 import { ref, toRefs, computed, onUnmounted } from 'vue';
 import type { AssetInfo } from '../utils/siyuan-db';
 import { formatAssetSize, formatAssetTime, getAssetBadgeText, isImageAsset, splitFileName, type AssetSortField, type AssetSortOrder } from '../utils/asset-list';
@@ -466,8 +497,8 @@ onUnmounted(() => {
   }
 
   &--original {
-    color: #d97706;
-    border: 1px solid #d97706;
+    color: var(--am-badge-original-color, #d97706);
+    border: 1px solid var(--am-badge-original-color, #d97706);
     text-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
   }
 }
@@ -533,8 +564,8 @@ onUnmounted(() => {
   }
 
   &--original {
-    color: #d97706;
-    stroke: #d97706 !important;
+    color: var(--am-badge-original-color, #d97706);
+    stroke: var(--am-badge-original-color, #d97706) !important;
   }
 }
 
@@ -546,9 +577,15 @@ onUnmounted(() => {
   display: flex;
   gap: 4px;
   justify-content: flex-end;
-  /* 始终显示操作按钮 */
-  opacity: 1;
+  /* 渐进式呈现：默认弱化，悬停时凸显，减少视觉噪声 */
+  opacity: 0.25;
+  transition: opacity 0.15s ease;
   pointer-events: auto;
+}
+
+.asset-item:hover .asset-actions,
+.asset-item.is-selected .asset-actions {
+  opacity: 1;
 }
 
 /* 纯图标按钮样式 */

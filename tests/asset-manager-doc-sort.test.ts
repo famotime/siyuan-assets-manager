@@ -123,7 +123,9 @@ describe('AssetsManager 文档归类视图排序', () => {
     await mountAndSettle();
     expect(renderedDocTitles()).toEqual(['文档B', '文档C', '文档A']);
 
-    const toggle = mountContainer.querySelector('button[title^="文档排序"]') as HTMLButtonElement;
+    const toggle = mountContainer.querySelector(
+      'button[aria-label^="文档排序"], button[title^="文档排序"]'
+    ) as HTMLButtonElement;
     expect(toggle).not.toBeNull();
     toggle.click();
     await settle();

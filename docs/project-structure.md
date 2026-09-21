@@ -19,7 +19,8 @@
 | `docs/deduplicate-safety-optimization-plan.md` | 图片去重与归一化安全优化方案与实施计划（消除裂图与资源丢失隐患） |
 | `docs/unreferenced-assets-detection-specification.md` | 未引用资源与孤儿底图识别设计方案与判定规范（对齐思源官方内核规则） |
 | `docs/secondary-image-editing-plan.md` | 矢量图片二次编辑与隔离底图技术方案 |
-| `docs/ux-optimization-plan.md` | 用户体验与交互优化规范方案 |
+| `docs/ux-ui-redesign-and-theming-specification.md` | 资源管家 UI/UX 全面重构与主题自适应设计规范（资深设计师视角，拒绝 AI Slop） |
+| `docs/ux-optimization-plan.md` | 用户体验与交互优化规范方案 (历史版本) |
 | `docs/refactor-plan.md` | 重构计划与演进记录 |
 | `docs/project-structure.md` | 项目目录与模块职责结构说明 |
 

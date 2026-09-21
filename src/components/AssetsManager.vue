@@ -1,147 +1,180 @@
 <template>
   <div ref="containerEl" class="assets-manager-container" style="position: relative;">
+    <!-- 顶部综合控制区 (两段式高信噪比布局) -->
     <div class="header" :class="{ 'header--tab': isTabMode }">
-      <h2>资源管家</h2>
-      <div class="stats">
-        <span v-if="viewMode === 'flat'">当前显示: {{ sortedAssets.length }} / {{ assets.length }} 个资源</span>
-        <span v-else>当前显示: {{ docModeStats.docCount }} 篇文档 · {{ docModeStats.assetCount }} / {{ assets.length }} 个资源</span>
-        <span v-if="selectedNames.size > 0" class="selected-badge">
-          已选 {{ selectedNames.size }} 项 ({{ selectedSummary.sizeText }})
-        </span>
-        <span class="refresh-time" title="资源列表最近一次从思源数据库重新载入的时间">
-          上次刷新：{{ lastRefreshText }}
-        </span>
-      </div>
-      <div class="actions">
-        <!-- 视图切换模式按钮组 (平铺视图 vs 文档归类) -->
-        <div class="view-mode-toggle" title="切换视图模式">
-          <button
-            type="button"
-            class="am-btn am-btn--icon"
-            :class="{ 'is-active': viewMode === 'flat' }"
-            @click="setViewMode('flat')"
-            title="平铺列表视图"
-          >
-            <LayoutList :size="15" />
-          </button>
-          <button
-            type="button"
-            class="am-btn am-btn--icon"
-            :class="{ 'is-active': viewMode === 'doc' }"
-            @click="setViewMode('doc')"
-            title="按文档归类视图"
-          >
-            <FolderTree :size="15" />
-          </button>
+      <!-- 第一层：品牌、实时指标胶囊与核心操作图标群 -->
+      <div class="header__top-row">
+        <div class="header__title-group">
+          <h2>资源管家</h2>
+          <div class="header-summary-badge" v-if="assets.length > 0">
+            <span class="summary-count">{{ sortedAssets.length }} / {{ assets.length }} 项</span>
+            <span class="summary-dot">·</span>
+            <span class="summary-size">{{ totalAssetsSizeText }}</span>
+          </div>
         </div>
 
-        <input 
-          v-model="searchQuery" 
-          type="text" 
-          :placeholder="viewMode === 'doc' ? '搜索资源或文档名称...' : '搜索资源名称...'" 
-          class="am-input"
-        />
-        <select v-model="filterType" class="am-input">
-          <option value="all">全部属性</option>
-          <option value="reeditable">可二次编辑</option>
-          <option value="original">原始底图</option>
-          <option value="unreferenced">未引用 (孤儿/孤立)</option>
-          <option value="large">大文件 (>1MB)</option>
-        </select>
+        <div class="header__top-actions">
+          <span class="refresh-time" title="资源列表最近一次从思源数据库重新载入的时间">
+            上次刷新：{{ lastRefreshText }}
+          </span>
+
+          <div class="primary-action-icons">
+            <!-- 刷新 -->
+            <button
+              class="am-action-btn am-action-btn--refresh b3-tooltips b3-tooltips__s"
+              @click="handleRefreshClick"
+              aria-label="刷新资源列表"
+            >
+              <RotateCw :size="17" :class="{ spinning: loading }" style="fill: none !important;" />
+            </button>
+
+            <!-- 批量删除 / 去重 -->
+            <template v-if="selectedNames.size > 0">
+              <button
+                class="am-action-btn am-action-btn--batch-delete b3-tooltips b3-tooltips__s"
+                @click="handleBatchDelete"
+                :aria-label="`批量删除选中的 ${selectedNames.size} 个文件`"
+              >
+                <Trash2 :size="17" style="fill: none !important;" />
+              </button>
+              <button
+                class="am-action-btn am-action-btn--cancel b3-tooltips b3-tooltips__s"
+                @click="clearSelection"
+                aria-label="取消当前多选"
+              >
+                <XSquare :size="17" style="fill: none !important;" />
+              </button>
+            </template>
+            <template v-else>
+              <button
+                class="am-action-btn am-action-btn--dedup b3-tooltips b3-tooltips__s"
+                @click="handleOpenDeduplicate"
+                aria-label="识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
+              >
+                <CopyMinus :size="17" style="fill: none !important;" />
+              </button>
+              <button
+                class="am-action-btn am-action-btn--clean b3-tooltips b3-tooltips__s"
+                @click="handleUnifiedCleanup"
+                aria-label="综合清理所有未引用的孤儿资源与孤立底图"
+              >
+                <Trash2 :size="17" style="fill: none !important;" />
+              </button>
+            </template>
+
+            <!-- 日志 -->
+            <button
+              class="am-action-btn am-action-btn--history b3-tooltips b3-tooltips__sw"
+              @click="historyDialogVisible = true"
+              aria-label="查看删除操作日志与回退历史"
+            >
+              <History :size="17" style="fill: none !important;" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 第二层：检索过滤与视图切换工具栏 -->
+      <div class="header__toolbar-row">
+        <div class="toolbar-left">
+          <!-- 视图切换模式按钮组 (平铺视图 vs 文档归类) -->
+          <div class="view-mode-toggle">
+            <button
+              type="button"
+              class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
+              :class="{ 'is-active': viewMode === 'flat' }"
+              @click="setViewMode('flat')"
+              aria-label="平铺列表视图"
+            >
+              <LayoutList :size="15" style="fill: none !important;" />
+            </button>
+            <button
+              type="button"
+              class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
+              :class="{ 'is-active': viewMode === 'doc' }"
+              @click="setViewMode('doc')"
+              aria-label="按文档归类视图"
+            >
+              <FolderTree :size="15" style="fill: none !important;" />
+            </button>
+          </div>
+
+          <!-- 搜索输入舱 -->
+          <div class="search-capsule">
+            <Search :size="13" class="search-icon" style="fill: none !important;" />
+            <input 
+              v-model="searchQuery" 
+              type="text" 
+              :placeholder="viewMode === 'doc' ? '搜索资源或文档名称...' : '搜索资源名称...'" 
+              class="am-input search-input"
+            />
+            <button
+              v-if="searchQuery"
+              class="search-clear-btn"
+              @click="searchQuery = ''"
+              aria-label="清空搜索"
+            >
+              <X :size="12" style="fill: none !important;" />
+            </button>
+          </div>
+
+          <!-- 属性过滤下拉 -->
+          <select v-model="filterType" class="am-input filter-select">
+            <option value="all">全部属性</option>
+            <option value="reeditable">可二次编辑</option>
+            <option value="original">原始底图</option>
+            <option value="unreferenced">未引用 (孤儿/孤立)</option>
+            <option value="large">大文件 (>1MB)</option>
+          </select>
+        </div>
 
         <!-- 文档归类模式专属控制器：文档排序与全部展开/折叠 -->
-        <template v-if="viewMode === 'doc'">
-          <select v-model="docSortField" class="am-input doc-sort-select" title="文档卡片排序依据">
+        <div class="toolbar-right" v-if="viewMode === 'doc'">
+          <select v-model="docSortField" class="am-input doc-sort-select">
             <option value="totalSize">按文档总大小</option>
             <option value="assetCount">按文档资源数</option>
             <option value="name">按文档名称</option>
           </select>
           <button
             type="button"
-            class="am-btn am-btn--icon"
+            class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
             @click="toggleDocSortOrder"
-            :title="docSortOrder === 'desc' ? '文档排序：降序 (点击切换升序)' : '文档排序：升序 (点击切换降序)'"
+            :aria-label="docSortOrder === 'desc' ? '文档排序：降序 (点击切换升序)' : '文档排序：升序 (点击切换降序)'"
           >
-            <ArrowDownNarrowWide v-if="docSortOrder === 'desc'" :size="15" />
-            <ArrowUpNarrowWide v-else :size="15" />
+            <ArrowDownNarrowWide v-if="docSortOrder === 'desc'" :size="16" style="fill: none !important;" />
+            <ArrowUpNarrowWide v-else :size="16" style="fill: none !important;" />
           </button>
           <button
             type="button"
-            class="am-btn am-btn--icon"
+            class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
             @click="toggleAllDocGroups"
-            :title="isAllGroupsCollapsed ? '一键全部展开所有文档' : '一键全部折叠所有文档'"
+            :aria-label="isAllGroupsCollapsed ? '一键全部展开所有文档' : '一键全部折叠所有文档'"
           >
-            <ChevronsDownUp v-if="!isAllGroupsCollapsed" :size="15" />
-            <ChevronsUpDown v-else :size="15" />
+            <ChevronsDownUp v-if="!isAllGroupsCollapsed" :size="16" style="fill: none !important;" />
+            <ChevronsUpDown v-else :size="16" style="fill: none !important;" />
           </button>
-        </template>
-
-        <!-- 主操作按钮从左至右固定为：刷新 · 去重 · 清理 · 日志 -->
-        <button class="am-btn" @click="handleRefreshClick" title="刷新资源列表">
-          <svg v-if="loading" class="icon spinning" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
-          <span v-else>刷新</span>
-        </button>
-        <template v-if="selectedNames.size > 0">
-          <button
-            class="am-btn am-btn--danger"
-            @click="handleBatchDelete"
-            :title="`批量删除选中的 ${selectedNames.size} 个文件 (支持快捷键 Delete)`"
-          >
-            批量删除 ({{ selectedNames.size }})
-          </button>
-          <button
-            class="am-btn"
-            @click="clearSelection"
-            title="取消当前多选"
-          >
-            取消选择
-          </button>
-        </template>
-        <template v-else>
-          <button
-            class="am-btn am-btn--outline"
-            @click="handleOpenDeduplicate"
-            title="识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
-          >
-            去重
-          </button>
-          <button
-            class="am-btn am-btn--danger"
-            @click="handleUnifiedCleanup"
-            title="综合清理所有未引用的孤儿资源与孤立底图"
-          >
-            清理
-          </button>
-        </template>
-        <button class="am-btn" @click="historyDialogVisible = true" title="查看删除操作日志与回退历史">
-          <History :size="14" style="margin-right: 4px;" />
-          <span>日志</span>
-        </button>
+        </div>
       </div>
     </div>
 
-    <!-- 顶部 6 大分类统计卡片 -->
-    <div class="category-cards-grid">
-      <div
+    <!-- 顶部 6 大分类指标药丸导航栏 (Segmented Metric Pills) -->
+    <div class="category-pills-bar">
+      <button
         v-for="card in categoryCards"
         :key="card.key"
-        class="category-card"
+        type="button"
+        class="category-pill"
         :class="{ 'is-active': activeCategory === card.key }"
         @click="handleCategoryClick(card.key)"
         :title="activeCategory === card.key && card.key !== 'all' ? `点击取消【${card.label}】筛选，查看全部` : `点击仅查看【${card.label}】资源`"
       >
-        <div class="category-card__icon" :style="{ color: card.color }">
-          <component :is="card.icon" :size="20" />
-        </div>
-        <div class="category-card__info">
-          <div class="category-card__name">{{ card.label }}</div>
-          <div class="category-card__meta">
-            <span class="category-card__count">{{ categoryStats[card.key]?.count || 0 }} 个</span>
-            <span class="category-card__dot">·</span>
-            <span class="category-card__size">{{ categoryStats[card.key]?.sizeText || '0 B' }}</span>
-          </div>
-        </div>
-      </div>
+        <span class="pill-icon" :style="{ color: card.color }">
+          <component :is="card.icon" :size="14" style="fill: none !important;" />
+        </span>
+        <span class="pill-label">{{ card.label }}</span>
+        <span class="pill-badge">{{ categoryStats[card.key]?.count || 0 }}</span>
+        <span class="pill-size">{{ categoryStats[card.key]?.sizeText || '0 B' }}</span>
+      </button>
     </div>
 
     <!-- 已有数据时刷新不卸载列表，否则每次刷新都会丢掉滚动位置并整表重建 -->
@@ -305,6 +338,34 @@
       v-model:visible="historyDialogVisible"
       @refresh="loadData"
     />
+
+    <!-- 底部悬浮批量操作浮岛 (就近操作，提升大屏长列表人机工效) -->
+    <div v-if="selectedNames.size > 0" class="am-batch-floating-dock">
+      <div class="am-batch-floating-dock__info">
+        <span>已选 <strong class="am-batch-floating-dock__count">{{ selectedNames.size }}</strong> 项</span>
+        <span>({{ selectedSummary.sizeText }})</span>
+      </div>
+      <div class="am-batch-floating-dock__divider"></div>
+      <div class="am-batch-floating-dock__actions">
+        <button
+          type="button"
+          class="am-btn am-btn--sm am-btn--ghost"
+          @click="clearSelection"
+          aria-label="清空当前多选"
+        >
+          取消选择
+        </button>
+        <button
+          type="button"
+          class="am-btn am-btn--sm am-btn--danger"
+          @click="handleBatchDelete"
+          :aria-label="`确认执行批量删除 (${selectedNames.size} 个文件)`"
+        >
+          <Trash2 :size="13" style="fill: none !important;" />
+          <span>批量删除</span>
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -330,6 +391,13 @@ import {
   ChevronsUpDown,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
+  RotateCw,
+  CopyMinus,
+  Sparkles,
+  Trash2,
+  XSquare,
+  Search,
+  X,
 } from 'lucide-vue-next';
 import { getAllAssetsInfo, deleteAssetFile, countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
 import { deleteOriginalImage, readOriginalImage, normalizeOriginalStoragePath, isTrashSupported } from '../utils/file-system';
@@ -384,6 +452,10 @@ const lastRefreshedAt = ref<number | null>(null);
 const lastRefreshText = computed(() =>
   lastRefreshedAt.value ? formatAssetTime(lastRefreshedAt.value) : '—'
 );
+const totalAssetsSizeText = computed(() => {
+  const total = assets.value.reduce((sum, a) => sum + (a.size || 0), 0);
+  return formatAssetSize(total);
+});
 const deduplicateVisible = ref(false);
 const historyDialogVisible = ref(false);
 const searchQuery = ref('');
@@ -398,12 +470,12 @@ function handleOpenDeduplicate() {
 const categoryStats = computed(() => calculateCategoryStats(assets.value));
 
 const categoryCards = computed(() => [
-  { key: 'all' as AssetCategory, label: '全部', icon: Files, color: 'var(--b3-theme-primary)' },
-  { key: 'image' as AssetCategory, label: '图片', icon: Image, color: '#10b981' },
-  { key: 'document' as AssetCategory, label: '文档', icon: FileText, color: '#3b82f6' },
-  { key: 'audio' as AssetCategory, label: '音频', icon: Music, color: '#f59e0b' },
-  { key: 'video' as AssetCategory, label: '视频', icon: Video, color: '#ef4444' },
-  { key: 'archive' as AssetCategory, label: '压缩包', icon: Archive, color: '#8b5cf6' },
+  { key: 'all' as AssetCategory, label: '全部', icon: Files, color: 'var(--am-cat-all)' },
+  { key: 'image' as AssetCategory, label: '图片', icon: Image, color: 'var(--am-cat-image)' },
+  { key: 'document' as AssetCategory, label: '文档', icon: FileText, color: 'var(--am-cat-doc)' },
+  { key: 'audio' as AssetCategory, label: '音频', icon: Music, color: 'var(--am-cat-audio)' },
+  { key: 'video' as AssetCategory, label: '视频', icon: Video, color: 'var(--am-cat-video)' },
+  { key: 'archive' as AssetCategory, label: '压缩包', icon: Archive, color: 'var(--am-cat-archive)' },
 ]);
 
 function handleCategoryClick(cat: AssetCategory) {
@@ -1609,48 +1681,310 @@ async function handleUnifiedCleanup() {
 }
 .header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
   padding-right: 40px; /* 为右上角关闭按钮预留空间，防止重叠 */
+  flex-shrink: 0;
 
   &--tab {
     padding-right: 0;
   }
+
+  &__top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  &__title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    h2 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--b3-theme-on-background);
+      letter-spacing: -0.2px;
+    }
+  }
+
+  &__top-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  &__toolbar-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    background: var(--am-surface-hover);
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--am-border-subtle);
+  }
 }
-.header h2 {
-  margin: 0;
+
+.header-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--am-surface-active);
+  font-size: 11px;
+  color: var(--b3-theme-on-surface);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+
+  .summary-count {
+    font-weight: 600;
+  }
+
+  .summary-dot {
+    opacity: 0.5;
+  }
+
+  .summary-size {
+    opacity: 0.85;
+  }
 }
-.stats {
-  font-size: 14px;
-  color: var(--b3-theme-on-surface-light);
+
+.primary-action-icons {
   display: flex;
   align-items: center;
-  /* 窄面板下多出来的刷新时间会换行而不是撑破头部 */
-  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 顶部核心主操作按钮体系：加大至 32px，独立语义色微底色与精致线框 */
+.am-action-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  flex-shrink: 0;
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  // 1. 刷新按钮：主色蓝 (Primary Blue)
+  &--refresh {
+    color: var(--b3-theme-primary);
+    background: color-mix(in srgb, var(--b3-theme-primary) 10%, transparent);
+    border-color: color-mix(in srgb, var(--b3-theme-primary) 28%, transparent);
+
+    &:hover {
+      background: color-mix(in srgb, var(--b3-theme-primary) 18%, transparent);
+      border-color: var(--b3-theme-primary);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+  }
+
+  // 2. 去重比对按钮：智能紫/靛蓝 (Indigo / Purple)
+  &--dedup {
+    color: #6366f1;
+    background: color-mix(in srgb, #6366f1 10%, transparent);
+    border-color: color-mix(in srgb, #6366f1 28%, transparent);
+
+    &:hover {
+      background: color-mix(in srgb, #6366f1 18%, transparent);
+      border-color: #6366f1;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
+    }
+  }
+
+  // 3. 综合清理按钮：警示红 (Danger Red / Trash)
+  &--clean {
+    color: var(--b3-theme-error, #ef4444);
+    background: color-mix(in srgb, var(--b3-theme-error, #ef4444) 10%, transparent);
+    border-color: color-mix(in srgb, var(--b3-theme-error, #ef4444) 28%, transparent);
+
+    &:hover {
+      background: color-mix(in srgb, var(--b3-theme-error, #ef4444) 20%, transparent);
+      border-color: var(--b3-theme-error, #ef4444);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+    }
+  }
+
+  // 4. 日志审计按钮：翠绿/青碧 (Emerald / Teal)
+  &--history {
+    color: #059669;
+    background: color-mix(in srgb, #059669 10%, transparent);
+    border-color: color-mix(in srgb, #059669 28%, transparent);
+
+    &:hover {
+      background: color-mix(in srgb, #059669 18%, transparent);
+      border-color: #059669;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(5, 150, 105, 0.15);
+    }
+  }
+
+  // 批量删除 (多选态高亮)
+  &--batch-delete {
+    color: #fff;
+    background: var(--b3-theme-error, #ef4444);
+    border-color: var(--b3-theme-error, #ef4444);
+
+    &:hover {
+      background: color-mix(in srgb, var(--b3-theme-error, #ef4444) 85%, #000);
+      border-color: color-mix(in srgb, var(--b3-theme-error, #ef4444) 85%, #000);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);
+    }
+  }
+
+  // 取消多选
+  &--cancel {
+    color: var(--b3-theme-on-surface);
+    background: var(--b3-theme-surface-lighter);
+    border-color: var(--b3-border-color);
+
+    &:hover {
+      background: var(--am-surface-hover);
+      border-color: var(--b3-theme-on-surface-light);
+      transform: translateY(-1px);
+    }
+  }
+}
+
+html[data-theme-mode="dark"] {
+  .am-action-btn {
+    &--dedup {
+      color: #818cf8;
+      background: color-mix(in srgb, #818cf8 14%, transparent);
+      border-color: color-mix(in srgb, #818cf8 32%, transparent);
+
+      &:hover {
+        background: color-mix(in srgb, #818cf8 22%, transparent);
+        border-color: #818cf8;
+      }
+    }
+
+    &--clean {
+      color: #f87171;
+      background: color-mix(in srgb, #f87171 14%, transparent);
+      border-color: color-mix(in srgb, #f87171 32%, transparent);
+
+      &:hover {
+        background: color-mix(in srgb, #f87171 22%, transparent);
+        border-color: #f87171;
+      }
+    }
+
+    &--history {
+      color: #34d399;
+      background: color-mix(in srgb, #34d399 14%, transparent);
+      border-color: color-mix(in srgb, #34d399 32%, transparent);
+
+      &:hover {
+        background: color-mix(in srgb, #34d399 22%, transparent);
+        border-color: #34d399;
+      }
+    }
+  }
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 280px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
   gap: 6px;
 }
+
 .refresh-time {
-  font-size: 12px;
-  opacity: 0.85;
+  font-size: 11px;
+  color: var(--b3-theme-on-surface-light);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
 }
-.selected-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: rgba(66, 133, 244, 0.15);
-  color: var(--b3-theme-primary);
-  font-weight: 600;
-  font-size: 12px;
-}
-.actions {
+
+/* 复合搜索胶囊舱 */
+.search-capsule {
+  position: relative;
   display: flex;
-  gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  flex: 1;
+  max-width: 280px;
+  min-width: 140px;
+
+  .search-icon {
+    position: absolute;
+    left: 8px;
+    color: var(--b3-theme-on-surface-light);
+    pointer-events: none;
+  }
+
+  .search-input {
+    width: 100%;
+    height: 28px;
+    padding-left: 28px;
+    padding-right: 24px;
+    font-size: 12px;
+    border-radius: 4px;
+  }
+
+  .search-clear-btn {
+    position: absolute;
+    right: 4px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--b3-theme-on-surface-light);
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+
+    &:hover {
+      background: var(--am-surface-hover);
+      color: var(--b3-theme-on-surface);
+    }
+  }
 }
+
+.filter-select {
+  height: 28px;
+  font-size: 12px;
+  padding: 0 8px;
+  width: 130px;
+}
+
+.doc-sort-select {
+  height: 28px;
+  font-size: 12px;
+  padding: 0 6px;
+  width: 115px;
+}
+
 .view-mode-toggle {
   display: inline-flex;
   align-items: center;
@@ -1662,7 +1996,9 @@ async function handleUnifiedCleanup() {
   .am-btn {
     border: none;
     border-radius: 0;
-    padding: 6px 8px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     background: transparent;
     color: var(--b3-theme-on-surface-light);
     margin: 0;
@@ -1674,20 +2010,18 @@ async function handleUnifiedCleanup() {
 
     &.is-active {
       background: var(--b3-theme-primary);
-      color: #fff;
+      color: var(--b3-theme-on-primary, #fff);
     }
   }
 }
-.doc-sort-select {
-  width: 125px;
-}
+
 .spinning {
   animation: spin 1s linear infinite;
-  fill: currentColor;
-  width: 16px;
-  height: 16px;
+  stroke: currentColor;
+  fill: none !important;
 }
 @keyframes spin { 100% { transform: rotate(360deg); } }
+
 .main-content {
   flex: 1;
   min-height: 0;
@@ -1696,96 +2030,6 @@ async function handleUnifiedCleanup() {
   overflow: hidden;
   border: 1px solid var(--b3-theme-surface-lighter);
   border-radius: 4px;
-}
-
-/* 顶部 6 大分类统计卡片网格 */
-.category-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.category-card {
-  background: var(--b3-theme-background-light);
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  user-select: none;
-  box-sizing: border-box;
-
-  &:hover {
-    background: var(--b3-theme-surface);
-    border-color: var(--b3-theme-primary);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  }
-
-  &.is-active {
-    background: rgba(66, 133, 244, 0.12);
-    border-color: var(--b3-theme-primary);
-    box-shadow: 0 0 0 1px var(--b3-theme-primary);
-  }
-
-  &__icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-
-    :deep(svg),
-    svg {
-      fill: none !important;
-      stroke: currentColor !important;
-      stroke-width: 2px !important;
-    }
-  }
-
-  &__info {
-    min-width: 0;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  &__name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--b3-theme-on-background);
-    line-height: 1.2;
-  }
-
-  &__meta {
-    font-size: 11px;
-    color: var(--b3-theme-on-surface-light);
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  &__count {
-    font-weight: 500;
-  }
-
-  &__dot {
-    opacity: 0.5;
-  }
-
-  &__size {
-    opacity: 0.85;
-  }
 }
 
 .loading-state {

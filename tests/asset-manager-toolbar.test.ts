@@ -126,8 +126,8 @@ describe('AssetsManager 顶部操作区', () => {
       || title.startsWith('批量删除')
       || title === '取消当前多选';
 
-    return Array.from(mountContainer.querySelectorAll('button'))
-      .map((button) => button.getAttribute('title') || '')
+    return Array.from(mountContainer.querySelectorAll('.primary-action-icons button'))
+      .map((button) => button.getAttribute('aria-label') || button.getAttribute('title') || '')
       .filter(isPrimary);
   }
 
@@ -137,7 +137,7 @@ describe('AssetsManager 顶部操作区', () => {
 
   function refreshButton(): HTMLButtonElement {
     const button = mountContainer.querySelector(
-      'button[title="刷新资源列表"]'
+      'button[aria-label="刷新资源列表"], button[title="刷新资源列表"]'
     ) as HTMLButtonElement;
     expect(button).not.toBeNull();
     return button;

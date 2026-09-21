@@ -2,8 +2,8 @@
   <ConfirmDialog />
   <div class="am-dialog-overlay" v-if="visible" @click.self="closeManager">
     <div class="am-dialog manager-dialog">
-      <button class="am-dialog__close" style="position: absolute; top: 16px; right: 16px; z-index: 10;" @click="closeManager" aria-label="关闭">
-        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <button class="am-dialog__close b3-tooltips b3-tooltips__sw" style="position: absolute; top: 16px; right: 16px; z-index: 10;" @click="closeManager" aria-label="关闭窗口 (Esc)">
+        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="fill: none !important;">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
@@ -21,12 +21,15 @@
   />
 
   <!-- 全局重命名弹窗 -->
-  <div v-if="globalRenameVisible && globalRenameAsset" class="am-dialog-overlay" style="z-index: 1100;">
+  <div v-if="globalRenameVisible && globalRenameAsset" class="am-dialog-overlay" style="z-index: 1100;" @click.self="closeGlobalRenameDialog">
     <div class="am-dialog" style="width: 420px; max-width: 90vw;">
       <div class="am-dialog__header">
-        <h3>重命名资源</h3>
-        <button class="am-dialog__close" @click="closeGlobalRenameDialog" aria-label="关闭">
-          <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <FileEdit :size="18" style="fill: none !important; color: var(--b3-theme-primary);" />
+          <h3 style="margin: 0;">重命名资源</h3>
+        </div>
+        <button class="am-dialog__close b3-tooltips b3-tooltips__sw" @click="closeGlobalRenameDialog" aria-label="关闭窗口 (Esc)">
+          <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
             <line x1="18" y1="6" x2="6" y2="18"/>
             <line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
@@ -40,6 +43,7 @@
           <label style="display: block; margin-bottom: 8px; font-weight: bold; font-size: 13px;">新文件名:</label>
           <div class="am-input-group">
             <input 
+              ref="renameInputRef"
               v-model="globalRenameBaseName" 
               type="text" 
               class="am-input" 
@@ -52,16 +56,23 @@
         </div>
       </div>
       <div class="am-dialog__footer">
-        <button class="am-btn am-btn--ghost" @click="closeGlobalRenameDialog">取消</button>
-        <button class="am-btn am-btn--primary" @click="submitGlobalRename">确认修改</button>
+        <button class="am-btn am-btn--ghost b3-tooltips b3-tooltips__n" @click="closeGlobalRenameDialog" aria-label="取消重命名 (Esc)" style="display: inline-flex; align-items: center; gap: 4px;">
+          <X :size="14" style="fill: none !important;" />
+          <span>取消</span>
+        </button>
+        <button class="am-btn am-btn--primary b3-tooltips b3-tooltips__n" @click="submitGlobalRename" aria-label="确认修改文件名并同步更新引用" style="display: inline-flex; align-items: center; gap: 4px;">
+          <Check :size="14" style="fill: none !important;" />
+          <span>确认修改</span>
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
+import { FileEdit, X, Check } from 'lucide-vue-next';
 import { usePlugin } from '@/main';
 import { ASSETS_MANAGER_TAB_TYPE } from './index';
 import AssetsManager from './components/AssetsManager.vue';
@@ -87,6 +98,33 @@ const globalRenameVisible = ref(false);
 const globalRenameAsset = ref<AssetInfo | null>(null);
 const globalRenameBaseName = ref('');
 const globalRenameExt = ref('');
+const renameInputRef = ref<HTMLInputElement | null>(null);
+
+function handleGlobalRenameKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeGlobalRenameDialog();
+  }
+}
+
+watch(globalRenameVisible, (val) => {
+  if (val) {
+    window.addEventListener('keydown', handleGlobalRenameKeyDown, true);
+    nextTick(() => {
+      if (renameInputRef.value) {
+        renameInputRef.value.focus();
+        renameInputRef.value.select();
+      }
+    });
+  } else {
+    window.removeEventListener('keydown', handleGlobalRenameKeyDown, true);
+  }
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalRenameKeyDown, true);
+});
 
 const handleToggleAssetsManager = () => {
   const pluginInstance = plugin as any;

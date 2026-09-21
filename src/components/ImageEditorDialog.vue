@@ -13,7 +13,7 @@
             @click="handleResetOriginal" 
             aria-label="重置为原始底图（清空所有矢量标注）"
           >
-            <RotateCcw :size="16" />
+            <RotateCcw :size="16" style="fill: none !important;" />
           </button>
           <button 
             v-if="isReEditMode" 
@@ -21,23 +21,47 @@
             @click="handleFlattenLayers" 
             aria-label="合并固化图层（转换为普通图片，移除二次编辑数据）"
           >
-            <Layers :size="16" />
+            <Layers :size="16" style="fill: none !important;" />
           </button>
-          <button class="am-dialog__close b3-tooltips b3-tooltips__sw" @click="close" aria-label="关闭">
-            <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+          <button class="am-dialog__close b3-tooltips b3-tooltips__sw" @click="close" aria-label="关闭窗口 (Esc)">
+            <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
           </button>
         </div>
       </div>
-      <div class="am-dialog__body" style="position: relative; background: #282828; padding: 16px; display: flex;">
+      <div class="am-dialog__body" style="position: relative; background: #1f1f23; padding: 16px; display: flex;">
         <div ref="tuiEditorContainer" style="width: 100%; height: 100%;"></div>
       </div>
       <div class="am-dialog__footer">
-        <button class="am-btn am-btn--outline" @click="downloadLocal" style="margin-right: 8px;" title="当前编辑的图片另存到本地">另存</button>
-        <button class="am-btn am-btn--ghost" @click="close" title="取消编辑并关闭窗口">取消</button>
-        <button class="am-btn am-btn--primary" @click="save" title="保存修改并同步到所有引用此图片的文档块">保存</button>
+        <button 
+          class="am-btn am-btn--outline b3-tooltips b3-tooltips__n" 
+          @click="downloadLocal" 
+          style="margin-right: 8px; display: inline-flex; align-items: center; gap: 4px;" 
+          aria-label="当前编辑的图片另存到本地"
+        >
+          <Download :size="14" style="fill: none !important;" />
+          <span>另存</span>
+        </button>
+        <button 
+          class="am-btn am-btn--ghost b3-tooltips b3-tooltips__n" 
+          @click="close" 
+          style="display: inline-flex; align-items: center; gap: 4px;"
+          aria-label="取消编辑并关闭窗口 (Esc)"
+        >
+          <X :size="14" style="fill: none !important;" />
+          <span>取消</span>
+        </button>
+        <button 
+          class="am-btn am-btn--primary b3-tooltips b3-tooltips__n" 
+          @click="save" 
+          style="display: inline-flex; align-items: center; gap: 4px;"
+          aria-label="保存修改并同步到所有引用此图片的文档块"
+        >
+          <Check :size="14" style="fill: none !important;" />
+          <span>保存</span>
+        </button>
       </div>
     </div>
   </div>
@@ -45,7 +69,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onUnmounted } from 'vue';
-import { RotateCcw, Layers } from 'lucide-vue-next';
+import { RotateCcw, Layers, Download, X, Check } from 'lucide-vue-next';
 import { getImageEditor, extractVectorDataFromTui, applyVectorDataToTui, getFabricCanvasFromTui } from '../utils/tui-image-editor-bridge';
 import 'tui-image-editor/dist/tui-image-editor.css';
 import { readAssetFile, readOriginalImage, readAssetMetadataFile, saveAssetMetadataFile } from '../utils/file-system';
@@ -541,17 +565,17 @@ async function save() {
 }
 
 :deep(.tui-image-editor-button svg) {
-  stroke: #8c8c8c;
-  fill: none;
+  stroke: var(--b3-theme-on-surface, #8c8c8c);
+  fill: none !important;
   transition: stroke 0.2s;
 }
 
 :deep(.tui-image-editor-button.active svg) {
-  stroke: #fff;
+  stroke: var(--b3-theme-primary, #007aff) !important;
 }
 
 :deep(.tui-image-editor-button:hover svg) {
-  stroke: #fff;
+  stroke: var(--b3-theme-primary, #007aff) !important;
 }
 
 /* 确保顶栏帮助菜单中各按钮（含下载、加载、查看原图等）底色与布局整洁 */

@@ -9,8 +9,8 @@
           <span class="batch-count-badge">{{ filteredHistory.length }} 条记录</span>
         </div>
         <div class="header-actions">
-          <button class="am-icon-btn" @click="handleClose" title="关闭">
-            <X :size="16" />
+          <button class="am-icon-btn b3-tooltips b3-tooltips__sw" @click="handleClose" aria-label="关闭窗口 (Esc)">
+            <X :size="16" style="fill: none !important;" />
           </button>
         </div>
       </div>
@@ -363,7 +363,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import {
   History,
   X,
@@ -423,8 +423,29 @@ let hoverPreviewTimeout: number | null = null;
 const rollbackConfirmBatch = ref<IDeletionBatch | null>(null);
 const isRollingBack = ref<boolean>(false);
 
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && props.visible) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (rollbackConfirmBatch.value) {
+      rollbackConfirmBatch.value = null;
+    } else {
+      handleClose();
+    }
+  }
+}
+
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', handleKeydown, true);
+  }
   await loadData();
+});
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('keydown', handleKeydown, true);
+  }
 });
 
 watch(

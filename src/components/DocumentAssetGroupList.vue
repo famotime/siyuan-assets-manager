@@ -88,16 +88,24 @@
             <div class="col-checkbox"></div>
             <div class="col-preview"></div>
             <div class="col-name sortable" :class="{ active: sortField === 'name' }" @click="handleSort('name')">
-              文件名 <span v-if="sortField === 'name'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+              文件名
+              <ArrowUp v-if="sortField === 'name' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+              <ArrowDown v-else-if="sortField === 'name' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
             </div>
             <div class="col-ext sortable" :class="{ active: sortField === 'ext' }" @click="handleSort('ext')">
-              后缀名 <span v-if="sortField === 'ext'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+              后缀名
+              <ArrowUp v-if="sortField === 'ext' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+              <ArrowDown v-else-if="sortField === 'ext' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
             </div>
             <div class="col-size sortable" :class="{ active: sortField === 'size' }" @click="handleSort('size')">
-              大小 <span v-if="sortField === 'size'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+              大小
+              <ArrowUp v-if="sortField === 'size' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+              <ArrowDown v-else-if="sortField === 'size' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
             </div>
             <div class="col-updated sortable" :class="{ active: sortField === 'updated' }" @click="handleSort('updated')">
-              更新时间 <span v-if="sortField === 'updated'" class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+              更新时间
+              <ArrowUp v-if="sortField === 'updated' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
+              <ArrowDown v-else-if="sortField === 'updated' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
             </div>
             <div class="col-actions">操作</div>
           </div>
@@ -175,14 +183,14 @@
                 class="asset-badge-icon-wrapper"
                 title="包含矢量二次编辑数据"
               >
-                <Palette :size="15" class="asset-badge-icon asset-badge-icon--reedit" />
+                <Palette :size="15" class="asset-badge-icon asset-badge-icon--reedit" style="fill: none !important;" />
               </span>
               <span
                 v-else-if="row.data.asset.isOriginal"
                 class="asset-badge-icon-wrapper"
                 title="隔离存储的干净原始底图"
               >
-                <Layers :size="15" class="asset-badge-icon asset-badge-icon--original" />
+                <Layers :size="15" class="asset-badge-icon asset-badge-icon--original" style="fill: none !important;" />
               </span>
             </div>
 
@@ -201,34 +209,34 @@
             <div class="col-actions asset-actions" @click.stop>
               <button
                 v-if="row.data.asset.docCount > 0"
-                class="am-btn am-btn--icon"
+                class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
                 @click.stop="$emit('open-docs', row.data.asset)"
-                title="在后台打开并定位到所有引用此资源的文档"
+                aria-label="在后台打开并定位引用此资源的文档"
               >
-                <ExternalLink :size="16" />
+                <ExternalLink :size="15" style="fill: none !important;" />
               </button>
               <button
                 v-if="isImage(row.data.asset.name) || row.data.asset.isOriginal"
-                class="am-btn am-btn--icon am-btn--icon-primary"
+                class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__s"
                 @click.stop="$emit('edit', row.data.asset)"
-                title="编辑此图片"
+                aria-label="二次编辑与矢量标注"
               >
-                <Pencil :size="16" />
+                <Pencil :size="15" style="fill: none !important;" />
               </button>
               <button
                 v-if="!row.data.asset.isOriginal"
-                class="am-btn am-btn--icon"
+                class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
                 @click.stop="$emit('rename', row.data.asset)"
-                title="重命名此资源，并自动更新所有文档引用"
+                aria-label="重命名此资源并自动更新引用"
               >
-                <TextCursorInput :size="16" />
+                <TextCursorInput :size="15" style="fill: none !important;" />
               </button>
               <button
-                class="am-btn am-btn--icon am-btn--icon-danger"
+                class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('delete', row.data.asset)"
-                :title="row.data.asset.isOriginal ? '删除此原始底图' : '删除此资源及所有引用它的文档块'"
+                :aria-label="row.data.asset.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
               >
-                <Trash2 :size="16" />
+                <Trash2 :size="15" style="fill: none !important;" />
               </button>
             </div>
           </div>
@@ -258,6 +266,8 @@ import {
   Trash2,
   Layers,
   Palette,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-vue-next';
 import type { AssetInfo } from '../utils/siyuan-db';
 import {
@@ -773,10 +783,10 @@ onUnmounted(() => {
   }
 
   &.is-selected {
-    background-color: rgba(66, 133, 244, 0.12);
+    background-color: var(--am-primary-subtle);
 
     &:hover {
-      background-color: rgba(66, 133, 244, 0.18);
+      background-color: var(--am-primary-hover);
     }
 
     .asset-title-text {
@@ -834,7 +844,6 @@ onUnmounted(() => {
   width: 155px;
   flex-shrink: 0;
   font-size: 12px;
-  box-sizing: border-box;
 }
 
 .col-actions {
@@ -845,74 +854,75 @@ onUnmounted(() => {
 }
 
 .asset-preview {
-  width: 36px;
-  height: 36px;
-  background: var(--b3-theme-background-light);
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  width: 38px;
+  height: 38px;
   border-radius: 4px;
   overflow: hidden;
+  background-color: var(--b3-theme-surface);
+  border: 1px solid var(--b3-theme-surface-lighter);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
   flex-shrink: 0;
 
   img {
-    max-width: 100%;
-    max-height: 100%;
+    width: 100%;
+    height: 100%;
     object-fit: cover;
   }
 }
 
 .preview-loading {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--b3-theme-on-surface-light);
 }
 
 .preview-badge {
   position: absolute;
-  bottom: 1px;
-  right: 1px;
-  font-size: 8px;
+  bottom: 2px;
+  right: 2px;
+  font-size: 9px;
   line-height: 1;
-  padding: 1px 2px;
+  padding: 1px 3px;
   border-radius: 2px;
   font-weight: 600;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  letter-spacing: 0.2px;
+  user-select: none;
+  background: transparent !important;
+  cursor: help;
+  z-index: 2;
 
   &--reedit {
-    background: #0ea5e9;
+    color: var(--b3-theme-primary);
+    border: 1px solid var(--b3-theme-primary);
   }
 
   &--original {
-    background: #8b5cf6;
+    color: var(--am-badge-original-color, #d97706);
+    border: 1px solid var(--am-badge-original-color, #d97706);
   }
 }
 
 .file-icon {
   font-size: 10px;
-  font-weight: bold;
+  font-weight: 700;
   color: var(--b3-theme-on-surface-light);
-  border: 1px solid var(--b3-theme-surface-lighter);
-  padding: 2px 4px;
-  border-radius: 3px;
-  background: var(--b3-theme-background);
-  text-transform: uppercase;
 }
 
 .asset-name {
   display: flex;
   align-items: center;
-  gap: 6px;
-  overflow: hidden;
-  white-space: nowrap;
+  gap: 8px;
   min-width: 0;
 }
 
 .asset-title-text {
+  font-size: 13px;
+  color: var(--b3-theme-on-background);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 600;
   min-width: 0;
   transition: color 0.15s ease;
@@ -924,9 +934,9 @@ onUnmounted(() => {
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 500;
-  color: #2563eb;
-  background-color: rgba(37, 99, 235, 0.1);
-  border: 1px solid rgba(37, 99, 235, 0.25);
+  color: var(--am-cat-doc, #2563eb);
+  background-color: color-mix(in srgb, var(--am-cat-doc, #2563eb) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-cat-doc, #2563eb) 30%, transparent);
   flex-shrink: 0;
 }
 
@@ -937,11 +947,11 @@ onUnmounted(() => {
 }
 
 .asset-badge-icon--reedit {
-  color: #0ea5e9;
+  color: var(--b3-theme-primary);
 }
 
 .asset-badge-icon--original {
-  color: #8b5cf6;
+  color: var(--am-badge-original-color, #d97706);
 }
 
 .asset-ext,
@@ -955,6 +965,14 @@ onUnmounted(() => {
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
+  /* 渐进式呈现：未悬停时淡化 */
+  opacity: 0.25;
+  transition: opacity 0.15s ease;
+}
+
+.asset-item:hover .asset-actions,
+.asset-item.is-selected .asset-actions {
+  opacity: 1;
 }
 
 /* 操作图标按钮统一样式 */
@@ -973,26 +991,28 @@ onUnmounted(() => {
   transition: all 0.15s ease;
 
   &:hover {
-    background-color: var(--b3-theme-surface-lighter);
+    background-color: var(--am-surface-hover);
     color: var(--b3-theme-on-surface);
   }
 
-  :deep(svg) {
+  :deep(svg),
+  svg {
     fill: none !important;
+    stroke: currentColor !important;
   }
 }
 
 .am-btn--icon-primary {
   &:hover {
     color: var(--b3-theme-primary);
-    background-color: rgba(66, 133, 244, 0.1);
+    background-color: var(--am-primary-subtle);
   }
 }
 
 .am-btn--icon-danger {
   &:hover {
-    color: #ef4444;
-    background-color: rgba(239, 68, 68, 0.1);
+    color: var(--b3-theme-error);
+    background-color: var(--am-error-subtle);
   }
 }
 </style>

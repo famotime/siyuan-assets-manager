@@ -4,7 +4,7 @@
       <!-- 弹窗头部 -->
       <div class="am-dialog__header">
         <div class="dedup-header-title">
-          <svg class="dedup-title-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg class="dedup-title-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="fill: none !important;">
             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
             <circle cx="12" cy="12" r="3"/>
           </svg>
@@ -41,11 +41,11 @@
             @click="maximizeImages = !maximizeImages"
             :title="maximizeImages ? '点击切换回标准视图（显示详细属性与引用文档）' : '点击开启大图模式（去除说明信息，最大化图片比对显示）'"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+            <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
               <path v-if="!maximizeImages" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
               <path v-else d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/>
             </svg>
-            <span>{{ maximizeImages ? '大图' : '大图' }}</span>
+            <span>大图</span>
           </button>
 
           <button
@@ -54,7 +54,7 @@
             :disabled="isScanning || isMerging"
             title="增量扫描：仅重算新增或已变更的文件"
           >
-            <svg class="icon" :class="{ spinning: isScanning }" width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+            <svg class="icon" :class="{ spinning: isScanning }" width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
               <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
             </svg>
             <span>扫描</span>
@@ -76,7 +76,7 @@
           </div>
 
           <button class="am-dialog__close" @click="handleClose" aria-label="关闭">
-            <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+            <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
@@ -87,7 +87,7 @@
       <!-- 扫描进度条 (扫描中展示) -->
       <div v-if="isScanning" class="dedup-scan-banner">
         <div class="scan-info">
-          <svg class="icon spinning" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none">
+          <svg class="icon spinning" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
             <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
           </svg>
           <span>{{ scanProgress.message || '正在扫描重复资源...' }}</span>
@@ -103,7 +103,9 @@
       <div class="am-dialog__body dedup-dialog-body" v-if="!isScanning">
         <!-- 无重复状态 -->
         <div v-if="displayGroups.length === 0" class="dedup-empty-state">
-          <div class="empty-icon">✨</div>
+          <div class="empty-icon">
+            <Sparkles :size="36" style="fill: none !important; color: var(--b3-theme-primary);" />
+          </div>
           <h4>未发现{{ activeTab === 'exact' ? '精确相同' : '视觉相似' }}的重复资源</h4>
           <p>当前没有多余冗余文件需要归一化，您的资源库非常整洁。</p>
           <button class="am-btn am-btn--primary" @click="handleRebuildIndex">重建指纹索引</button>
@@ -207,7 +209,10 @@
                 >
                   合并当前组
                 </button>
-                <span v-else class="processed-text">✅ 该组已成功归一化合并</span>
+                <span v-else class="processed-text">
+                  <CheckCircle2 :size="14" style="fill: none !important; margin-right: 4px; display: inline-block; vertical-align: middle;" />
+                  <span>该组已成功归一化合并</span>
+                </span>
               </div>
             </div>
 
@@ -313,7 +318,10 @@
                       :title="`点击在后台打开文档: ${group.first.readablePath || group.first.hpath || group.first.path || group.first.id}`"
                       @click="handleOpenDocRef(group.first)"
                     >
-                      <span class="ref-path">📄 {{ group.first.readablePath || group.first.hpath || group.first.path || group.first.id }}</span>
+                      <span class="ref-path">
+                        <FileText :size="12" style="fill: none !important; margin-right: 4px; display: inline-block; vertical-align: middle;" />
+                        <span>{{ group.first.readablePath || group.first.hpath || group.first.path || group.first.id }}</span>
+                      </span>
                       <span v-if="group.refs.length > 1" class="ref-count">（{{ group.refs.length }} 处）</span>
                     </div>
                     <div v-if="docGroups(item.asset).length > 3" class="ref-more">
@@ -370,7 +378,7 @@
             :disabled="isScanning || isMerging"
             title="批量一键将所有重复组归一化合并并删除冗余文件"
           >
-            <svg v-if="isMerging" class="icon spinning" width="14" height="14" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
+            <svg v-if="isMerging" class="icon spinning" width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
             <span v-if="isMerging">正在归一化 ({{ mergeProgress.current }}/{{ mergeProgress.total }})...</span>
             <span v-else>一键批量归一化 ({{ pendingGroups.length }}组)</span>
           </button>
@@ -383,6 +391,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import { openTab } from 'siyuan';
+import { Sparkles, CheckCircle2, FileText } from 'lucide-vue-next';
 import { usePlugin } from '../main';
 import type { AssetInfo, BlockRef } from '../utils/siyuan-db';
 import {
@@ -836,7 +845,7 @@ async function handleBatchMerge() {
     `• 预计释放空间: ${totalReclaimableSizeText.value}`,
     '',
     isSimilarMode
-      ? '⚠️ 风险提醒：当前为【视觉相似】模式！视觉相似图片虽构图相近但内容可能不完全相同，合并后非主资源将被永久物理删除，请确保已核对右侧比对视图。'
+      ? '[风险提醒] 当前为【视觉相似】模式！视觉相似图片虽构图相近但内容可能不完全相同，合并后非主资源将被永久物理删除，请确保已核对右侧比对视图。'
       : '注意：冗余文件将被物理删除，文档中对应的引用将无缝指向唯一主资源。',
     '是否确认执行一键批量归一化？',
   ].join('\n');

@@ -45,11 +45,72 @@ $transition-fast: 0.15s ease;
 $transition-normal: 0.2s ease;
 $transition-slow: 0.3s ease;
 
-// ===== Lucide 线框图标保护 =====
-.lucide,
-svg.lucide {
-  fill: none !important;
-  stroke: currentColor !important;
+// ===== 插件语义化自适应表面与边框令牌 (基于 CSS color-mix) =====
+:root {
+  // 1. 悬浮底色：在亮色下产生柔和浅灰，在暗色下产生轻微微光
+  --am-surface-hover: color-mix(in srgb, var(--b3-theme-on-surface, #333) 6%, transparent);
+  --am-surface-active: color-mix(in srgb, var(--b3-theme-on-surface, #333) 10%, transparent);
+
+  // 2. 选中态背景色：基于当前主题高亮色 (自适应任何第三方主题，不论蓝/绿/紫/橙)
+  --am-primary-subtle: color-mix(in srgb, var(--b3-theme-primary, #4285f4) 12%, transparent);
+  --am-primary-hover: color-mix(in srgb, var(--b3-theme-primary, #4285f4) 18%, transparent);
+  --am-primary-border: color-mix(in srgb, var(--b3-theme-primary, #4285f4) 40%, transparent);
+
+  // 3. 危险与警告色阶
+  --am-error-subtle: color-mix(in srgb, var(--b3-theme-error, #d23f31) 10%, transparent);
+  --am-error-hover: color-mix(in srgb, var(--b3-theme-error, #d23f31) 16%, transparent);
+  --am-error-border: color-mix(in srgb, var(--b3-theme-error, #d23f31) 35%, transparent);
+
+  // 4. 标准边框与分割
+  --am-border-subtle: color-mix(in srgb, var(--b3-border-color, var(--b3-theme-surface-lighter, #e5e7eb)) 70%, transparent);
+  --am-border-strong: var(--b3-border-color, var(--b3-theme-surface-lighter, #d1d5db));
+
+  // 5. 分类主题色：亮色模式 (深沉稳重，对比度 >= 4.8:1)
+  --am-cat-all: var(--b3-theme-primary, #4285f4);
+  --am-cat-image: #059669;
+  --am-cat-doc: #2563eb;
+  --am-cat-audio: #d97706;
+  --am-cat-video: #dc2626;
+  --am-cat-archive: #7c3aed;
+
+  // 6. 状态微标
+  --am-badge-original-color: #b45309;
+}
+
+// 适配思源暗色主题 (通过思源全局 html[data-theme-mode="dark"] 自动切换)
+html[data-theme-mode="dark"] {
+  // 暗色模式：轻微降饱和度并提高明度，消除刺眼荧光感 (对比度 >= 5.5:1)
+  --am-cat-all: var(--b3-theme-primary, #4285f4);
+  --am-cat-image: #34d399;
+  --am-cat-doc: #60a5fa;
+  --am-cat-audio: #fbbf24;
+  --am-cat-video: #f87171;
+  --am-cat-archive: #a78bfa;
+  --am-badge-original-color: #fbbf24;
+}
+
+// ===== 线框图标绝对防御屏障 (Anti-Pollution Shield) =====
+// 强制将插件作用域下的所有线框 svg 设为 stroke 驱动，杜绝思源全局 svg { fill: currentColor } 的实心黑块污染
+.siyuan-assets-manager-app,
+.assets-manager-container,
+.am-dialog,
+.am-tab-container,
+.am-modal-dialog,
+.am-confirm-dialog-overlay {
+  svg:not([data-allow-fill]),
+  .lucide,
+  svg.lucide {
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+
+    path, circle, rect, line, polyline, polygon {
+      &:not([data-allow-fill]) {
+        fill: none !important;
+      }
+    }
+  }
 }
 
 // ===== 思源设置面板优雅舒适布局样式（参考 siyuan-image-quickedit） =====
@@ -213,7 +274,7 @@ svg.lucide {
     font-size: 13px;
     color: var(--b3-theme-on-surface-light);
     background-color: var(--b3-theme-surface-lighter);
-    border: 1px solid var(--b3-theme-surface-lighter);
+    border: 1px solid var(--b3-border-color);
     border-left: none;
     border-top-right-radius: $radius-sm;
     border-bottom-right-radius: $radius-sm;
@@ -449,7 +510,7 @@ svg.lucide {
 
   &.is-checked {
     border-color: var(--b3-theme-primary);
-    background-color: rgba(66, 133, 244, 0.08);
+    background-color: var(--am-primary-subtle);
     color: var(--b3-theme-on-surface);
     font-weight: 500;
   }
@@ -544,5 +605,142 @@ body > svg:not([class]):not([id]) {
     z-index: 1001 !important;
   }
 }
+
+// ===== 分段指标药丸导航条 (Segmented Metric Pills) =====
+.category-pills-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  padding: 2px 2px 4px 2px;
+  flex-shrink: 0;
+
+  &::-webkit-scrollbar {
+    height: 3px;
+  }
+}
+
+.category-pill {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 15px;
+  border: 1px solid var(--am-border-subtle);
+  background: var(--b3-theme-background-light);
+  color: var(--b3-theme-on-surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all $transition-fast;
+  user-select: none;
+  box-sizing: border-box;
+
+  &:hover {
+    background: var(--am-surface-hover);
+    border-color: var(--b3-theme-primary);
+    transform: translateY(-1px);
+  }
+
+  &.is-active {
+    background: var(--am-primary-subtle);
+    border-color: var(--b3-theme-primary);
+    color: var(--b3-theme-primary);
+    font-weight: 600;
+
+    .pill-badge {
+      background: var(--b3-theme-primary);
+      color: var(--b3-theme-on-primary);
+    }
+  }
+
+  .pill-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .pill-label {
+    font-size: 12px;
+  }
+
+  .pill-badge {
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--am-surface-active);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+
+  .pill-size {
+    font-size: 11px;
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+// ===== 底部悬浮批量操作浮岛 (Floating Batch Action Dock) =====
+.am-batch-floating-dock {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: $z-overlay + 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: var(--b3-theme-background);
+  border: 1px solid var(--b3-theme-primary);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: am-dock-slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+
+  &__info {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--b3-theme-on-background);
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  &__count {
+    color: var(--b3-theme-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__divider {
+    width: 1px;
+    height: 16px;
+    background: var(--b3-theme-surface-lighter);
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+}
+
+@keyframes am-dock-slide-up {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
 
 
