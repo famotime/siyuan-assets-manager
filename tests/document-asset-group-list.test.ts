@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { createApp, ref, nextTick, type App } from 'vue';
 import DocumentAssetGroupList from '../src/components/DocumentAssetGroupList.vue';
 import type { DocAssetGroup } from '../src/utils/asset-list';
+import { DOC_ROW_HEIGHTS } from '../src/utils/doc-group-rows';
 import type { AssetInfo } from '../src/utils/siyuan-db';
 
 describe('DocumentAssetGroupList component', () => {
@@ -157,10 +158,13 @@ describe('DocumentAssetGroupList component', () => {
     expect(vueCard.textContent).toContain('技术笔记/前端/Vue3 实战指南');
     expect(vueCard.textContent).toContain('2 个资源');
 
-    // 检查多篇引用徽章
-    const multiRefBadge = vueCard.querySelector('.multi-ref-badge');
-    expect(multiRefBadge).not.toBeNull();
-    expect(multiRefBadge?.textContent).toContain('多篇引用 (2)');
+    // 检查多篇引用徽章。行级虚拟化后资源行不再嵌套在卡片元素内部，
+    // 因此改为按 data-group-id 定位到该文档名下的资源行再取徽章。
+    const sharedRow = mountContainer.querySelector(
+      '.asset-item[data-group-id="doc-vue"] .multi-ref-badge'
+    );
+    expect(sharedRow).not.toBeNull();
+    expect(sharedRow?.textContent).toContain('多篇引用 (2)');
 
     // 检查未引用特殊卡片
     const unrefCard = cards[1];
@@ -235,4 +239,137 @@ describe('DocumentAssetGroupList component', () => {
     expect(cards[0].classList.contains('is-collapsed')).toBe(true);
     expect(cards[1].classList.contains('is-collapsed')).toBe(true);
   });
+
+  /**
+   * 万级资源下列表必须只渲染视口内的行：折叠的文档不产生资源行，
+   * 展开的文档也只渲染窗口附近的一小段，否则 DOM 节点数会随资源数线性膨胀。
+   */
+  function createLargeGroups(totalAssets: number, docCount: number): DocAssetGroup[] {
+    const perDoc = Math.ceil(totalAssets / docCount);
+    const groups: DocAssetGroup[] = [];
+    let seq = 0;
+
+    for (let d = 0; d < docCount; d++) {
+      const assets: AssetInfo[] = [];
+      for (let i = 0; i < perDoc && seq < totalAssets; i++, seq++) {
+        assets.push({
+          name: `bulk-${seq}.png`,
+          size: 1024 + seq,
+          updated: 1700000000000 + seq,
+          isDir: false,
+          references: [{ id: `blk-${seq}`, root_id: `doc-${d}`, box: 'box-1', content: '', markdown: '', path: '' }],
+          refCount: 1,
+          docCount: 1,
+          isReEditable: false,
+          isOriginal: false,
+        });
+      }
+      groups.push({
+        id: `doc-${d}`,
+        title: `批量文档 ${d}`,
+        readablePath: `笔记本/批量文档 ${d}`,
+        assets,
+        totalSize: assets.length * 1024,
+        assetCount: assets.length,
+        isUnreferenced: false,
+        firstBlockId: `blk-${d * perDoc}`,
+      });
+    }
+
+    return groups;
+  }
+
+  it('renders no asset rows at all while every document group is collapsed', async () => {
+    const groups = createLargeGroups(3000, 150);
+    mountList({ groups, collapsedDocIds: new Set(groups.map((g) => g.id)) });
+    await nextTick();
+
+    expect(mountContainer.querySelectorAll('.asset-item')).toHaveLength(0);
+    // 分组卡片同样只渲染视口附近的一小段
+    expect(mountContainer.querySelectorAll('.doc-group-card').length).toBeLessThan(50);
+    // 150 张卡片若全部渲染约 5850 个节点，这里必须远低于它才算真的开了窗
+    expect(mountContainer.querySelectorAll('*').length).toBeLessThan(1000);
+  }, 120000);
+
+  it('renders only a window of rows instead of every expanded asset', async () => {
+    const groups = createLargeGroups(3000, 150);
+    const { collapsedDocIds } = mountList({ groups, collapsedDocIds: new Set<string>() });
+    await nextTick();
+
+    // 全部展开后资源行有 3000 条，DOM 里只应存在窗口附近的一小段
+    const renderedRows = mountContainer.querySelectorAll('.asset-item').length;
+    expect(renderedRows).toBeGreaterThan(0);
+    expect(renderedRows).toBeLessThan(100);
+
+    // 收起后资源行彻底消失
+    collapsedDocIds.value = new Set(groups.map((g) => g.id));
+    await nextTick();
+    expect(mountContainer.querySelectorAll('.asset-item')).toHaveLength(0);
+  }, 120000);
+
+  it('stays bounded at the reported 10000-asset scale', async () => {
+    const groups = createLargeGroups(10000, 500);
+    const { collapsedDocIds } = mountList({ groups, collapsedDocIds: new Set(groups.map((g) => g.id)) });
+    await nextTick();
+
+    expect(mountContainer.querySelectorAll('.asset-item')).toHaveLength(0);
+    expect(mountContainer.querySelectorAll('*').length).toBeLessThan(5000);
+
+    collapsedDocIds.value = new Set<string>();
+    await nextTick();
+    expect(mountContainer.querySelectorAll('.asset-item').length).toBeLessThan(100);
+  }, 120000);
+
+  /**
+   * jsdom 没有布局，视口高度恒为 0，上面几个用例因此都停在「从头开窗」这一种情形。
+   * 真正容易出现空白或错位的滚动偏移路径必须单独造一个视口来覆盖：
+   * 给滚动容器伪造 clientHeight/scrollTop 再派发 scroll 事件，等价于用户滚动。
+   */
+  it('offsets the rendered window by exactly the height of the rows above it', async () => {
+    const DOCS = 8;
+    const PER_DOC = 8;
+    const groups = createLargeGroups(DOCS * PER_DOC, DOCS);
+    mountList({ groups, collapsedDocIds: new Set<string>() });
+    await nextTick();
+
+    const container = mountContainer.querySelector('.doc-groups-scroll-container') as HTMLElement;
+    const inner = mountContainer.querySelector('.doc-rows-inner') as HTMLElement;
+    expect(container).not.toBeNull();
+    expect(inner).not.toBeNull();
+
+    const H = DOC_ROW_HEIGHTS;
+    // 每张展开的卡片 = 头部 + 列名行 + 每篇文档的资源行 + 卡片间距
+    const blockHeight = H.header + H.subheader + PER_DOC * H.asset + H.gap;
+    const totalHeight = DOCS * blockHeight;
+
+    Object.defineProperty(container, 'clientHeight', { value: 400, configurable: true });
+    Object.defineProperty(container, 'scrollTop', { value: 1000, configurable: true });
+    container.dispatchEvent(new Event('scroll'));
+    await nextTick();
+
+    // 滚到 1000px 恰好越过第一张卡片（528px），因此窗口应从第二张卡片的头部开始
+    expect(inner.style.marginTop).toBe(`${blockHeight}px`);
+    // 窗口高度 + 偏移必须恒等于整个列表高度，否则滚动条长度和实际内容会对不上
+    expect(Number.parseFloat(inner.style.height) + blockHeight).toBe(totalHeight);
+    // 首行正是紧随 1000px 位置之后的那个分组头部
+    expect(mountContainer.querySelector('.doc-title-text')?.textContent?.trim()).toBe('批量文档 1');
+    // 窗口仍然只覆盖视口 + overscan 附近，而不是 64 条资源行
+    expect(mountContainer.querySelectorAll('.asset-item').length).toBeLessThan(DOCS * PER_DOC);
+  }, 120000);
+
+  it('does not grow the rendered window as the asset count grows', async () => {
+    mountList({ groups: createLargeGroups(1500, 75), collapsedDocIds: new Set<string>() });
+    await nextTick();
+    const smallCount = mountContainer.querySelectorAll('.asset-item').length;
+
+    app?.unmount();
+    mountContainer.innerHTML = '';
+
+    mountList({ groups: createLargeGroups(3000, 150), collapsedDocIds: new Set<string>() });
+    await nextTick();
+    const largeCount = mountContainer.querySelectorAll('.asset-item').length;
+
+    // 资源翻倍，DOM 行数不变：渲染量与数据量解耦才是虚拟滚动
+    expect(largeCount).toBe(smallCount);
+  }, 120000);
 });

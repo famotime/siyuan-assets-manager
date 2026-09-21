@@ -4,75 +4,87 @@
       暂无匹配的文档或资源
     </div>
 
-    <div v-else class="doc-groups-scroll-container">
-      <div
-        v-for="group in groups"
-        :key="group.id"
-        class="doc-group-card"
-        :class="{
-          'is-unreferenced': group.isUnreferenced,
-          'is-collapsed': isGroupCollapsed(group.id),
-        }"
-      >
-        <!-- 分组卡片头部 -->
-        <div
-          class="doc-group-header"
-          @click="toggleGroup(group.id)"
-          :title="isGroupCollapsed(group.id) ? '点击展开文档资源' : '点击折叠文档资源'"
-        >
-          <div class="doc-header-left">
-            <span class="expand-icon-wrapper" :class="{ 'is-expanded': !isGroupCollapsed(group.id) }">
-              <ChevronRight :size="16" />
-            </span>
-
-            <div class="doc-checkbox-wrapper" @click.stop>
-              <input
-                type="checkbox"
-                class="am-checkbox"
-                :checked="isDocAllSelected(group)"
-                :indeterminate.prop="isDocSomeSelected(group)"
-                @change="handleDocCheckboxChange($event, group)"
-                title="全选/取消全选此文档中的所有资源"
-              />
-            </div>
-
-            <div class="doc-icon-wrapper" :class="{ 'icon-unref': group.isUnreferenced }">
-              <AlertCircle v-if="group.isUnreferenced" :size="18" />
-              <FileText v-else :size="18" />
-            </div>
-
-            <div class="doc-title-info">
-              <div class="doc-title-row">
-                <span class="doc-title-text">{{ group.title || group.readablePath || group.id }}</span>
-                <span v-if="group.isUnreferenced" class="doc-unref-badge">孤立/未引用</span>
-                <span v-else-if="group.matchedByDocName && searchQuery" class="doc-match-badge">文档匹配</span>
-              </div>
-              <div class="doc-path-row" :title="group.readablePath || group.title || group.id">
-                {{ group.readablePath || group.title || group.id }}
-              </div>
-            </div>
-          </div>
-
-          <div class="doc-header-right" @click.stop>
-            <div class="doc-stats-badges">
-              <span class="stat-badge count-badge">{{ group.assetCount }} 个资源</span>
-              <span class="stat-badge size-badge">{{ formatSize(group.totalSize) }}</span>
-            </div>
-
-            <button
-              v-if="!group.isUnreferenced"
-              class="am-btn am-btn--icon doc-open-btn"
-              @click.stop="$emit('open-doc-id', group.id, group.firstBlockId)"
-              title="在思源中打开此文档"
+    <!--
+      万级资源下列表必须只渲染视口内的行，因此这里渲染的是 buildDocRows 摊平出来的一维行序列，
+      交给 useVirtualList 按滚动位置开窗。行高由 DOC_ROW_HEIGHTS 统一给出并内联绑定，
+      保证虚拟滚动的测量值与 CSS 实际高度同源。
+    -->
+    <div v-else class="doc-groups-scroll-container" v-bind="containerProps">
+      <div v-bind="wrapperProps" class="doc-rows-inner">
+        <template v-for="row in list" :key="row.data.key">
+          <!-- 分组卡片头部 -->
+          <div
+            v-if="row.data.kind === 'header'"
+            class="doc-row doc-group-card"
+            :class="{
+              'is-unreferenced': row.data.group.isUnreferenced,
+              'is-collapsed': row.data.collapsed,
+            }"
+            :style="{ height: `${row.data.height}px` }"
+          >
+            <div
+              class="doc-group-header"
+              @click="toggleGroup(row.data.group.id)"
+              :title="row.data.collapsed ? '点击展开文档资源' : '点击折叠文档资源'"
             >
-              <ExternalLink :size="15" />
-            </button>
-          </div>
-        </div>
+              <div class="doc-header-left">
+                <span class="expand-icon-wrapper" :class="{ 'is-expanded': !row.data.collapsed }">
+                  <ChevronRight :size="16" />
+                </span>
 
-        <!-- 分组卡片内部资源清单行（展开时展示） -->
-        <div v-show="!isGroupCollapsed(group.id)" class="doc-group-body">
-          <div class="doc-sublist-header">
+                <div class="doc-checkbox-wrapper" @click.stop>
+                  <input
+                    type="checkbox"
+                    class="am-checkbox"
+                    :checked="isDocAllSelected(row.data.group)"
+                    :indeterminate.prop="isDocSomeSelected(row.data.group)"
+                    @change="handleDocCheckboxChange($event, row.data.group)"
+                    title="全选/取消全选此文档中的所有资源"
+                  />
+                </div>
+
+                <div class="doc-icon-wrapper" :class="{ 'icon-unref': row.data.group.isUnreferenced }">
+                  <AlertCircle v-if="row.data.group.isUnreferenced" :size="18" />
+                  <FileText v-else :size="18" />
+                </div>
+
+                <div class="doc-title-info">
+                  <div class="doc-title-row">
+                    <span class="doc-title-text">{{ row.data.group.title || row.data.group.readablePath || row.data.group.id }}</span>
+                    <span v-if="row.data.group.isUnreferenced" class="doc-unref-badge">孤立/未引用</span>
+                    <span v-else-if="row.data.group.matchedByDocName && searchQuery" class="doc-match-badge">文档匹配</span>
+                  </div>
+                  <div class="doc-path-row" :title="row.data.group.readablePath || row.data.group.title || row.data.group.id">
+                    {{ row.data.group.readablePath || row.data.group.title || row.data.group.id }}
+                  </div>
+                </div>
+              </div>
+
+              <div class="doc-header-right" @click.stop>
+                <div class="doc-stats-badges">
+                  <span class="stat-badge count-badge">{{ row.data.group.assetCount }} 个资源</span>
+                  <span class="stat-badge size-badge">{{ formatSize(row.data.group.totalSize) }}</span>
+                </div>
+
+                <button
+                  v-if="!row.data.group.isUnreferenced"
+                  class="am-btn am-btn--icon doc-open-btn"
+                  @click.stop="$emit('open-doc-id', row.data.group.id, row.data.group.firstBlockId)"
+                  title="在思源中打开此文档"
+                >
+                  <ExternalLink :size="15" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 卡片内的列名行 -->
+          <div
+            v-else-if="row.data.kind === 'subheader'"
+            class="doc-row doc-sublist-header"
+            :class="{ 'is-unreferenced': row.data.group.isUnreferenced }"
+            :style="{ height: `${row.data.height}px` }"
+          >
             <div class="col-checkbox"></div>
             <div class="col-preview"></div>
             <div class="col-name sortable" :class="{ active: sortField === 'name' }" @click="handleSort('name')">
@@ -90,135 +102,152 @@
             <div class="col-actions">操作</div>
           </div>
 
-          <div class="doc-sublist-items">
-            <div
-              v-for="(asset, aIdx) in group.assets"
-              :key="asset.name"
-              class="asset-item"
-              :class="{ 'is-selected': selectedNames.has(asset.name) }"
-              @click="handleRowClick($event, asset, group.assets, aIdx)"
-            >
-              <div class="col-checkbox" @click.stop>
-                <input
-                  type="checkbox"
-                  class="am-checkbox"
-                  :checked="selectedNames.has(asset.name)"
-                  @change="handleRowCheckboxChange($event, asset)"
-                />
-              </div>
+          <!-- 单条资源行 -->
+          <div
+            v-else-if="row.data.kind === 'asset'"
+            class="doc-row asset-item"
+            :class="{
+              'is-selected': selectedNames.has(row.data.asset.name),
+              'is-unreferenced': row.data.group.isUnreferenced,
+              'is-last-in-group': row.data.isLastInGroup,
+            }"
+            :data-group-id="row.data.groupId"
+            :style="{ height: `${row.data.height}px` }"
+            @click="handleRowClick($event, row.data.asset, row.data.group.assets, row.data.indexInGroup)"
+          >
+            <div class="col-checkbox" @click.stop>
+              <input
+                type="checkbox"
+                class="am-checkbox"
+                :checked="selectedNames.has(row.data.asset.name)"
+                @change="handleRowCheckboxChange($event, row.data.asset)"
+              />
+            </div>
 
-              <div class="col-preview">
-                <div
-                  class="asset-preview"
-                  @mouseenter="$emit('show-preview', { event: $event, asset, previewSrc: getThumbnailSrc(asset) })"
-                  @mousemove="$emit('update-preview', { event: $event })"
-                  @mouseleave="$emit('hide-preview')"
-                >
-                  <template v-if="isImage(asset.name) || asset.isOriginal">
-                    <img v-if="getThumbnailSrc(asset)" :src="getThumbnailSrc(asset)" />
-                    <div v-else class="preview-loading">...</div>
-                    <span
-                      v-if="asset.isReEditable"
-                      class="preview-badge preview-badge--reedit"
-                      title="包含矢量二次编辑数据"
-                    >可编辑</span>
-                    <span
-                      v-else-if="asset.isOriginal"
-                      class="preview-badge preview-badge--original"
-                      title="隔离存储的干净原始底图"
-                    >底图</span>
-                  </template>
-                  <div v-else class="file-icon">{{ getAssetBadgeText(asset.name) }}</div>
-                </div>
-              </div>
-
+            <div class="col-preview">
               <div
-                class="col-name asset-name"
-                @mouseenter="$emit('show-preview', { event: $event, asset, previewSrc: getThumbnailSrc(asset) })"
+                class="asset-preview"
+                @mouseenter="$emit('show-preview', { event: $event, asset: row.data.asset, previewSrc: getThumbnailSrc(row.data.asset) })"
                 @mousemove="$emit('update-preview', { event: $event })"
                 @mouseleave="$emit('hide-preview')"
               >
-                <span class="asset-title-text">{{ splitFileName(asset.name).name }}</span>
-
-                <span
-                  v-if="asset.docCount > 1"
-                  class="multi-ref-badge"
-                  :title="`该资源被 ${asset.docCount} 篇不同的文档共同引用`"
-                >
-                  多篇引用 ({{ asset.docCount }})
-                </span>
-
-                <span
-                  v-if="asset.isReEditable"
-                  class="asset-badge-icon-wrapper"
-                  title="包含矢量二次编辑数据"
-                >
-                  <Palette :size="15" class="asset-badge-icon asset-badge-icon--reedit" />
-                </span>
-                <span
-                  v-else-if="asset.isOriginal"
-                  class="asset-badge-icon-wrapper"
-                  title="隔离存储的干净原始底图"
-                >
-                  <Layers :size="15" class="asset-badge-icon asset-badge-icon--original" />
-                </span>
-              </div>
-
-              <div class="col-ext asset-ext">
-                {{ splitFileName(asset.name).ext }}
-              </div>
-
-              <div class="col-size asset-size">
-                {{ formatSize(asset.size) }}
-              </div>
-
-              <div class="col-updated asset-updated">
-                {{ formatTime(asset.updated) }}
-              </div>
-
-              <div class="col-actions asset-actions" @click.stop>
-                <button
-                  v-if="asset.docCount > 0"
-                  class="am-btn am-btn--icon"
-                  @click.stop="$emit('open-docs', asset)"
-                  title="在后台打开并定位到所有引用此资源的文档"
-                >
-                  <ExternalLink :size="16" />
-                </button>
-                <button
-                  v-if="isImage(asset.name) || asset.isOriginal"
-                  class="am-btn am-btn--icon am-btn--icon-primary"
-                  @click.stop="$emit('edit', asset)"
-                  title="编辑此图片"
-                >
-                  <Pencil :size="16" />
-                </button>
-                <button
-                  v-if="!asset.isOriginal"
-                  class="am-btn am-btn--icon"
-                  @click.stop="$emit('rename', asset)"
-                  title="重命名此资源，并自动更新所有文档引用"
-                >
-                  <TextCursorInput :size="16" />
-                </button>
-                <button
-                  class="am-btn am-btn--icon am-btn--icon-danger"
-                  @click.stop="$emit('delete', asset)"
-                  :title="asset.isOriginal ? '删除此原始底图' : '删除此资源及所有引用它的文档块'"
-                >
-                  <Trash2 :size="16" />
-                </button>
+                <template v-if="isImage(row.data.asset.name) || row.data.asset.isOriginal">
+                  <img
+                    v-if="getThumbnailSrc(row.data.asset)"
+                    :src="getThumbnailSrc(row.data.asset)"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <div v-else class="preview-loading">...</div>
+                  <span
+                    v-if="row.data.asset.isReEditable"
+                    class="preview-badge preview-badge--reedit"
+                    title="包含矢量二次编辑数据"
+                  >可编辑</span>
+                  <span
+                    v-else-if="row.data.asset.isOriginal"
+                    class="preview-badge preview-badge--original"
+                    title="隔离存储的干净原始底图"
+                  >底图</span>
+                </template>
+                <div v-else class="file-icon">{{ getAssetBadgeText(row.data.asset.name) }}</div>
               </div>
             </div>
+
+            <div
+              class="col-name asset-name"
+              @mouseenter="$emit('show-preview', { event: $event, asset: row.data.asset, previewSrc: getThumbnailSrc(row.data.asset) })"
+              @mousemove="$emit('update-preview', { event: $event })"
+              @mouseleave="$emit('hide-preview')"
+            >
+              <span class="asset-title-text">{{ splitFileName(row.data.asset.name).name }}</span>
+
+              <span
+                v-if="row.data.asset.docCount > 1"
+                class="multi-ref-badge"
+                :title="`该资源被 ${row.data.asset.docCount} 篇不同的文档共同引用`"
+              >
+                多篇引用 ({{ row.data.asset.docCount }})
+              </span>
+
+              <span
+                v-if="row.data.asset.isReEditable"
+                class="asset-badge-icon-wrapper"
+                title="包含矢量二次编辑数据"
+              >
+                <Palette :size="15" class="asset-badge-icon asset-badge-icon--reedit" />
+              </span>
+              <span
+                v-else-if="row.data.asset.isOriginal"
+                class="asset-badge-icon-wrapper"
+                title="隔离存储的干净原始底图"
+              >
+                <Layers :size="15" class="asset-badge-icon asset-badge-icon--original" />
+              </span>
+            </div>
+
+            <div class="col-ext asset-ext">
+              {{ splitFileName(row.data.asset.name).ext }}
+            </div>
+
+            <div class="col-size asset-size">
+              {{ formatSize(row.data.asset.size) }}
+            </div>
+
+            <div class="col-updated asset-updated">
+              {{ formatTime(row.data.asset.updated) }}
+            </div>
+
+            <div class="col-actions asset-actions" @click.stop>
+              <button
+                v-if="row.data.asset.docCount > 0"
+                class="am-btn am-btn--icon"
+                @click.stop="$emit('open-docs', row.data.asset)"
+                title="在后台打开并定位到所有引用此资源的文档"
+              >
+                <ExternalLink :size="16" />
+              </button>
+              <button
+                v-if="isImage(row.data.asset.name) || row.data.asset.isOriginal"
+                class="am-btn am-btn--icon am-btn--icon-primary"
+                @click.stop="$emit('edit', row.data.asset)"
+                title="编辑此图片"
+              >
+                <Pencil :size="16" />
+              </button>
+              <button
+                v-if="!row.data.asset.isOriginal"
+                class="am-btn am-btn--icon"
+                @click.stop="$emit('rename', row.data.asset)"
+                title="重命名此资源，并自动更新所有文档引用"
+              >
+                <TextCursorInput :size="16" />
+              </button>
+              <button
+                class="am-btn am-btn--icon am-btn--icon-danger"
+                @click.stop="$emit('delete', row.data.asset)"
+                :title="row.data.asset.isOriginal ? '删除此原始底图' : '删除此资源及所有引用它的文档块'"
+              >
+                <Trash2 :size="16" />
+              </button>
+            </div>
           </div>
-        </div>
+
+          <!-- 卡片之间的间距 -->
+          <div
+            v-else-if="row.data.kind === 'gap'"
+            class="doc-row doc-row--gap"
+            :style="{ height: `${row.data.height}px` }"
+          ></div>
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, toRefs, onUnmounted } from 'vue';
+import { ref, toRefs, computed, onUnmounted } from 'vue';
+import { useVirtualList } from '@vueuse/core';
 import {
   ChevronRight,
   FileText,
@@ -241,6 +270,7 @@ import {
   type AssetSortOrder,
   type DocAssetGroup,
 } from '../utils/asset-list';
+import { buildDocRows } from '../utils/doc-group-rows';
 import { readOriginalImage } from '../utils/file-system';
 
 const props = defineProps<{
@@ -253,6 +283,24 @@ const props = defineProps<{
 }>();
 
 const { groups, selectedNames } = toRefs(props);
+
+// 摊平成一维行序列后交给虚拟滚动：折叠的文档不产生资源行，
+// 展开的文档也只有视口附近的行会真正进入 DOM。
+const rows = computed(() =>
+  buildDocRows(props.groups, {
+    collapsedDocIds: props.collapsedDocIds,
+    searchQuery: props.searchQuery,
+  })
+);
+
+const { list, containerProps, wrapperProps } = useVirtualList(rows, {
+  itemHeight: (index: number) => rows.value[index]?.height ?? 0,
+  overscan: 10,
+});
+
+// 行自带所属分组，Shift 连续多选直接取 row.group.assets，
+// 不必按 id 回查当前 props（回查可能与扁平化时的下标不同代）。
+
 
 const emit = defineEmits<{
   (e: 'open-docs', asset: AssetInfo): void;
@@ -270,13 +318,7 @@ const emit = defineEmits<{
 
 // 折叠状态由父组件持有（collapsedDocIds），使视图切换与资源增删都不丢失用户操作。
 // 搜索期间强制全部展开以便看到命中结果，但不改写父组件持有的集合，清空搜索后自动还原。
-function isGroupCollapsed(groupId: string): boolean {
-  if (props.searchQuery && props.searchQuery.trim()) {
-    return false;
-  }
-  return props.collapsedDocIds.has(groupId);
-}
-
+// 该判定已下沉到 buildDocRows，行序列本身就是折叠后的结果。
 function toggleGroup(groupId: string) {
   emit('toggle-collapse', groupId);
 }
@@ -446,27 +488,51 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-.doc-group-card {
-  margin-bottom: 14px;
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 8px;
-  background-color: var(--b3-theme-surface);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  overflow: hidden;
+.doc-rows-inner {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * 虚拟滚动按行渲染，卡片描边因此拆到每一行上：头部行负责顶边与左右边，
+ * 资源行负责左右边，末行补上底边与圆角，合起来与原先整张卡片外观一致。
+ */
+.doc-row {
   box-sizing: border-box;
+  overflow: hidden;
+  flex-shrink: 0;
+}
 
-  &:last-child {
-    margin-bottom: 0;
+/* 孤立/未引用分组的暖色描边（放在资源行自身状态之前，保证选中/悬浮态能覆盖） */
+.doc-row.is-unreferenced {
+  border-left-color: rgba(245, 158, 11, 0.35);
+  border-right-color: rgba(245, 158, 11, 0.35);
+}
+
+.doc-group-card {
+  border: 1px solid var(--b3-theme-surface-lighter);
+  border-radius: 8px 8px 0 0;
+  background-color: var(--b3-theme-surface);
+
+  /* 折叠时这一行就是整张卡片，四角都收圆 */
+  &.is-collapsed {
+    border-radius: 8px;
   }
 
-  &:hover {
-    border-color: rgba(66, 133, 244, 0.35);
-  }
-
+  /*
+   * 孤立/未引用卡片：顶边与左右边转暖色；展开时下边框是与列名行的分隔线，
+   * 仍保持中性灰（原实现由 .doc-group-header 自己钉住灰色），卡片真正的底边
+   * 由末行资源补上（见 .doc-row.is-unreferenced.is-last-in-group）。
+   */
   &.is-unreferenced {
-    border-color: rgba(245, 158, 11, 0.35);
+    border-top-color: rgba(245, 158, 11, 0.35);
+    border-left-color: rgba(245, 158, 11, 0.35);
+    border-right-color: rgba(245, 158, 11, 0.35);
     background-color: rgba(245, 158, 11, 0.02);
+
+    &.is-collapsed {
+      border-bottom-color: rgba(245, 158, 11, 0.35);
+    }
 
     .doc-group-header {
       background-color: rgba(245, 158, 11, 0.05);
@@ -478,10 +544,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 48px;
+  height: 100%;
   padding: 8px 14px;
   background-color: var(--b3-theme-background-light);
-  border-bottom: 1px solid var(--b3-theme-surface-lighter);
   cursor: pointer;
   user-select: none;
   transition: background-color 0.15s ease;
@@ -490,10 +555,6 @@ onUnmounted(() => {
   &:hover {
     background-color: var(--b3-theme-surface-lighter);
   }
-}
-
-.doc-group-card.is-collapsed .doc-group-header {
-  border-bottom: none;
 }
 
 .doc-header-left {
@@ -540,6 +601,7 @@ onUnmounted(() => {
   flex: 1;
 }
 
+/* 行高写死：虚拟滚动依赖行高恒定，标题两行合计必须稳定落在头部行的内容盒内 */
 .doc-title-row {
   display: flex;
   align-items: center;
@@ -547,7 +609,7 @@ onUnmounted(() => {
   font-weight: 600;
   font-size: 14px;
   color: var(--b3-theme-on-background);
-  line-height: 1.3;
+  line-height: 19px;
 }
 
 .doc-title-text {
@@ -556,9 +618,14 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+/*
+ * 徽章是标题行里的 flex 子项，会撑高该行。显式钉住 line-height，
+ * 使「有徽章」与「无徽章」的标题行同为 17+2=19px，头部行的内容高度才有确定上界。
+ */
 .doc-unref-badge {
   font-size: 11px;
   font-weight: 500;
+  line-height: 17px;
   color: #d97706;
   background-color: rgba(245, 158, 11, 0.15);
   padding: 1px 6px;
@@ -569,6 +636,7 @@ onUnmounted(() => {
 .doc-match-badge {
   font-size: 11px;
   font-weight: 500;
+  line-height: 17px;
   color: var(--b3-theme-primary);
   background-color: rgba(66, 133, 244, 0.12);
   padding: 1px 6px;
@@ -578,6 +646,7 @@ onUnmounted(() => {
 
 .doc-path-row {
   font-size: 12px;
+  line-height: 17px;
   color: var(--b3-theme-on-surface-light);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -601,6 +670,7 @@ onUnmounted(() => {
 
 .stat-badge {
   font-size: 12px;
+  line-height: 16px;
   padding: 2px 7px;
   border-radius: 4px;
   font-weight: 500;
@@ -627,26 +697,20 @@ onUnmounted(() => {
   }
 }
 
-/* 子列表样式 */
-.doc-group-body {
-  background-color: var(--b3-theme-surface);
-}
-
+/* 卡片内的列名行 */
 .doc-sublist-header {
   display: flex;
   align-items: center;
   padding: 6px 14px;
   background-color: var(--b3-theme-background-light);
   border-bottom: 1px solid var(--b3-theme-surface-lighter);
+  border-left: 1px solid var(--b3-theme-surface-lighter);
+  border-right: 1px solid var(--b3-theme-surface-lighter);
   font-size: 12px;
   font-weight: 600;
+  line-height: 18px;
   color: var(--b3-theme-on-surface-light);
   user-select: none;
-}
-
-.doc-sublist-items {
-  display: flex;
-  flex-direction: column;
 }
 
 .sortable {
@@ -672,18 +736,32 @@ onUnmounted(() => {
 }
 
 .asset-item {
-  height: 52px;
   display: flex;
   align-items: center;
+  /* 行背景接替原卡片底色，否则整行会露出容器背景 */
+  background-color: var(--b3-theme-surface);
   border-bottom: 1px solid var(--b3-theme-surface-lighter);
+  border-left: 1px solid var(--b3-theme-surface-lighter);
+  border-right: 1px solid var(--b3-theme-surface-lighter);
   padding: 0 14px;
   font-size: 13px;
   cursor: pointer;
   user-select: none;
   transition: background-color 0.15s ease;
 
-  &:last-child {
-    border-bottom: none;
+  /* 末行补上卡片底边与圆角 */
+  &.is-last-in-group {
+    border-radius: 0 0 8px 8px;
+  }
+
+  /* 孤立/未引用卡片的底边同样转暖色，否则四边里只有底边是灰的 */
+  &.is-unreferenced.is-last-in-group {
+    border-bottom-color: rgba(245, 158, 11, 0.35);
+  }
+
+  /* 孤立/未引用卡片的淡琥珀底色（放在悬浮与选中态之前） */
+  &.is-unreferenced {
+    background-color: rgba(245, 158, 11, 0.02);
   }
 
   &:hover {

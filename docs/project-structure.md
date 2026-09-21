@@ -40,6 +40,7 @@
 | --- | --- |
 | `src/components/AssetsManager.vue` | 资源管理主面板；加载资源、多维筛选（含可二次编辑）、大图预览、定位引用、删除、清理孤儿资源与清理孤立底图 |
 | `src/components/VirtualAssetList.vue` | 虚拟滚动资源列表；负责列表高性能渲染、非图片类型徽章展示（`getAssetBadgeText`）、`[可二次编辑]` 徽标展示和行级操作事件 |
+| `src/components/DocumentAssetGroupList.vue` | 按文档归类视图；把分组摊平成行序列后交由 `useVirtualList` 开窗渲染，折叠的文档不产生资源行，行高由 `DOC_ROW_HEIGHTS` 内联绑定 |
 | `src/components/ImageEditorDialog.vue` | TUI Image Editor 弹窗；支持二次编辑模式、干净原始底图加载与矢量图层注入还原、重置为原始底图、合并固化图层、高保真导出与保存 |
 | `src/components/ConfirmDialog.vue` | 通用确认对话框组件 |
 
@@ -51,6 +52,7 @@
 | `src/utils/asset-actions.ts` | 编辑后文件名生成、重命名输入校验和扩展名决策 |
 | `src/utils/asset-list.ts` | 资源过滤（支持 `reeditable`）、排序、扩展名拆分、类型徽章生成（`getAssetBadgeText`）、大小格式化、孤儿资源与孤立底图统计 |
 | `src/utils/asset-markdown.ts` | Markdown 中 assets 引用解析、替换、移除和正则转义 |
+| `src/utils/doc-group-rows.ts` | 按文档归类的行模型；把分组摊平为一维虚拟滚动行序列（`buildDocRows`），并集中定义行高常量 `DOC_ROW_HEIGHTS` |
 | `src/utils/file-system.ts` | 资源文件读取、保存、删除、重命名，以及原始底图隔离存储（`storage/petal/siyuan-assets-manager/originals/`）的安全保存、读取、删除与列表 |
 | `src/utils/image-editor.ts` | 图片编辑器弹窗尺寸计算、导出流水线（`prepareCanvasExport`）、画布对象重置（`resetCanvasObjects`）、100% 物理分辨率换算、Alpha 像素切边与重采样、键盘快捷键处理 |
 | `src/utils/plugin-entry.ts` | 插件入口纯函数；从 DOM 获取资源文件名与最近块 `data-node-id` |
@@ -74,7 +76,10 @@
 | `tests/asset-workflow.test.ts` | 图片保存编辑与重命名长流程业务编排、底图归档分支与块属性广播 |
 | `tests/asset-actions.test.ts` | 编辑命名、重命名校验和扩展名确认 |
 | `tests/asset-list.test.ts` | 过滤（含二次编辑）、排序、扩展名、徽章文本提取、大小格式化、孤儿资源与底图统计 |
+| `tests/asset-manager-toolbar.test.ts` | 顶部操作区按钮顺序（刷新·去重·清理·日志）、上次刷新时间的占位/更新与刷新期间列表不被卸载 |
 | `tests/asset-markdown.test.ts` | assets 引用提取、正则特殊字符替换、图片/链接/纯路径移除 |
+| `tests/doc-group-rows.test.ts` | 文档归类行模型：折叠/展开行序列、搜索强制展开、行高常量、行 key 唯一性 |
+| `tests/document-asset-group-list.test.ts` | 文档归类视图组件：分组渲染与折叠契约、万级资源下只渲染视口内的行 |
 | `tests/file-system.test.ts` | 文件路径规范化、绝对路径计算与 DataURL 转 Blob 校验 |
 | `tests/image-editor.test.ts` | 图片编辑器尺寸、分辨率计算、画布对象重置、Alpha 像素扫描与快捷键判断 |
 | `tests/plugin-entry.test.ts` | 入口资源名解析、blockId 提取和根容器 id |
