@@ -34,12 +34,15 @@ import {
   scanDuplicates,
   normalizeDuplicateGroup,
   batchNormalizeDuplicateGroups,
+  deriveGroupId,
   saveDeduplicateCache,
   loadDeduplicateCache,
   clearDeduplicateCache,
+  DEDUP_CACHE_VERSION,
   type IDuplicateGroup,
   type IDuplicateItem,
 } from '../src/utils/deduplicate';
+import * as pluginContext from '../src/utils/plugin-context';
 import type { AssetInfo, BlockRef } from '../src/utils/siyuan-db';
 
 const readAssetFileMock = vi.mocked(readAssetFile);
@@ -435,10 +438,52 @@ describe('deduplicate utils', () => {
     });
   });
 
+  describe('deriveGroupId', () => {
+    const mk = (names: string[]): IDuplicateItem[] =>
+      names.map((name) => ({
+        asset: makeAsset(name, 100),
+        score: 0,
+        isCanonical: false,
+      }));
+
+    it('is independent of member order', () => {
+      const a = deriveGroupId('exact', mk(['a.png', 'b.png', 'c.png']));
+      const b = deriveGroupId('exact', mk(['c.png', 'a.png', 'b.png']));
+      expect(a).toBe(b);
+    });
+
+    it('differs when the member set changes', () => {
+      const a = deriveGroupId('exact', mk(['a.png', 'b.png']));
+      const b = deriveGroupId('exact', mk(['a.png', 'b.png', 'c.png']));
+      expect(a).not.toBe(b);
+    });
+
+    it('differs across modes for the same members', () => {
+      const items = mk(['a.png', 'b.png']);
+      expect(deriveGroupId('exact', items)).not.toBe(deriveGroupId('similar', items));
+    });
+
+    it('is prefixed by mode and stable in format', () => {
+      const id = deriveGroupId('similar', mk(['a.png', 'b.png']));
+      expect(id).toMatch(/^similar_[0-9a-f]{8}$/);
+    });
+  });
+
   describe('deduplicate persistence cache', () => {
+    let pluginStore: Map<string, any>;
+
+    beforeEach(() => {
+      pluginStore = new Map<string, any>();
+      pluginContext.usePlugin({
+        saveData: async (file: string, data: any) => { pluginStore.set(file, data); },
+        loadData: async (file: string) => pluginStore.get(file) ?? null,
+        removeData: async (file: string) => { pluginStore.delete(file); },
+      } as any);
+    });
+
     it('saves and loads deduplicate cache to/from storage', async () => {
       const mockCache = {
-        version: 1,
+        version: DEDUP_CACHE_VERSION,
         lastScanTime: 1700000000000,
         similarityThreshold: 95,
         exactGroups: [
@@ -469,6 +514,19 @@ describe('deduplicate utils', () => {
 
       const afterClear = await loadDeduplicateCache();
       expect(afterClear).toBeNull();
+    });
+
+    it('rejects a cache written by an older schema version', async () => {
+      await saveDeduplicateCache({
+        version: 1,
+        lastScanTime: 1700000000000,
+        similarityThreshold: 95,
+        exactGroups: [],
+        similarGroups: [],
+      } as any);
+
+      // v1 缓存直接丢弃：本版本不迁移 isIgnored/isProcessed
+      expect(await loadDeduplicateCache()).toBeNull();
     });
   });
 });

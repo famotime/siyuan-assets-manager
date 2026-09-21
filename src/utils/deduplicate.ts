@@ -325,6 +325,37 @@ export function pickCanonicalAsset(items: IDuplicateItem[]): string {
 }
 
 /**
+ * FNV-1a 32 位哈希，输出 8 位十六进制。
+ * 不复用 computeFileHash：后者是 async 且面向 Blob，此处只需同步纯函数。
+ */
+function fnv1a32(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * 由组内容派生稳定 id。
+ *
+ * 位置 id（exact_1 / exact_2 …）会随扫描顺序漂移，使「已忽略/已处理」
+ * 在重扫后落到无关的组上。改用成员文件名集合派生，与扫描顺序、分桶顺序、
+ * 聚类遍历顺序均无关；成员不变则 id 不变。
+ *
+ * 代价：成员变动（又混入一张重复图）时 id 变化，该组重新变为待处理。
+ * 这是有意为之——成员的引用关系确实变了，值得重新过目。
+ *
+ * 分隔符用 \x00 / \x1f 而非逗号：文件名本身可能含逗号，
+ * 无分隔约定会让 ["a,b"] 与 ["a","b"] 派生出同一 id。
+ */
+export function deriveGroupId(mode: DeduplicateMode, items: IDuplicateItem[]): string {
+  const names = items.map((it) => it.asset.name).sort();
+  return `${mode}_${fnv1a32(`${mode}\x00${names.join('\x1f')}`)}`;
+}
+
+/**
  * 计算重复组的冗余空间
  */
 export function calculateGroupRedundantSize(items: IDuplicateItem[], canonicalName: string): number {
@@ -421,7 +452,6 @@ export async function scanDuplicates(
   // 构建精确重复组
   const exactGroups: IDuplicateGroup[] = [];
   const exactMatchedAssetNames = new Set<string>();
-  let exactGroupIdx = 1;
 
   for (const [hash, cluster] of exactClusters.entries()) {
     if (cluster.length >= 2) {
@@ -439,7 +469,7 @@ export async function scanDuplicates(
       }
 
       exactGroups.push({
-        id: `exact_${exactGroupIdx++}`,
+        id: deriveGroupId('exact', items),
         mode: 'exact',
         similarity: 1.0,
         canonicalAssetName: canonicalName,
@@ -547,7 +577,6 @@ export async function scanDuplicates(
   }
 
   const similarGroups: IDuplicateGroup[] = [];
-  let similarGroupIdx = 1;
 
   for (const cluster of clusters.values()) {
     if (cluster.length >= 2) {
@@ -577,7 +606,7 @@ export async function scanDuplicates(
       const avgSimilarity = pairCount > 0 ? simSum / pairCount : minSimilarity;
 
       similarGroups.push({
-        id: `similar_${similarGroupIdx++}`,
+        id: deriveGroupId('similar', items),
         mode: 'similar',
         similarity: Math.round(avgSimilarity * 100) / 100,
         canonicalAssetName: canonicalName,
@@ -804,8 +833,11 @@ export async function batchNormalizeDuplicateGroups(
 export const DEDUP_CACHE_FILE = 'deduplicate-cache.json';
 export const DEDUP_LOCAL_STORAGE_KEY = 'siyuan_assets_dedup_cache';
 
+/** 分组缓存的 schema 版本。指纹文件另有一套独立的版本命名空间，勿混用 */
+export const DEDUP_CACHE_VERSION = 2;
+
 export interface IDeduplicateCache {
-  version: number;
+  version: number; // schema 版本，必须等于 DEDUP_CACHE_VERSION，否则缓存作废
   lastScanTime: number; // 扫描完成时间戳 (ms)
   similarityThreshold: number; // 相似度阈值 (80 ~ 100)
   exactGroups: IDuplicateGroup[];
@@ -851,7 +883,12 @@ export async function loadDeduplicateCache(): Promise<IDeduplicateCache | null> 
       const data = await plugin.loadData(DEDUP_CACHE_FILE);
       if (data) {
         const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-        if (parsed && Array.isArray(parsed.exactGroups) && Array.isArray(parsed.similarGroups)) {
+        if (
+          parsed &&
+          parsed.version === DEDUP_CACHE_VERSION &&
+          Array.isArray(parsed.exactGroups) &&
+          Array.isArray(parsed.similarGroups)
+        ) {
           log(`[deduplicate] 成功从 ${DEDUP_CACHE_FILE} 加载缓存比对数据`);
           return parsed as IDeduplicateCache;
         }
@@ -867,7 +904,12 @@ export async function loadDeduplicateCache(): Promise<IDeduplicateCache | null> 
       const item = localStorage.getItem(DEDUP_LOCAL_STORAGE_KEY);
       if (item) {
         const parsed = JSON.parse(item);
-        if (parsed && Array.isArray(parsed.exactGroups) && Array.isArray(parsed.similarGroups)) {
+        if (
+          parsed &&
+          parsed.version === DEDUP_CACHE_VERSION &&
+          Array.isArray(parsed.exactGroups) &&
+          Array.isArray(parsed.similarGroups)
+        ) {
           log(`[deduplicate] 成功从 localStorage 加载缓存比对数据`);
           return parsed as IDeduplicateCache;
         }
