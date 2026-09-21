@@ -2037,46 +2037,80 @@ git commit -m "feat(dedup): default to incremental scan with index rebuild escap
 ### Task 9: 文档同步与收尾
 
 **Files:**
-- Modify: `docs/project-structure.md`
+- Modify: `docs/project-structure.md`（`## 工具模块` 与 `## 测试` 两张表）
+- Modify: `CLAUDE.md`（`## Key Modules` 表、`## Development Rules & Invariants`、`## Build & Test Commands`）
 - Modify: `docs/changelog.md`
+- Modify: `tests/deduplicate.test.ts`（仅注释）
+- Modify: `package.zip`（重新打包产物，单独提交）
 
 **Interfaces:**
 - Consumes: 全部前置任务
 - Produces: 无
 
-**依据：** 项目 CLAUDE.md 规约要求「重大架构改动时同步更新 `docs/project-structure.md` 与 `docs/refactor-plan.md`」。`docs/refactor-plan.md` 是重构计划，与本次功能改动无关，故只更新 `project-structure.md`，并在 `changelog.md` 记录。
+**依据：** 项目 CLAUDE.md 规约要求「重大架构改动时同步更新 `docs/project-structure.md` 与 `docs/refactor-plan.md`」。`docs/refactor-plan.md` 是重构计划，与本次功能改动无关；又因模块清单实际记在 `CLAUDE.md` 里，故两处都要更新。
+
+> **计划更正（编写本任务时发现）：** 本任务原稿把「Key Modules 表格」写成在 `docs/project-structure.md` 里，**这是错的**。该表在 `CLAUDE.md:33-52`；`docs/project-structure.md` 用的是另一套小节（`## 工具模块` `:47`、`## 测试` `:72`）。原稿据此会改错文件。
+> 同时发现两处已存在的文档滞后，**不属于本任务范围**，只需在提交信息或报告中留一句记录：`deduplicate.ts` 在两张模块表中都缺席（早于本次改动）；`docs/project-structure.md` 的 `## 测试` 表只列了 32 个测试文件中的 15 个。本次只补本功能新增的条目，不顺带重写整张表。
 
 - [ ] **Step 1: 更新 `docs/project-structure.md`**
 
-在 Key Modules 表格中加入两行新模块，并更新 `src/utils/deduplicate.ts` 的描述：
+在该文件**第 47 行起的 `## 工具模块` 表**末尾追加三行（`deduplicate.ts` 此前缺席，本次因是功能核心而补上）：
 
 ```markdown
-| `src/utils/deduplicate.ts` | 去重扫描（三阶段：size 分桶 → 精确哈希 → 感知哈希）、指纹复用增量、分组归一化、稳定组身份、缓存持久化 |
-| `src/utils/dedup-fingerprint-store.ts` | per-asset 指纹（sha256/dHash/分辨率）的失效校验、裁剪与持久化；仅走 plugin.saveData |
+| `src/utils/deduplicate.ts` | 去重扫描三阶段流水线（size 分桶 → 精确哈希 → 感知哈希）、指纹复用增量、分组归一化、内容派生组身份与缓存持久化 |
+| `src/utils/dedup-fingerprint-store.ts` | per-asset 指纹（sha256/dHash/分辨率）的失效校验、裁剪与持久化；仅走 `plugin.saveData`，不落 localStorage |
 | `src/utils/concurrency.ts` | 保序并发池：在飞数受限、可中止、进度上报 |
 ```
 
-同时在「Development Rules & Invariants」中补一条约束：
+再在该文件**第 72 行起的 `## 测试` 表**末尾追加三行：
 
 ```markdown
-- **指纹复用安全性**: 去重扫描复用 `size + updated` 双判有效的指纹；`score`（依赖 refCount/docCount/isReEditable）必须每次重算，绝不复用，否则会给出过期的保留项推荐。
+| `tests/deduplicate.test.ts` | 去重扫描三阶段与指纹复用增量、`score` 每次重算、组身份顺序无关性、缓存 schema 版本判废、归一化安全复核 |
+| `tests/dedup-fingerprint-store.test.ts` | 指纹失效判据（size/updated/updated>0/字段缺失）、裁剪、存取往返与版本不符判空、不写 localStorage |
+| `tests/concurrency.test.ts` | 并发池契约：保序返回、在飞上限、中止不再启动、进度单调、非法 limit 回退 |
 ```
 
-- [ ] **Step 1b: 修正 `CLAUDE.md` 中已过时的测试规模**
+- [ ] **Step 1b: 更新 `CLAUDE.md`**
 
-执行期间实测：全量套件为 **31 个测试文件 / 242 个测试**（命令 `npm test`）。而 `CLAUDE.md` 的构建命令表仍写着「运行全部 Vitest 单元测试（14 套件 / 66+ 测试）」——该数字已严重过时。
-
-把 Build & Test Commands 表中 `npm test` 一行的描述改为：
+**(a) `## Key Modules` 表**（第 35 行起）末尾追加三行：
 
 ```markdown
-| `npm test` | 运行全部 Vitest 单元测试（31 个测试文件 / 242+ 测试） |
+| `src/utils/deduplicate.ts` | 去重扫描三阶段（size 分桶 → 精确哈希 → 感知哈希）、指纹复用增量、分组归一化、稳定组身份、缓存持久化 |
+| `src/utils/dedup-fingerprint-store.ts` | per-asset 指纹失效校验、裁剪与持久化；仅走 `plugin.saveData` |
+| `src/utils/concurrency.ts` | 保序并发池：在飞数受限、可中止、进度上报 |
 ```
 
-注意保留「+」：后续任务还会继续新增用例，本任务的收尾时刻以当时的实际数字为准，但不必为此反复改文档。
+**(b) `## Development Rules & Invariants`**（第 54 行起）追加一条：
+
+```markdown
+- **指纹复用安全性**: 去重扫描复用 `size + updated` 双判有效的指纹（`updated > 0` 才算已知）；`score` 依赖 `refCount`/`docCount`/`isReEditable`，必须每次扫描重算、绝不复用，否则会给出过期的保留项推荐。
+```
+
+**(c) `## Build & Test Commands`**（第 16 行）：把 `npm test` 一行的描述从过时的「运行全部 Vitest 单元测试（14 套件 / 66+ 测试）」改为实测值。**先跑 `npm test` 取当次真实数字**（本计划执行到此时为 **32 个测试文件 / 273 个测试**），再写：
+
+```markdown
+| `npm test` | 运行全部 Vitest 单元测试（32 个测试文件 / 273+ 测试） |
+```
+
+保留「+」：用例数会继续增长，不必为此反复改文档。
 
 - [ ] **Step 2: 更新 `docs/changelog.md`**
 
-在文件顶部（最新条目位置）按既有格式加入本次改动条目，列出：增量指纹复用、两阶段并发化（并发度可配置）、分组 id 内容派生、`http-adapter` 的 `updated` 语义修正、缓存 schema 升 v2（旧缓存丢弃）。
+**注意：`v1.1.0` 已有 git tag（`git tag` 可见 `v1.0.0`、`v1.1.0`），即已发布，不得往它的小节里追加内容。** 该文件由手工维护——`release.js` 只负责改 `package.json`/`plugin.json` 的版本号并打 tag，**不生成 changelog**，所以版本小节要人写。
+
+在 `# 思源资源管家` 标题与 `> 全库资源看得清…` 引言之后、`## v1.1.0` 之前，插入一个新小节。本次是功能新增，按语义化版本应升 minor：
+
+```markdown
+## v1.2.0
+### 优化
+- **去重扫描增量更新**：为每个资源缓存文件指纹（精确 SHA-256 与感知 dHash），重扫时仅重新读取与解码真正变更过的文件。万级图片库下，重复扫描从"重算全部"变为近瞬时完成。指纹以文件大小与修改时间双重判定有效性，任一不符即重算，宁可多算也不误判。
+- **去重扫描并发化**：精确哈希与图片解码两个阶段由串行改为受控并发，首次扫描也显著加速。两阶段瓶颈不同（前者受磁盘与哈希计算限制，后者受解码位图内存限制），故在设置中分别提供"哈希并发度"（默认 8）与"解码并发度"（默认 3）两个可调项。
+- **重建指纹索引**：去重比对界面新增该入口，用于哈希算法升级或怀疑指纹陈旧时清空指纹并全量重算；操作前二次确认，且不会修改或删除任何资源文件。
+- **分组身份稳定化**：重复分组标识由位置序号改为按组内文件名集合派生，使"已忽略/已处理"标记真正跨扫描生效，不再因重扫而漂移到无关分组上。分组缓存 schema 因此升级到 v2，旧缓存自动判废并触发一次全量扫描。
+- **HTTP 模式修改时间语义修正**：Web 模式下取不到 `last-modified` 时不再伪造成当前时间，而返回 0 表示"未知"，使上述指纹失效判定成为确定性行为（此前会导致增量静默退化为全量）。
+```
+
+若你认为版本号应留待 `npm run release` 决定，就把标题改成 `## 未发布`——**不要**改动 `package.json` 或 `plugin.json` 的版本号，那是 `release.js` 的职责，手工改会让它在此基础上二次递增。
 
 - [ ] **Step 2b: 修正测试中一处事实错误的注释**
 
