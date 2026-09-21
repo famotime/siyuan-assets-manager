@@ -1797,6 +1797,24 @@ git commit -m "feat(settings): expose dedup scan concurrency knobs"
 
 **本任务无单元测试**——`DeduplicateDialog.vue` 无既有测试文件，且本次改动是接线而非逻辑。验证靠 `npm test` 无回归 + 手动核对（Step 5）。
 
+- [ ] **Step 0: 修正缓存写入的 schema 版本**
+
+`persistCurrentCache`（`DeduplicateDialog.vue:562-574`）当前**硬编码 `version: 1`**，而 Task 4 已把 `loadDeduplicateCache` 改为要求 `version === 2`。若不修，写进去的缓存每次加载都会被判废，弹窗每次打开都退化为全量扫描——功能上看似正常，但增量收益归零且无任何报错。这是 Task 4 与本任务之间的跨任务耦合点。
+
+把 `:564-570` 改为：
+
+```ts
+    await saveDeduplicateCache({
+      version: DEDUP_CACHE_VERSION,
+      lastScanTime: lastScanTime.value,
+      similarityThreshold: similarityThreshold.value,
+      exactGroups: exactGroups.value,
+      similarGroups: similarGroups.value,
+    });
+```
+
+并在 `:382-386` 的 `deduplicate` import 块中追加 `DEDUP_CACHE_VERSION`。
+
 - [ ] **Step 1: 引入指纹存储函数**
 
 在 `src/components/DeduplicateDialog.vue:382-386` 的 `deduplicate` import 块之后追加：
