@@ -309,6 +309,12 @@ describe('deduplicate utils', () => {
       // 失效条目必须被整体替换：陈旧 sha256 不得残留，否则会与 dup2 误配成一组
       expect(second.fingerprints.entries['dup1.png'].sha256).not.toBe('stale-hash');
       expect(second.fingerprints.entries['dup1.png'].size).toBe(500);
+      // 失效条目必须被整体替换：陈旧 dHash 不得残留。
+      // 陈旧 dHash 不会自愈——阶段三的 cached?.dHash 分支会直接采用它，
+      // 可能把文件归入错误的相似组，用户据此合并即误删。
+      expect(second.fingerprints.entries['dup1.png'].dHash).toBeUndefined();
+      expect(second.fingerprints.entries['dup1.png'].width).toBeUndefined();
+      expect(second.fingerprints.entries['dup1.png'].height).toBeUndefined();
       expect(second.exactGroups.length).toBe(1);
       expect(second.exactGroups[0].items.length).toBe(2);
     });
@@ -390,6 +396,49 @@ describe('deduplicate utils', () => {
       expect(result.fingerprints.entries['ghost.png']).toBeDefined();
       // 但本次已算出的条目不得被丢弃
       expect(Object.keys(result.fingerprints.entries).length).toBeGreaterThan(1);
+    });
+
+    it('respects an injected concurrency limit for the hashing phase', async () => {
+      const assets = Array.from({ length: 12 }, (_, i) => makeAsset(`d${i}.png`, 500));
+      let inFlight = 0;
+      let peak = 0;
+
+      readAssetFileMock.mockImplementation(async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 3));
+        inFlight--;
+        return new Blob(['same-bytes']);
+      });
+
+      await scanDuplicates(assets, { concurrency: { hash: 2 } });
+
+      expect(peak).toBeLessThanOrEqual(2);
+      expect(peak).toBeGreaterThan(1);
+    });
+
+    it('falls back to defaults when concurrency is absent or malformed', async () => {
+      const assets = [makeAsset('dup1.png', 500), makeAsset('dup2.png', 500)];
+      readAssetFileMock.mockResolvedValue(new Blob(['same-bytes']));
+
+      await expect(scanDuplicates(assets, { concurrency: {} })).resolves.toBeDefined();
+      await expect(
+        scanDuplicates(assets, { concurrency: { hash: NaN, decode: -1 } })
+      ).resolves.toBeDefined();
+    });
+
+    it('reports combined reuse and recompute counts in progress messages', async () => {
+      const assets = [makeAsset('dup1.png', 500), makeAsset('dup2.png', 500)];
+      readAssetFileMock.mockResolvedValue(new Blob(['same-bytes']));
+
+      const first = await scanDuplicates(assets);
+      const messages: string[] = [];
+      await scanDuplicates(assets, {
+        fingerprints: first.fingerprints,
+        onProgress: (p) => messages.push(p.message),
+      });
+
+      expect(messages.some((m) => m.includes('复用'))).toBe(true);
     });
   });
 
