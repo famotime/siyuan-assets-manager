@@ -1321,7 +1321,9 @@ git commit -m "feat(dedup): reuse cached fingerprints in scan pipeline"
 
 ### Task 6 前置约束（Task 5 评审发现，必须遵守）
 
-Task 5 的评审确认：`deduplicate.ts` 阶段三写入点（`prevValid = !forceRehash && isFingerprintValid(prev, asset)` 及其后的受保护展开）是**唯一阻止陈旧 `sha256` 存活的关卡**——而这正是最危险的方向（陈旧哈希会让两个不同文件哈希相同 → 误判重复 → 用户合并即删除文件）。该写入点在 jsdom 下不可达（无 `Image`，`computeImageDHash` 恒返回 `null`），因此**删掉这个守卫不会被任何测试发现**。本任务恰好要重写这段代码，故必须：
+Task 5 的评审确认：`deduplicate.ts` 阶段三写入点（`prevValid = !forceRehash && isFingerprintValid(prev, asset)` 及其后的受保护展开）是**唯一阻止陈旧 `sha256` 存活的关卡**——而这正是最危险的方向（陈旧哈希会让两个不同文件哈希相同 → 误判重复 → 用户合并即删除文件）。**删掉这个守卫不会被任何测试发现**。本任务恰好要重写这段代码，故必须：
+
+> **不可达的真实原因（Task 6 实施时更正）：** 并非"jsdom 没有 `Image`"——jsdom 里 `Image` 与 `URL.createObjectURL` 都存在。真实原因是 jsdom 不会为 blob URL 触发 `onload`/`onerror`，且缺少 canvas 后端，于是 `computeImageDHash` 只能由它自己的 1500ms 看门狗超时兜底、resolve 出 `null`。结论不变（该块不可达），但引用原因时请用正确的那一条。
 
 1. **逐字保留 `prevValid` 的语义**：条目失效时整体替换、绝不展开 `prev`；仅当条目有效（`size` + `updated` 匹配且 `updated > 0`）时才保留其既有字段。池化改造不得改变这条语义，哪怕是为了"让代码更简洁"。
 2. **补强陈旧字段测试**：Task 5 的用例只断言了 `sha256` 与 `size`，因此漏掉了 `{...prev, size, updated, sha256: fresh}` 这种"展开在前"的变体——它会留下陈旧的 `dHash`/`width`/`height`，而陈旧的 `dHash` **不会自愈**（阶段三的复用分支会照单全收），可能把文件归入不该属于的相似组。在既有用例中补上对其余字段的断言：
