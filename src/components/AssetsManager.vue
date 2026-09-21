@@ -107,7 +107,7 @@
             清理
           </button>
         </template>
-        <button class="am-btn" @click="loadData" title="刷新资源列表">
+        <button class="am-btn" @click="handleRefreshClick" title="刷新资源列表">
           <svg v-if="loading" class="icon spinning" viewBox="0 0 24 24"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
           <span v-else>刷新</span>
         </button>
@@ -168,7 +168,9 @@
         :sortField="sortField"
         :sortOrder="sortOrder"
         :selectedNames="selectedNames"
+        :collapsedDocIds="collapsedDocIds"
         :searchQuery="searchQuery"
+        @toggle-collapse="toggleDocGroup"
         @update:selectedNames="handleSelectionChange"
         @sort="handleSortChange"
         @open-docs="handleOpenDocs"
@@ -304,7 +306,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { openTab } from 'siyuan';
 import {
   Files,
@@ -343,6 +345,7 @@ import {
   splitFileName,
   groupReferencesByDoc,
   groupAssetsByDocument,
+  applyPinnedDocOrder,
   type AssetCategory,
   type AssetFilterType,
   type AssetSortField,
@@ -420,20 +423,16 @@ const sortOrder = ref<AssetSortOrder>('desc');
 // 文档卡片排序与折叠状态
 const docSortField = ref<DocSortField>('totalSize');
 const docSortOrder = ref<DocSortOrder>('desc');
-const isAllGroupsCollapsed = ref(false);
+
+// 折叠状态由本组件持有，使切换视图与资源增删都不丢失用户操作（面板关闭时才随之重置）
+const collapsedDocIds = ref<Set<string>>(new Set());
+const hasInitializedCollapse = ref(false);
+
+// 文档卡片顺序冻结：仅在显式刷新或切换排序字段时重新捕获，避免删除/编辑资源后卡片跳位
+const pinnedDocOrder = ref<string[] | null>(null);
 
 function toggleDocSortOrder() {
   docSortOrder.value = docSortOrder.value === 'desc' ? 'asc' : 'desc';
-}
-
-function toggleAllDocGroups() {
-  if (isAllGroupsCollapsed.value) {
-    docListRef.value?.expandAll();
-    isAllGroupsCollapsed.value = false;
-  } else {
-    docListRef.value?.collapseAll();
-    isAllGroupsCollapsed.value = true;
-  }
 }
 
 // 多选状态
@@ -751,13 +750,17 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
 });
 
-async function loadData() {
+async function loadData(options: { resort?: boolean } = {}) {
   loading.value = true;
   try {
     assets.value = await getAllAssetsInfo();
     // 过滤掉已不存在的选中项
     const existingNames = new Set(assets.value.map(a => a.name));
     selectedNames.value = new Set([...selectedNames.value].filter(name => existingNames.has(name)));
+    // 默认不重排：删除、编辑、去重等写入后保持用户当前看到的卡片顺序，仅刷新按钮显式要求重排
+    if (options.resort) {
+      resortNow();
+    }
   } catch (e) {
     error("Failed to load assets", e);
   } finally {
@@ -934,7 +937,8 @@ const handleGlobalRefresh = (event?: Event) => {
 };
 
 onMounted(() => {
-  loadData();
+  // 初次加载确立排序基准，之后除非用户点刷新或改排序字段，卡片顺序不再变动
+  loadData({ resort: true });
   window.addEventListener('assets-manager-refresh', handleGlobalRefresh);
   window.addEventListener('keydown', handleKeyDown);
 });
@@ -961,14 +965,72 @@ const categoryAndTypeFilteredAssets = computed(() => {
 });
 
 const groupedDocAssets = computed(() => {
-  return groupAssetsByDocument(categoryAndTypeFilteredAssets.value, {
+  const groups = groupAssetsByDocument(categoryAndTypeFilteredAssets.value, {
     searchQuery: searchQuery.value,
     docSortField: docSortField.value,
     docSortOrder: docSortOrder.value,
     assetSortField: sortField.value,
     assetSortOrder: sortOrder.value,
   });
+  return applyPinnedDocOrder(groups, pinnedDocOrder.value ?? undefined);
 });
+
+// 捕获当前文档顺序作为冻结基准。刻意不带分类与搜索过滤，保证任何筛选视图下拿到的都是
+// 同一份全库位次，避免「在筛选态刷新后再切回全部」时未冻结文档被挤到末尾。
+function resortNow() {
+  const fullGroups = groupAssetsByDocument(assets.value, {
+    docSortField: docSortField.value,
+    docSortOrder: docSortOrder.value,
+  });
+  pinnedDocOrder.value = fullGroups.filter((g) => !g.isUnreferenced).map((g) => g.id);
+}
+
+// 显式切换排序依据时才重排
+watch([docSortField, docSortOrder], () => {
+  resortNow();
+});
+
+// 首次进入文档归类视图时默认折叠全部文档；此后完全遵从用户操作，不再自动改写
+watch(
+  [viewMode, groupedDocAssets],
+  ([mode, groups]) => {
+    if (hasInitializedCollapse.value) return;
+    if (mode !== 'doc' || groups.length === 0) return;
+    hasInitializedCollapse.value = true;
+    collapsedDocIds.value = new Set(groups.map((g) => g.id));
+  },
+  { immediate: true }
+);
+
+// 是否已全部折叠由 collapsedDocIds 推导，避免视图切换后与列表实际状态不一致
+const isAllGroupsCollapsed = computed(
+  () =>
+    groupedDocAssets.value.length > 0
+    && groupedDocAssets.value.every((g) => collapsedDocIds.value.has(g.id))
+);
+
+function toggleDocGroup(groupId: string) {
+  const next = new Set(collapsedDocIds.value);
+  if (next.has(groupId)) {
+    next.delete(groupId);
+  } else {
+    next.add(groupId);
+  }
+  collapsedDocIds.value = next;
+}
+
+function toggleAllDocGroups() {
+  if (isAllGroupsCollapsed.value) {
+    collapsedDocIds.value = new Set();
+  } else {
+    collapsedDocIds.value = new Set(groupedDocAssets.value.map((g) => g.id));
+  }
+}
+
+// 刷新按钮是唯一会按最新数据重新排序的入口
+function handleRefreshClick() {
+  loadData({ resort: true });
+}
 
 const docModeStats = computed(() => {
   const docCount = groupedDocAssets.value.filter((g) => !g.isUnreferenced).length;

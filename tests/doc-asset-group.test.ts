@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyPinnedDocOrder,
   extractDocTitle,
   groupAssetsByDocument,
   type DocAssetGroup,
@@ -243,5 +244,56 @@ describe('groupAssetsByDocument', () => {
     expect(groupsByFile.length).toBe(1)
     expect(groupsByFile[0].assets.length).toBe(1)
     expect(groupsByFile[0].assets[0].name).toBe('random-clip.mp4')
+  })
+})
+
+describe('applyPinnedDocOrder', () => {
+  function makeGroup(
+    id: string,
+    options: { totalSize?: number; isUnreferenced?: boolean } = {}
+  ): DocAssetGroup {
+    return {
+      id,
+      title: id,
+      readablePath: id,
+      assets: [],
+      totalSize: options.totalSize || 0,
+      assetCount: 0,
+      isUnreferenced: options.isUnreferenced || false,
+    }
+  }
+
+  // 自然排序结果（如按大小倒序）：doc-c > doc-b > doc-a
+  const natural = () => [
+    makeGroup('doc-c', { totalSize: 300 }),
+    makeGroup('doc-b', { totalSize: 200 }),
+    makeGroup('doc-a', { totalSize: 100 }),
+  ]
+
+  it('keeps the natural order when no pinned order is supplied', () => {
+    expect(applyPinnedDocOrder(natural()).map((g) => g.id)).toEqual(['doc-c', 'doc-b', 'doc-a'])
+    expect(applyPinnedDocOrder(natural(), []).map((g) => g.id)).toEqual(['doc-c', 'doc-b', 'doc-a'])
+  })
+
+  it('reorders normal document groups to match the pinned order', () => {
+    const reordered = applyPinnedDocOrder(natural(), ['doc-a', 'doc-c', 'doc-b'])
+    expect(reordered.map((g) => g.id)).toEqual(['doc-a', 'doc-c', 'doc-b'])
+  })
+
+  it('appends documents missing from the pinned order at the end, keeping their natural order', () => {
+    const reordered = applyPinnedDocOrder(natural(), ['doc-b'])
+    expect(reordered.map((g) => g.id)).toEqual(['doc-b', 'doc-c', 'doc-a'])
+  })
+
+  it('always keeps the unreferenced group last, even when pinned elsewhere', () => {
+    const groups = [...natural(), makeGroup('unreferenced', { isUnreferenced: true })]
+    const reordered = applyPinnedDocOrder(groups, ['unreferenced', 'doc-a'])
+    expect(reordered.map((g) => g.id)).toEqual(['doc-a', 'doc-c', 'doc-b', 'unreferenced'])
+  })
+
+  it('does not mutate the input array', () => {
+    const groups = natural()
+    applyPinnedDocOrder(groups, ['doc-a', 'doc-b', 'doc-c'])
+    expect(groups.map((g) => g.id)).toEqual(['doc-c', 'doc-b', 'doc-a'])
   })
 })

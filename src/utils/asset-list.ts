@@ -585,3 +585,40 @@ export function groupAssetsByDocument(
 
   return result
 }
+
+/**
+ * 按冻结的文档顺序重排分组结果，用于「删除/编辑资源后保持当前排序」：
+ * 常规文档卡片依 pinnedOrder 决定位次；不在冻结列表中的文档（新增的引用文档）
+ * 保持自然顺序追加到常规分组末尾；未引用分组无论是否出现在 pinnedOrder 中都恒置底。
+ */
+export function applyPinnedDocOrder(
+  groups: DocAssetGroup[],
+  pinnedOrder?: string[]
+): DocAssetGroup[] {
+  if (!pinnedOrder || pinnedOrder.length === 0) {
+    return groups
+  }
+
+  const rank = new Map<string, number>()
+  for (let i = 0; i < pinnedOrder.length; i++) {
+    rank.set(pinnedOrder[i], i)
+  }
+
+  const pinnedNormals: DocAssetGroup[] = []
+  const freshNormals: DocAssetGroup[] = []
+  const unrefGroups: DocAssetGroup[] = []
+
+  for (const group of groups) {
+    if (group.isUnreferenced) {
+      unrefGroups.push(group)
+    } else if (rank.has(group.id)) {
+      pinnedNormals.push(group)
+    } else {
+      freshNormals.push(group)
+    }
+  }
+
+  pinnedNormals.sort((a, b) => rank.get(a.id)! - rank.get(b.id)!)
+
+  return [...pinnedNormals, ...freshNormals, ...unrefGroups]
+}

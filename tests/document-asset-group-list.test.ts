@@ -83,41 +83,69 @@ describe('DocumentAssetGroupList component', () => {
     ];
   }
 
-  it('renders document groups, badges, titles, and handles collapse toggle', async () => {
-    const groups = ref(createMockGroup());
+  function mountList(
+    overrides: {
+      groups?: DocAssetGroup[];
+      collapsedDocIds?: Set<string>;
+      searchQuery?: string;
+    } = {}
+  ) {
+    const groups = ref(overrides.groups ?? createMockGroup());
+    const collapsedDocIds = ref(overrides.collapsedDocIds ?? new Set<string>());
     const selectedNames = ref(new Set<string>());
     const sortField = ref<'size' | 'name' | 'ext' | 'updated' | 'docCount'>('size');
     const sortOrder = ref<'asc' | 'desc'>('desc');
+    const searchQuery = ref(overrides.searchQuery ?? '');
 
     const openDocIdHandler = vi.fn();
     const updateSelectedHandler = vi.fn();
+    const toggleCollapseHandler = vi.fn();
 
     const Wrapper = {
       components: { DocumentAssetGroupList },
       setup() {
         return {
           groups,
+          collapsedDocIds,
           selectedNames,
           sortField,
           sortOrder,
+          searchQuery,
           openDocIdHandler,
           updateSelectedHandler,
+          toggleCollapseHandler,
         };
       },
       template: `
         <DocumentAssetGroupList
           :groups="groups"
+          :collapsedDocIds="collapsedDocIds"
           :selectedNames="selectedNames"
           :sortField="sortField"
           :sortOrder="sortOrder"
+          :searchQuery="searchQuery"
           @open-doc-id="openDocIdHandler"
           @update:selectedNames="updateSelectedHandler"
+          @toggle-collapse="toggleCollapseHandler"
         />
       `,
     };
 
     app = createApp(Wrapper);
     app.mount(mountContainer);
+
+    return {
+      groups,
+      collapsedDocIds,
+      searchQuery,
+      openDocIdHandler,
+      updateSelectedHandler,
+      toggleCollapseHandler,
+    };
+  }
+
+  it('renders document groups, badges, titles, and reports collapse intent', async () => {
+    const { openDocIdHandler, updateSelectedHandler, toggleCollapseHandler } = mountList();
     await nextTick();
 
     const cards = mountContainer.querySelectorAll('.doc-group-card');
@@ -146,12 +174,13 @@ describe('DocumentAssetGroupList component', () => {
     openBtn.click();
     expect(openDocIdHandler).toHaveBeenCalledWith('doc-vue', 'blk-1');
 
-    // 折叠与展开切换
+    // 折叠状态由父组件经 collapsedDocIds 驱动，子组件点击仅上报意图而不自行改写状态
     const header = vueCard.querySelector('.doc-group-header') as HTMLDivElement;
     expect(vueCard.classList.contains('is-collapsed')).toBe(false);
     header.click();
     await nextTick();
-    expect(vueCard.classList.contains('is-collapsed')).toBe(true);
+    expect(toggleCollapseHandler).toHaveBeenCalledWith('doc-vue');
+    expect(vueCard.classList.contains('is-collapsed')).toBe(false);
 
     // 测试文档级全选勾选框
     const docCheckbox = vueCard.querySelector('.doc-checkbox-wrapper input[type="checkbox"]') as HTMLInputElement;
@@ -159,5 +188,51 @@ describe('DocumentAssetGroupList component', () => {
     docCheckbox.checked = true;
     docCheckbox.dispatchEvent(new Event('change'));
     expect(updateSelectedHandler).toHaveBeenCalled();
+  });
+
+  it('renders collapse state from the collapsedDocIds prop', async () => {
+    mountList({ collapsedDocIds: new Set(['doc-vue']) });
+    await nextTick();
+
+    const cards = mountContainer.querySelectorAll('.doc-group-card');
+    expect(cards[0].classList.contains('is-collapsed')).toBe(true);
+    expect(cards[1].classList.contains('is-collapsed')).toBe(false);
+  });
+
+  it('emits toggle-collapse on header click without mutating the provided set', async () => {
+    const collapsedDocIds = new Set<string>();
+    const { toggleCollapseHandler } = mountList({ collapsedDocIds });
+    await nextTick();
+
+    const card = mountContainer.querySelectorAll('.doc-group-card')[0];
+    (card.querySelector('.doc-group-header') as HTMLElement).click();
+    await nextTick();
+
+    expect(toggleCollapseHandler).toHaveBeenCalledWith('doc-vue');
+    expect(collapsedDocIds.size).toBe(0);
+    expect(card.classList.contains('is-collapsed')).toBe(false);
+  });
+
+  it('force-expands every group while a search query is active, restoring collapsed state afterwards', async () => {
+    const { searchQuery } = mountList({
+      collapsedDocIds: new Set(['doc-vue', 'unreferenced']),
+    });
+    await nextTick();
+
+    const cards = mountContainer.querySelectorAll('.doc-group-card');
+    expect(cards[0].classList.contains('is-collapsed')).toBe(true);
+    expect(cards[1].classList.contains('is-collapsed')).toBe(true);
+
+    // 输入搜索词：全部强制展开以便看到命中结果
+    searchQuery.value = 'vue';
+    await nextTick();
+    expect(cards[0].classList.contains('is-collapsed')).toBe(false);
+    expect(cards[1].classList.contains('is-collapsed')).toBe(false);
+
+    // 清空搜索：恢复用户先前的折叠状态
+    searchQuery.value = '';
+    await nextTick();
+    expect(cards[0].classList.contains('is-collapsed')).toBe(true);
+    expect(cards[1].classList.contains('is-collapsed')).toBe(true);
   });
 });

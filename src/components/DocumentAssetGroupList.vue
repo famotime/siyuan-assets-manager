@@ -218,7 +218,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, toRefs, computed, watch, onUnmounted } from 'vue';
+import { ref, toRefs, onUnmounted } from 'vue';
 import {
   ChevronRight,
   FileText,
@@ -248,6 +248,7 @@ const props = defineProps<{
   sortField: AssetSortField;
   sortOrder: AssetSortOrder;
   selectedNames: Set<string>;
+  collapsedDocIds: Set<string>;
   searchQuery?: string;
 }>();
 
@@ -264,65 +265,23 @@ const emit = defineEmits<{
   (e: 'update-preview', payload: { event: MouseEvent }): void;
   (e: 'hide-preview'): void;
   (e: 'update:selectedNames', nextSelected: Set<string>): void;
+  (e: 'toggle-collapse', groupId: string): void;
 }>();
 
-// 折叠状态跟踪：记录手动折叠的 docId 集合
-const collapsedDocIds = ref<Set<string>>(new Set());
-
-// 初次加载分组时，若文档较多（> 5 个），默认展开前 5 个，其余折叠，保持轻快整洁
-const isInitialBatchInitialized = ref(false);
-watch(
-  () => props.groups,
-  (newGroups) => {
-    if (!isInitialBatchInitialized.value && newGroups && newGroups.length > 0) {
-      isInitialBatchInitialized.value = true;
-      if (newGroups.length > 5) {
-        const initialCollapsed = new Set<string>();
-        for (let i = 5; i < newGroups.length; i++) {
-          initialCollapsed.add(newGroups[i].id);
-        }
-        collapsedDocIds.value = initialCollapsed;
-      }
-    }
-  },
-  { immediate: true }
-);
-
-// 搜索关键词变更时，如果有关键词，默认清空折叠状态使结果全部展开可见
-watch(
-  () => props.searchQuery,
-  (q) => {
-    if (q && q.trim()) {
-      collapsedDocIds.value = new Set();
-    }
-  }
-);
-
+// 折叠状态由父组件持有（collapsedDocIds），使视图切换与资源增删都不丢失用户操作。
+// 搜索期间强制全部展开以便看到命中结果，但不改写父组件持有的集合，清空搜索后自动还原。
 function isGroupCollapsed(groupId: string): boolean {
-  return collapsedDocIds.value.has(groupId);
+  if (props.searchQuery && props.searchQuery.trim()) {
+    return false;
+  }
+  return props.collapsedDocIds.has(groupId);
 }
 
 function toggleGroup(groupId: string) {
-  const next = new Set(collapsedDocIds.value);
-  if (next.has(groupId)) {
-    next.delete(groupId);
-  } else {
-    next.add(groupId);
-  }
-  collapsedDocIds.value = next;
-}
-
-function expandAll() {
-  collapsedDocIds.value = new Set();
-}
-
-function collapseAll() {
-  collapsedDocIds.value = new Set(props.groups.map((g) => g.id));
+  emit('toggle-collapse', groupId);
 }
 
 defineExpose({
-  expandAll,
-  collapseAll,
   toggleGroup,
   invalidateAssetThumbnail,
 });
