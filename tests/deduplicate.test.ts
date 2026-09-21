@@ -438,7 +438,10 @@ describe('deduplicate utils', () => {
         onProgress: (p) => messages.push(p.message),
       });
 
-      expect(messages.some((m) => m.includes('复用'))).toBe(true);
+      // 必须断言真实计数，而非消息模板里的 "复用" 字样：
+      // 模板恒含该词，只匹配它会在重用计数恒为 0 时照样通过。
+      // 第二次扫描两条指纹均有效（size/updated 未变），故为 复用 2 / 重算 0。
+      expect(messages.some((m) => m.includes('复用 2 个指纹，重算 0 个'))).toBe(true);
     });
   });
 
