@@ -75,7 +75,7 @@
 
 ## 🙏 感谢
 
-1. [ImgReEditor](https://github.com/Achuan-2/siyuan-plugin-imgReEditor) 插件项目（作者：Achuan-2）：本插件借鉴了图像二次编辑的思路，不同的是将矢量标注压缩存储在图像块属性中，并配合底图隔离归档，避免了编辑后底图无法还原及历史编辑信息被破坏的问题；
+1. [ImgReEditor](https://github.com/Achuan-2/siyuan-plugin-imgReEditor) 插件项目（作者：Achuan-2）：本插件借鉴了图像二次编辑的思路，并配合底图隔离归档，避免了编辑后底图无法还原及历史编辑信息被破坏的问题；
 2. [tui.image-editor](https://github.com/nhn/tui.image-editor/) 项目（作者：NHN Cloud）：本项目图像编辑器基于 tui.image-editor 进行了深度定制与功能增强，包括：
 
    - 大幅重构交互界面，提供类 Photoshop 的工具栏与配置面板，解决原版工具占据编辑空间、遮挡图像的问题；
