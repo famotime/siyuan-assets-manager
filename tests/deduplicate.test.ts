@@ -42,6 +42,7 @@ import {
   type IDuplicateGroup,
   type IDuplicateItem,
 } from '../src/utils/deduplicate';
+import { createEmptyFingerprintStore } from '../src/utils/dedup-fingerprint-store';
 import * as pluginContext from '../src/utils/plugin-context';
 import type { AssetInfo, BlockRef } from '../src/utils/siyuan-db';
 
@@ -240,6 +241,155 @@ describe('deduplicate utils', () => {
 
       expect(res.exactGroups).toEqual([]);
       expect(res.similarGroups).toEqual([]);
+    });
+
+    it('reuses fingerprints on a second scan without re-reading unchanged files', async () => {
+      const assets = [makeAsset('dup1.png', 500), makeAsset('dup2.png', 500)];
+      readAssetFileMock.mockResolvedValue(new Blob(['same-bytes']));
+
+      const first = await scanDuplicates(assets);
+      expect(first.stats.computed).toBeGreaterThan(0);
+      const callsAfterFirst = readAssetFileMock.mock.calls.length;
+
+      const second = await scanDuplicates(assets, { fingerprints: first.fingerprints });
+
+      expect(readAssetFileMock.mock.calls.length).toBe(callsAfterFirst);
+      expect(second.stats.computed).toBe(0);
+      expect(second.stats.reused).toBeGreaterThan(0);
+      expect(second.exactGroups.length).toBe(first.exactGroups.length);
+      expect(second.exactGroups[0].id).toBe(first.exactGroups[0].id);
+    });
+
+    it('recomputes only the file whose updated timestamp changed', async () => {
+      const assets = [makeAsset('dup1.png', 500), makeAsset('dup2.png', 500)];
+      readAssetFileMock.mockResolvedValue(new Blob(['same-bytes']));
+
+      const first = await scanDuplicates(assets);
+      const callsAfterFirst = readAssetFileMock.mock.calls.length;
+
+      const bumped = [
+        { ...assets[0], updated: assets[0].updated + 1 },
+        assets[1],
+      ];
+      await scanDuplicates(bumped, { fingerprints: first.fingerprints });
+
+      expect(readAssetFileMock.mock.calls.length - callsAfterFirst).toBe(1);
+    });
+
+    it('recomputes everything when forceRehash is set', async () => {
+      const assets = [makeAsset('dup1.png', 500), makeAsset('dup2.png', 500)];
+      readAssetFileMock.mockResolvedValue(new Blob(['same-bytes']));
+
+      const first = await scanDuplicates(assets);
+      readAssetFileMock.mockClear();
+
+      const second = await scanDuplicates(assets, {
+        fingerprints: first.fingerprints,
+        forceRehash: true,
+      });
+
+      expect(second.stats.reused).toBe(0);
+      expect(readAssetFileMock.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    it('discards every stale field when an entry is invalidated', async () => {
+      const assets = [makeAsset('dup1.png', 500), makeAsset('dup2.png', 500)];
+      readAssetFileMock.mockResolvedValue(new Blob(['same-bytes']));
+
+      const first = await scanDuplicates(assets);
+
+      // 伪造一条"size/updated 不符但字段齐全"的旧条目
+      const poisoned = createEmptyFingerprintStore();
+      poisoned.entries['dup1.png'] = {
+        size: 1, updated: 1, sha256: 'stale-hash', dHash: '0000', width: 1, height: 1,
+      };
+
+      const second = await scanDuplicates(assets, { fingerprints: poisoned });
+
+      // 失效条目必须被整体替换：陈旧 sha256 不得残留，否则会与 dup2 误配成一组
+      expect(second.fingerprints.entries['dup1.png'].sha256).not.toBe('stale-hash');
+      expect(second.fingerprints.entries['dup1.png'].size).toBe(500);
+      expect(second.exactGroups.length).toBe(1);
+      expect(second.exactGroups[0].items.length).toBe(2);
+    });
+
+    it('recomputes score for reused fingerprints so canonical follows fresh refCount', async () => {
+      // 最高风险用例：若 score 被误缓存，canonical 会停留在过期推荐上，
+      // 用户据此合并将丢失引用数更多的那个文件。
+      const assets = [makeAsset('dup1.png', 500, 1), makeAsset('dup2.png', 500, 0)];
+      readAssetFileMock.mockResolvedValue(new Blob(['same-bytes']));
+
+      const first = await scanDuplicates(assets);
+      expect(first.exactGroups[0].canonicalAssetName).toBe('dup1.png');
+
+      // 文件字节未变（size/updated 不变，指纹应全命中），但引用数反转
+      const refsChanged = [
+        { ...assets[0], refCount: 0, docCount: 0, references: [] },
+        { ...assets[1], refCount: 5, docCount: 3, references: [] },
+      ];
+      const second = await scanDuplicates(refsChanged, { fingerprints: first.fingerprints });
+
+      expect(second.stats.reused).toBeGreaterThan(0);
+      expect(second.exactGroups[0].canonicalAssetName).toBe('dup2.png');
+      expect(second.exactGroups[0].items.find(i => i.asset.name === 'dup2.png')!.score)
+        .toBeGreaterThan(second.exactGroups[0].items.find(i => i.asset.name === 'dup1.png')!.score);
+    });
+
+    it('prunes fingerprints for assets no longer present', async () => {
+      const assets = [makeAsset('dup1.png', 500), makeAsset('dup2.png', 500)];
+      readAssetFileMock.mockResolvedValue(new Blob(['same-bytes']));
+
+      const first = await scanDuplicates(assets);
+      expect(first.fingerprints.entries['dup1.png']).toBeDefined();
+
+      const second = await scanDuplicates([assets[0]], { fingerprints: first.fingerprints });
+
+      expect(second.fingerprints.entries['dup2.png']).toBeUndefined();
+    });
+
+    it('reuses cached perceptual hashes without re-reading image files', async () => {
+      // jsdom 下 Image 未定义，computeImageDHash 必然返回 null。
+      // 因此阶段三的复用路径只能靠"直接注入 dHash 指纹"来覆盖——
+      // 这恰好也是最纯粹的形式：两个文件 size 不同（不进精确候选），
+      // 但 dHash 相同，应当直接聚为相似组且全程零文件读取。
+      const assets = [makeAsset('a.png', 100), makeAsset('b.png', 200)];
+      const seeded = createEmptyFingerprintStore();
+      seeded.entries['a.png'] = { size: 100, updated: assets[0].updated, dHash: '0'.repeat(64) };
+      seeded.entries['b.png'] = { size: 200, updated: assets[1].updated, dHash: '0'.repeat(64) };
+
+      const result = await scanDuplicates(assets, { fingerprints: seeded });
+
+      expect(readAssetFileMock).not.toHaveBeenCalled();
+      expect(result.stats.reused).toBe(2);
+      expect(result.stats.computed).toBe(0);
+      expect(result.similarGroups.length).toBe(1);
+      expect(result.similarGroups[0].items.length).toBe(2);
+      expect(result.similarGroups[0].similarity).toBe(1);
+    });
+
+    it('returns merged fingerprints but no groups, and skips pruning, when aborted', async () => {
+      const assets = Array.from({ length: 6 }, (_, i) => makeAsset(`d${i}.png`, 500));
+      const abortSignal = { aborted: false };
+
+      // 中止点由读取次数驱动，不依赖进度回调的触发时机，
+      // 因此该用例在串行（Task 5）与并发（Task 6）两种实现下都稳定
+      readAssetFileMock.mockImplementation(async () => {
+        abortSignal.aborted = true;
+        return new Blob(['same-bytes']);
+      });
+
+      const seeded = createEmptyFingerprintStore();
+      seeded.entries['ghost.png'] = { size: 9, updated: 9 }; // 不在 assets 中
+
+      const result = await scanDuplicates(assets, { fingerprints: seeded, abortSignal });
+
+      expect(result.exactGroups).toEqual([]);
+      expect(result.similarGroups).toEqual([]);
+      // 中止路径不得裁剪：按不完整集合删除会误伤有效指纹。
+      // ghost.png 本来会被完整扫描裁掉，此处必须存活。
+      expect(result.fingerprints.entries['ghost.png']).toBeDefined();
+      // 但本次已算出的条目不得被丢弃
+      expect(Object.keys(result.fingerprints.entries).length).toBeGreaterThan(1);
     });
   });
 

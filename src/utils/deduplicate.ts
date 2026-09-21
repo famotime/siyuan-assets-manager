@@ -6,6 +6,13 @@ import type { IAssetReEditMetadata } from '../types/reedit';
 import { usePlugin } from './plugin-context';
 import { recordDeletionBatch, type IDeletedItemRecord, type DeleteDestination } from './deletion-logger';
 import { captureAssetThumbnail } from './image-editor';
+import {
+  createEmptyFingerprintStore,
+  isFingerprintValid,
+  pruneFingerprintStore,
+  type IAssetFingerprint,
+  type IFingerprintStore,
+} from './dedup-fingerprint-store';
 import { log, warn, error } from './logger';
 
 export type DeduplicateMode = 'exact' | 'similar';
@@ -37,6 +44,21 @@ export interface IDeduplicateScanProgress {
   current: number;
   total: number;
   message: string;
+}
+
+export interface IDeduplicateScanStats {
+  /** 复用既有指纹的条目数 */
+  reused: number;
+  /** 本次实际重算的条目数 */
+  computed: number;
+}
+
+export interface IDeduplicateScanResult {
+  exactGroups: IDuplicateGroup[];
+  similarGroups: IDuplicateGroup[];
+  /** 含本次新增/回写的条目，由调用方落盘 */
+  fingerprints: IFingerprintStore;
+  stats: IDeduplicateScanStats;
 }
 
 export interface INormalizeStats {
@@ -377,11 +399,29 @@ export async function scanDuplicates(
     minSimilarity?: number; // 相似度阈值 (0.80 ~ 1.0, 默认 0.90)
     onProgress?: (progress: IDeduplicateScanProgress) => void;
     abortSignal?: { aborted: boolean };
+    fingerprints?: IFingerprintStore;
+    forceRehash?: boolean;
   } = {}
-): Promise<{ exactGroups: IDuplicateGroup[]; similarGroups: IDuplicateGroup[] }> {
+): Promise<IDeduplicateScanResult> {
   const minSimilarity = options.minSimilarity ?? 0.90;
   const onProgress = options.onProgress || (() => {});
   const abortSignal = options.abortSignal || { aborted: false };
+  const forceRehash = options.forceRehash === true;
+
+  // 复制入参条目，避免污染调用方持有的对象
+  const fingerprints: IFingerprintStore = options.fingerprints
+    ? { version: options.fingerprints.version, entries: { ...options.fingerprints.entries } }
+    : createEmptyFingerprintStore();
+
+  let reused = 0;
+  let computed = 0;
+
+  /** 取可复用的条目；forceRehash 或失效时返回 null */
+  const reusableEntry = (asset: AssetInfo): IAssetFingerprint | null => {
+    if (forceRehash) return null;
+    const entry = fingerprints.entries[asset.name];
+    return isFingerprintValid(entry, asset) ? entry! : null;
+  };
 
   // 1. 过滤有效常规资源
   const validAssets = assets.filter(a => !a.isDir && !a.isOriginal);
@@ -403,7 +443,12 @@ export async function scanDuplicates(
   }
 
   if (abortSignal.aborted) {
-    return { exactGroups: [], similarGroups: [] };
+    return {
+      exactGroups: [],
+      similarGroups: [],
+      fingerprints,
+      stats: { reused, computed },
+    };
   }
 
   // -------------------------------------------------------------
@@ -421,21 +466,42 @@ export async function scanDuplicates(
 
   let hashProcessed = 0;
   for (const asset of candidateAssets) {
-    if (abortSignal.aborted) return { exactGroups: [], similarGroups: [] };
+    if (abortSignal.aborted) {
+      return { exactGroups: [], similarGroups: [], fingerprints, stats: { reused, computed } };
+    }
 
-    try {
-      const blob = await readAssetFile(asset.name);
-      if (blob) {
-        const hash = await computeFileHash(blob);
-        assetHashMap.set(asset.name, hash);
-
-        if (!exactClusters.has(hash)) {
-          exactClusters.set(hash, []);
-        }
-        exactClusters.get(hash)!.push(asset);
+    const cached = reusableEntry(asset);
+    if (cached?.sha256) {
+      reused++;
+      assetHashMap.set(asset.name, cached.sha256);
+      if (!exactClusters.has(cached.sha256)) {
+        exactClusters.set(cached.sha256, []);
       }
-    } catch (e) {
-      warn(`[deduplicate] 读取文件 ${asset.name} 计算哈希失败:`, e);
+      exactClusters.get(cached.sha256)!.push(asset);
+    } else {
+      try {
+        const blob = await readAssetFile(asset.name);
+        if (blob) {
+          const hash = await computeFileHash(blob);
+          assetHashMap.set(asset.name, hash);
+
+          if (!exactClusters.has(hash)) {
+            exactClusters.set(hash, []);
+          }
+          exactClusters.get(hash)!.push(asset);
+
+          // 失效条目整体替换，绝不合并旧字段：文件内容已变，
+          // 旧的 sha256/dHash 全部作废，合并会留下陈旧值
+          fingerprints.entries[asset.name] = {
+            size: asset.size,
+            updated: asset.updated,
+            sha256: hash,
+          };
+          computed++;
+        }
+      } catch (e) {
+        warn(`[deduplicate] 读取文件 ${asset.name} 计算哈希失败:`, e);
+      }
     }
 
     hashProcessed++;
@@ -444,9 +510,15 @@ export async function scanDuplicates(
         phase: 'hashing',
         current: hashProcessed,
         total: candidateAssets.length,
-        message: `正在计算精确哈希 (${hashProcessed}/${candidateAssets.length})...`,
+        message: `复用 ${reused} 个指纹，重算 ${computed} 个精确哈希 (${hashProcessed}/${candidateAssets.length})...`,
       });
     }
+  }
+
+  // 中止检查前移：必须在构建 exactGroups 之前。否则中止时会返回"部分分组"，
+  // 返回契约不统一（弹窗本就以 if (!aborted) 守卫，故无行为损失）。
+  if (abortSignal.aborted) {
+    return { exactGroups: [], similarGroups: [], fingerprints, stats: { reused, computed } };
   }
 
   // 构建精确重复组
@@ -480,10 +552,6 @@ export async function scanDuplicates(
     }
   }
 
-  if (abortSignal.aborted) {
-    return { exactGroups, similarGroups: [] };
-  }
-
   // -------------------------------------------------------------
   // 阶段三：对图片资源异步计算感知哈希 (dHash) 与视觉相似比对
   // -------------------------------------------------------------
@@ -510,25 +578,54 @@ export async function scanDuplicates(
   let dHashProcessed = 0;
 
   for (const asset of imageAssets) {
-    if (abortSignal.aborted) return { exactGroups, similarGroups: [] };
+    if (abortSignal.aborted) {
+      return { exactGroups, similarGroups: [], fingerprints, stats: { reused, computed } };
+    }
 
-    try {
-      const blob = await readAssetFile(asset.name);
-      if (blob) {
-        const feature = await computeImageDHash(blob);
-        if (feature) {
-          const score = scoreAssetCandidate(asset, feature.width, feature.height);
-          imageFeatures.push({
-            asset,
-            dHash: feature.dHash,
-            width: feature.width,
-            height: feature.height,
-            score,
-          });
+    const cached = reusableEntry(asset);
+    if (cached?.dHash) {
+      reused++;
+      imageFeatures.push({
+        asset,
+        dHash: cached.dHash,
+        width: cached.width || 0,
+        height: cached.height || 0,
+        // score 必须每次重算：它依赖 refCount/docCount/isReEditable，
+        // 这些会在文件字节完全不变的情况下变化
+        score: scoreAssetCandidate(asset, cached.width || 0, cached.height || 0),
+      });
+    } else {
+      try {
+        const blob = await readAssetFile(asset.name);
+        if (blob) {
+          const feature = await computeImageDHash(blob);
+          if (feature) {
+            imageFeatures.push({
+              asset,
+              dHash: feature.dHash,
+              width: feature.width,
+              height: feature.height,
+              score: scoreAssetCandidate(asset, feature.width, feature.height),
+            });
+
+            const prev = fingerprints.entries[asset.name];
+            const prevValid = !forceRehash && isFingerprintValid(prev, asset);
+            fingerprints.entries[asset.name] = {
+              size: asset.size,
+              updated: asset.updated,
+              // 阶段二刚写入的 sha256 必须保留（此时条目有效）；
+              // 若条目本就失效则一并丢弃
+              ...(prevValid && prev?.sha256 ? { sha256: prev.sha256 } : {}),
+              dHash: feature.dHash,
+              width: feature.width,
+              height: feature.height,
+            };
+            computed++;
+          }
         }
+      } catch (e) {
+        warn(`[deduplicate] 提取图片特征 ${asset.name} 失败:`, e);
       }
-    } catch (e) {
-      warn(`[deduplicate] 提取图片特征 ${asset.name} 失败:`, e);
     }
 
     dHashProcessed++;
@@ -537,7 +634,7 @@ export async function scanDuplicates(
         phase: 'perceptual',
         current: dHashProcessed,
         total: imageAssets.length,
-        message: `正在提取视觉感知特征 (${dHashProcessed}/${imageAssets.length})...`,
+        message: `复用 ${reused} 张图片特征，重算 ${computed} 张 (${dHashProcessed}/${imageAssets.length})...`,
       });
     }
   }
@@ -617,6 +714,10 @@ export async function scanDuplicates(
     }
   }
 
+  // 裁剪只在完整扫描后执行：中止时资源集合可能不完整，
+  // 按不完整集合删除条目会误伤有效指纹
+  pruneFingerprintStore(fingerprints, new Set(validAssets.map((a) => a.name)));
+
   onProgress({
     phase: 'done',
     current: validAssets.length,
@@ -624,7 +725,7 @@ export async function scanDuplicates(
     message: '扫描完成！',
   });
 
-  return { exactGroups, similarGroups };
+  return { exactGroups, similarGroups, fingerprints, stats: { reused, computed } };
 }
 
 export interface INormalizeOptions {
