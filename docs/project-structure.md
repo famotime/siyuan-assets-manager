@@ -60,6 +60,9 @@
 | `src/utils/siyuan-block.ts` | 对引用资源的 blocks 执行替换/移除/删除，以及 `custom-asset-reedit` 块属性读写与批量查询 |
 | `src/utils/siyuan-db.ts` | 资源文件聚合、引用统计、二次编辑元数据绑定、孤立底图扫描与一键清理 |
 | `src/utils/tui-image-editor-bridge.ts` | TUI / Fabric 桥接模块；抽取纯矢量图层、反序列化注入 Fabric Canvas、序号联动关系重建 |
+| `src/utils/deduplicate.ts` | 去重扫描三阶段流水线（size 分桶 → 精确哈希 → 感知哈希）、指纹复用增量、分组归一化、内容派生组身份与缓存持久化 |
+| `src/utils/dedup-fingerprint-store.ts` | per-asset 指纹（sha256/dHash/分辨率）的失效校验、裁剪与持久化；仅走 `plugin.saveData`，不落 localStorage |
+| `src/utils/concurrency.ts` | 保序并发池：在飞数受限、可中止、进度上报 |
 
 ## 类型
 
@@ -88,6 +91,9 @@
 | `tests/siyuan-block.test.ts` | 块引用替换/移除/删除、`custom-asset-reedit` 块属性读写与 IAL 解析 |
 | `tests/siyuan-db.test.ts` | 资源文件聚合、二次编辑状态绑定、孤立底图扫描与清理 |
 | `tests/tui-bridge.test.ts` | TUI 构造函数解析、Fabric Canvas 提取、纯矢量图层抽取与反序列化还原 |
+| `tests/deduplicate.test.ts` | 去重扫描三阶段与指纹复用增量、`score` 每次重算、组身份顺序无关性、缓存 schema 版本判废、归一化安全复核 |
+| `tests/dedup-fingerprint-store.test.ts` | 指纹失效判据（size/updated/updated>0/字段缺失）、裁剪、存取往返与版本不符判空、不写 localStorage |
+| `tests/concurrency.test.ts` | 并发池契约：保序返回、在飞上限、中止不再启动、进度单调、非法 limit 回退 |
 
 ## 构建与验证
 

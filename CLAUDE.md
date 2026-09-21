@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) and coding agents wh
 
 | Command | Description |
 |---|---|
-| `npm test` | 运行全部 Vitest 单元测试（14 套件 / 66+ 测试） |
+| `npm test` | 运行全部 Vitest 单元测试（32 个测试文件 / 273+ 测试） |
 | `npx vitest run tests/<file>.test.ts` | 运行单文件单元测试（如 `tests/asset-workflow.test.ts`） |
 | `npm run build` | 生产构建，输出到 `dist/` 并打包 `package.zip` |
 | `npm run dev` | Watch 构建至 `.env` 中 `VITE_SIYUAN_WORKSPACE_PATH` 配置的插件目录 |
@@ -50,6 +50,9 @@ This file provides guidance to Claude Code (claude.ai/code) and coding agents wh
 | `src/utils/asset-actions.ts` | 编辑后命名生成、重命名校验与扩展名决策 |
 | `src/utils/asset-markdown.ts` | Markdown 中 `assets/` 引用解析、正则转义、替换与移除 |
 | `src/api.ts` | 思源 Kernel 9 个核心 API 封装（SQL、通知、文件、块与属性） |
+| `src/utils/deduplicate.ts` | 去重扫描三阶段（size 分桶 → 精确哈希 → 感知哈希）、指纹复用增量、分组归一化、稳定组身份、缓存持久化 |
+| `src/utils/dedup-fingerprint-store.ts` | per-asset 指纹失效校验、裁剪与持久化；仅走 `plugin.saveData` |
+| `src/utils/concurrency.ts` | 保序并发池：在飞数受限、可中止、进度上报 |
 
 ## Development Rules & Invariants
 
@@ -57,3 +60,4 @@ This file provides guidance to Claude Code (claude.ai/code) and coding agents wh
 - **Build Target**: 构建格式为 CommonJS (`lib: { formats: ["cjs"] }`)，`siyuan` 与 `process` 外部化不打包。
 - **i18n**: 用户可见文案需同步维护在 `src/i18n/zh_CN.json` 和 `src/i18n/en_US.json`。
 - **Doc Updates**: 重大架构改动时同步更新 `docs/project-structure.md` 与 `docs/refactor-plan.md`。
+- **指纹复用安全性**: 去重扫描复用 `size + updated` 双判有效的指纹（`updated > 0` 才算已知）；`score` 依赖 `refCount`/`docCount`/`isReEditable`，必须每次扫描重算、绝不复用，否则会给出过期的保留项推荐。

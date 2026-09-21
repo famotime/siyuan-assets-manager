@@ -354,8 +354,9 @@ describe('deduplicate utils', () => {
     });
 
     it('reuses cached perceptual hashes without re-reading image files', async () => {
-      // jsdom 下 Image 未定义，computeImageDHash 必然返回 null。
-      // 因此阶段三的复用路径只能靠"直接注入 dHash 指纹"来覆盖——
+      // jsdom 不为 blob URL 触发 onload/onerror，且无 canvas 后端，
+      // 因此 computeImageDHash 只能由自身的 1500ms 看门狗超时兜底、resolve 出 null。
+      // 阶段三的复用路径只能靠"直接注入 dHash 指纹"来覆盖——
       // 这恰好也是最纯粹的形式：两个文件 size 不同（不进精确候选），
       // 但 dHash 相同，应当直接聚为相似组且全程零文件读取。
       const assets = [makeAsset('a.png', 100), makeAsset('b.png', 200)];
