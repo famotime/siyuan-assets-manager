@@ -150,6 +150,15 @@ describe('AssetsManager 顶部操作区', () => {
     expect(orderedActionTitles()).toEqual(ACTION_TITLES);
   });
 
+  it('renders visible text labels for the primary actions (刷新, 去重, 清理, 日志)', async () => {
+    await mountManager();
+    await flushLoad();
+
+    const buttons = Array.from(mountContainer.querySelectorAll('.primary-action-icons button'));
+    const labels = buttons.map((b) => b.textContent?.trim());
+    expect(labels).toEqual(['刷新', '去重', '清理', '日志']);
+  });
+
   it('shows a placeholder until the first refresh finishes, then the refresh time', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-21T10:00:00').getTime());
 

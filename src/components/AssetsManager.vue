@@ -21,54 +21,60 @@
           <div class="primary-action-icons">
             <!-- 刷新 -->
             <button
-              class="am-action-btn am-action-btn--refresh b3-tooltips b3-tooltips__s"
+              class="am-action-btn am-action-btn--refresh am-action-btn--with-text b3-tooltips b3-tooltips__s"
               @click="handleRefreshClick"
               aria-label="刷新资源列表"
             >
-              <RotateCw :size="17" :class="{ spinning: loading }" style="fill: none !important;" />
+              <RotateCw :size="14" :class="{ spinning: loading }" style="fill: none !important;" />
+              <span>刷新</span>
             </button>
 
             <!-- 批量删除 / 去重 -->
             <template v-if="selectedNames.size > 0">
               <button
-                class="am-action-btn am-action-btn--batch-delete b3-tooltips b3-tooltips__s"
+                class="am-action-btn am-action-btn--batch-delete am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleBatchDelete"
                 :aria-label="`批量删除选中的 ${selectedNames.size} 个文件`"
               >
-                <Trash2 :size="17" style="fill: none !important;" />
+                <Trash2 :size="14" style="fill: none !important;" />
+                <span>批量删除</span>
               </button>
               <button
-                class="am-action-btn am-action-btn--cancel b3-tooltips b3-tooltips__s"
+                class="am-action-btn am-action-btn--cancel am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="clearSelection"
                 aria-label="取消当前多选"
               >
-                <XSquare :size="17" style="fill: none !important;" />
+                <XSquare :size="14" style="fill: none !important;" />
+                <span>取消</span>
               </button>
             </template>
             <template v-else>
               <button
-                class="am-action-btn am-action-btn--dedup b3-tooltips b3-tooltips__s"
+                class="am-action-btn am-action-btn--dedup am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleOpenDeduplicate"
                 aria-label="识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
               >
-                <CopyMinus :size="17" style="fill: none !important;" />
+                <CopyMinus :size="14" style="fill: none !important;" />
+                <span>去重</span>
               </button>
               <button
-                class="am-action-btn am-action-btn--clean b3-tooltips b3-tooltips__s"
+                class="am-action-btn am-action-btn--clean am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleUnifiedCleanup"
                 aria-label="综合清理所有未引用的孤儿资源与孤立底图"
               >
-                <Trash2 :size="17" style="fill: none !important;" />
+                <Trash2 :size="14" style="fill: none !important;" />
+                <span>清理</span>
               </button>
             </template>
 
             <!-- 日志 -->
             <button
-              class="am-action-btn am-action-btn--history b3-tooltips b3-tooltips__sw"
+              class="am-action-btn am-action-btn--history am-action-btn--with-text b3-tooltips b3-tooltips__sw"
               @click="historyDialogVisible = true"
               aria-label="查看删除操作日志与回退历史"
             >
-              <History :size="17" style="fill: none !important;" />
+              <History :size="14" style="fill: none !important;" />
+              <span>日志</span>
             </button>
           </div>
         </div>
@@ -1744,6 +1750,26 @@ async function handleUnifiedCleanup() {
 
   &:active {
     transform: translateY(0);
+  }
+
+  &--with-text {
+    width: auto;
+    padding: 0 10px;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+
+    span {
+      line-height: 1;
+      user-select: none;
+    }
+  }
+
+  svg {
+    flex-shrink: 0;
+    pointer-events: none;
   }
 
   // 1. 刷新按钮：主色蓝 (Primary Blue)
