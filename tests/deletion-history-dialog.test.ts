@@ -102,9 +102,9 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
     await new Promise((resolve) => setTimeout(resolve, 50));
     await nextTick();
 
-    const openBtn = mountContainer.querySelector<HTMLButtonElement>('.toolbar-right button.am-btn--secondary');
+    const openBtn = mountContainer.querySelector<HTMLButtonElement>('.toolbar-right button.am-action-btn--recycle');
     expect(openBtn).not.toBeNull();
-    expect(openBtn?.textContent).toContain('打开系统回收站');
+    expect(openBtn?.getAttribute('aria-label')).toContain('打开操作系统回收站窗口');
 
     openBtn?.click();
     await nextTick();
@@ -180,27 +180,9 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
     await new Promise((resolve) => setTimeout(resolve, 50));
     await nextTick();
 
+    // 卡片头部已去除跳转按钮，保持头部信息精简
     const jumpBtns = mountContainer.querySelectorAll<HTMLButtonElement>('.btn-jump-doc');
-    expect(jumpBtns.length).toBe(2);
-
-    // 第一张卡片有引用：可点击且不带 disabled
-    const firstJumpBtn = jumpBtns[0];
-    expect(firstJumpBtn.classList.contains('is-disabled')).toBe(false);
-    expect(firstJumpBtn.disabled).toBe(false);
-
-    // 第二张卡片为孤儿清理：置灰且带 is-disabled 和 disabled
-    const secondJumpBtn = jumpBtns[1];
-    expect(secondJumpBtn.classList.contains('is-disabled')).toBe(true);
-    expect(secondJumpBtn.disabled).toBe(true);
-
-    // 点击第一张卡片的跳转到文档
-    firstJumpBtn.click();
-    await nextTick();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    expect(openTabSpy).toHaveBeenCalled();
-    const lastCall = openTabSpy.mock.calls[0][0] as any;
-    expect(lastCall.doc.id).toBe('doc_root_456');
+    expect(jumpBtns.length).toBe(0);
 
     // 展开第一张卡片，检查明细表格中的“关联文档”列与跳转文档按钮
     const firstCardHeader = mountContainer.querySelector<HTMLDivElement>('.history-card .card-header');
@@ -209,7 +191,7 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
 
     const itemJumpBtn = mountContainer.querySelector<HTMLButtonElement>('.doc-link-cell .am-link-btn');
     expect(itemJumpBtn).not.toBeNull();
-    expect(itemJumpBtn?.textContent).toContain('跳转文档');
+    expect(itemJumpBtn?.textContent).toContain('doc_root_456');
 
     openTabSpy.mockClear();
     itemJumpBtn?.click();
@@ -217,6 +199,15 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(openTabSpy).toHaveBeenCalled();
+    const lastCall = openTabSpy.mock.calls[0][0] as any;
+    expect(lastCall.doc.id).toBe('doc_root_456');
+
+    // 展开第二张卡片（孤儿清理），检查显示为无引用
+    const cards = mountContainer.querySelectorAll<HTMLDivElement>('.history-card');
+    cards[1]?.querySelector<HTMLDivElement>('.card-header')?.click();
+    await nextTick();
+    const secondCardText = cards[1]?.querySelector('.doc-link-cell')?.textContent;
+    expect(secondCardText).toContain('无引用');
   });
 
   it('renders degraded position count in the rollback report', async () => {
@@ -314,7 +305,7 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
     await new Promise((resolve) => setTimeout(resolve, 50));
     await nextTick();
 
-    mountContainer.querySelector<HTMLButtonElement>('.btn-compact.am-btn--primary')?.click();
+    mountContainer.querySelector<HTMLButtonElement>('.btn-rollback, .am-action-btn--rollback')?.click();
     await nextTick();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -365,7 +356,7 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
     await new Promise((resolve) => setTimeout(resolve, 50));
     await nextTick();
 
-    mountContainer.querySelector<HTMLButtonElement>('.btn-compact.am-btn--primary')?.click();
+    mountContainer.querySelector<HTMLButtonElement>('.btn-rollback, .am-action-btn--rollback')?.click();
     await nextTick();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -444,6 +435,100 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
     expect(content).toMatch(/\.dialog-body\s*\{[^}]*min-height:\s*0/s);
     // 验证 .history-card 包含 flex-shrink: 0，防止卡片数量较多或展开时被压缩挤扁
     expect(content).toMatch(/\.history-card\s*\{[^}]*flex-shrink:\s*0/s);
+  });
+
+  it('verifies that header-thumb-trigger is removed, buttons use am-action-btn with tooltips, and manual restore is highlighted in red', async () => {
+    const mockBatch: deletionLogger.IDeletionBatch = {
+      id: 'batch_new_ui',
+      timestamp: Date.now(),
+      actionType: 'single-delete',
+      destination: 'os-trash',
+      items: [
+        {
+          fileName: 'pic_with_thumb.png',
+          originalRelativePath: 'data/assets/pic_with_thumb.png',
+          size: 4096,
+          thumbnail: 'data:image/webp;base64,mockthumb',
+          affectedBlocks: [
+            {
+              id: 'block_doc_test',
+              root_id: 'doc_20260922_long_title_note',
+            },
+          ],
+        },
+      ],
+      freedBytes: 4096,
+      canRollback: true,
+      isRolledBack: false,
+    };
+
+    vi.spyOn(deletionLogger, 'getDeletionHistory').mockResolvedValue([mockBatch]);
+    vi.spyOn(deletionLogger, 'getDeletionHistoryLimit').mockResolvedValue(10);
+
+    const isVisible = ref(true);
+    const Wrapper = {
+      components: { DeletionHistoryDialog },
+      setup() {
+        return { isVisible };
+      },
+      template: `<DeletionHistoryDialog :visible="isVisible" />`,
+    };
+
+    app = createApp(Wrapper);
+    app.mount(mountContainer);
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await nextTick();
+
+    // 1. 验证卡片头部取消并去除了“预览原图”标签
+    expect(mountContainer.querySelector('.header-thumb-trigger')).toBeNull();
+    expect(mountContainer.textContent).not.toContain('预览原图');
+
+    // 2. 验证顶部工具栏按钮具备显眼图标、文字 + tooltips
+    const recycleBtn = mountContainer.querySelector<HTMLButtonElement>('.am-action-btn--recycle');
+    expect(recycleBtn).not.toBeNull();
+    expect(recycleBtn?.textContent).toContain('回收站');
+    expect(recycleBtn?.classList.contains('b3-tooltips')).toBe(true);
+
+    const clearBtn = mountContainer.querySelector<HTMLButtonElement>('.am-action-btn--clear');
+    expect(clearBtn).not.toBeNull();
+    expect(clearBtn?.textContent).toContain('清空');
+    expect(clearBtn?.classList.contains('b3-tooltips')).toBe(true);
+
+    // 3. 验证卡片头部跳转文档按钮已去除，回退按钮具备文字 + tooltips
+    expect(mountContainer.querySelector('.card-header-right .am-action-btn--jump-doc')).toBeNull();
+
+    const rollbackBtn = mountContainer.querySelector<HTMLButtonElement>('.am-action-btn--rollback');
+    expect(rollbackBtn).not.toBeNull();
+    expect(rollbackBtn?.textContent).toContain('回退');
+    expect(rollbackBtn?.classList.contains('b3-tooltips')).toBe(true);
+
+    // 4. 展开卡片，验证明细表格中关联文档显示截短样式与 tooltip
+    mountContainer.querySelector<HTMLDivElement>('.history-card .card-header')?.click();
+    await nextTick();
+
+    const docJumpBtn = mountContainer.querySelector<HTMLButtonElement>('.doc-jump-btn');
+    expect(docJumpBtn).not.toBeNull();
+    expect(docJumpBtn?.querySelector('.doc-title-text')).not.toBeNull();
+    // 表格内使用原生 title 悬浮显示完整文件名/路径，不带 b3-tooltips 伪元素以防止触发表格容器滚动条
+    expect(docJumpBtn?.classList.contains('b3-tooltips')).toBe(false);
+    expect(docJumpBtn?.getAttribute('title')).toContain('doc_20260922_long_title_note');
+
+    // 验证复制清单按钮也具备图标+tooltips且向左弹出避免被截断
+    const copyBtn = mountContainer.querySelector<HTMLButtonElement>('.card-toolbar .am-action-btn--copy');
+    expect(copyBtn).not.toBeNull();
+    expect(copyBtn?.classList.contains('b3-tooltips')).toBe(true);
+    expect(copyBtn?.classList.contains('b3-tooltips__w')).toBe(true);
+    expect(copyBtn?.getAttribute('aria-label')).toBe('复制文件名清单');
+
+    // 5. 点击回退引用按钮，弹出回退前置弹窗，验证“手工还原”文案用红字凸显
+    rollbackBtn?.click();
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const dangerEmphasis = mountContainer.querySelector<HTMLSpanElement>('.text-danger-emphasis');
+    expect(dangerEmphasis).not.toBeNull();
+    expect(dangerEmphasis?.textContent).toBe('手工还原');
   });
 });
 

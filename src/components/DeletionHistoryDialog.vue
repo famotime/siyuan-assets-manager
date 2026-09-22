@@ -66,22 +66,22 @@
           </div>
 
           <button
-            class="am-btn am-btn--secondary btn-compact"
+            class="am-action-btn am-action-btn--recycle am-action-btn--with-text b3-tooltips b3-tooltips__sw"
             @click="handleOpenRecycleBin"
-            title="直接打开操作系统回收站窗口，以便检索与还原被删文件"
+            aria-label="打开操作系统回收站窗口（检索与手工还原文件）"
           >
-            <ExternalLink :size="13" />
-            <span>打开系统回收站</span>
+            <ExternalLink :size="14" style="fill: none !important;" />
+            <span>回收站</span>
           </button>
 
           <button
             v-if="historyList.length > 0"
-            class="am-btn am-btn--danger-outline btn-compact"
+            class="am-action-btn am-action-btn--clear am-action-btn--with-text b3-tooltips b3-tooltips__sw"
             @click="handleClearAll"
-            title="清空所有历史操作记录（不影响磁盘文件）"
+            aria-label="清空所有历史操作记录（不影响磁盘文件）"
           >
-            <Trash2 :size="13" />
-            <span>清空日志</span>
+            <Trash2 :size="14" style="fill: none !important;" />
+            <span>清空</span>
           </button>
         </div>
       </div>
@@ -124,19 +124,6 @@
                 可回退
               </span>
 
-              <!-- 单文件删除且有缩略图时，在头部提供快速悬浮预览入口 -->
-              <span
-                v-if="batch.items.length === 1 && batch.items[0]?.thumbnail"
-                class="header-thumb-trigger"
-                title="悬浮查看被删图片预览"
-                @mouseenter.stop="handleShowPreview($event, batch.items[0])"
-                @mousemove.stop="handleUpdatePreview($event)"
-                @mouseleave.stop="handleHidePreview"
-              >
-                <Image :size="14" class="header-thumb-icon" />
-                <span class="header-thumb-tip">预览原图</span>
-              </span>
-
               <span class="card-time">{{ formatTime(batch.timestamp) }}</span>
             </div>
 
@@ -145,27 +132,15 @@
                 <strong>{{ batch.items.length }}</strong> 个文件 · 释放 <strong>{{ formatSize(batch.freedBytes) }}</strong>
               </span>
 
-              <!-- 跳转到文档按钮（每张卡片内提供，无论是否已回退） -->
-              <button
-                class="am-btn am-btn--secondary btn-compact btn-jump-doc"
-                :class="{ 'is-disabled': !hasRelatedDocs(batch) }"
-                :disabled="!hasRelatedDocs(batch)"
-                @click.stop="handleJumpToDoc(batch)"
-                :title="getJumpToDocTitle(batch)"
-              >
-                <FileText :size="13" />
-                <span>跳转到文档</span>
-              </button>
-
-              <!-- 回退主按钮（支持去重批次与带引用的单文件/批量删除） -->
+              <!-- 回退主按钮（显眼图标 + 文字 + Tooltips） -->
               <button
                 v-if="batch.canRollback && !batch.isRolledBack"
-                class="am-btn am-btn--primary btn-compact"
+                class="am-action-btn am-action-btn--rollback am-action-btn--with-text btn-rollback b3-tooltips b3-tooltips__sw"
                 @click.stop="openRollbackConfirm(batch)"
-                title="逆向回退文档正文与属性视图中的图片引用"
+                aria-label="逆向回退文档正文与属性视图中的图片引用"
               >
-                <RotateCcw :size="13" />
-                <span>回退引用</span>
+                <RotateCcw :size="14" style="fill: none !important;" />
+                <span>回退</span>
               </button>
             </div>
           </div>
@@ -177,12 +152,12 @@
               <span class="card-detail-hint">被删文件明细（共 {{ batch.items.length }} 项，支持鼠标悬浮预览图片）：</span>
               <div class="card-toolbar-actions">
                 <button
-                  class="am-btn am-btn--secondary btn-compact"
+                  class="am-action-btn am-action-btn--copy b3-tooltips b3-tooltips__w"
                   @click="copyBatchFilePaths(batch)"
-                  title="一键复制所有文件路径/文件名到剪贴板，方便在操作系统回收站中检索"
+                  aria-label="复制文件名清单"
+                  title="一键复制本批次所有文件名到剪贴板，方便在操作系统回收站中检索"
                 >
-                  <Copy :size="12" />
-                  <span>复制文件清单</span>
+                  <Copy :size="14" style="fill: none !important;" />
                 </button>
               </div>
             </div>
@@ -196,7 +171,7 @@
                     <th style="width: 100px;">大小</th>
                     <th v-if="batch.actionType === 'deduplicate'">合并替换为主保留项</th>
                     <th v-if="batch.actionType === 'deduplicate'" style="width: 120px;">受影响引用</th>
-                    <th v-else style="width: 130px;">关联文档</th>
+                    <th v-else style="width: 170px;">关联文档</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -233,7 +208,7 @@
                         v-if="item.affectedBlocks && item.affectedBlocks.length > 0"
                         class="am-link-btn"
                         @click.stop="handleJumpToItemDoc(item)"
-                        title="点击跳转到引用所在的文档"
+                        :title="getItemDocTooltip(item)"
                       >
                         <FileText :size="11" />
                         <span>{{ item.affectedBlocks.length }} 处引用</span>
@@ -242,13 +217,13 @@
                     </td>
                     <td v-else class="doc-link-cell">
                       <button
-                        v-if="item.affectedBlocks && item.affectedBlocks.length > 0"
-                        class="am-link-btn"
+                        v-if="hasItemDoc(item)"
+                        class="am-link-btn doc-jump-btn"
+                        :title="getItemDocTooltip(item)"
                         @click.stop="handleJumpToItemDoc(item)"
-                        title="点击跳转到该文件所在文档"
                       >
-                        <FileText :size="11" />
-                        <span>跳转文档 ({{ getItemDocCount(item) }})</span>
+                        <FileText :size="12" class="doc-icon" style="fill: none !important;" />
+                        <span class="doc-title-text">{{ getItemDocDisplayTitle(item) }}</span>
                       </button>
                       <span v-else class="text-muted">无引用</span>
                     </td>
@@ -331,7 +306,7 @@
                 <p v-else>
                   <strong>【重要提示】</strong>此操作将自动恢复文档中被清理的图片引用语法。
                 </p>
-                <p><strong>物理资源文件请由您在操作系统回收站中手工还原回 <code>data/assets/</code> 目录。</strong></p>
+                <p><strong>物理资源文件请由您在操作系统回收站中<span class="text-danger-emphasis">手工还原</span>回 <code>data/assets/</code> 目录。</strong></p>
               </div>
             </div>
 
@@ -339,8 +314,13 @@
               <div class="checklist-header">
                 <span>需从系统回收站放回的文件清单（共 {{ rollbackChecklist.length }} 个）：</span>
                 <div class="checklist-header-actions">
-                  <button class="am-btn am-btn--secondary btn-compact" @click="copyChecklist">
-                    <Copy :size="12" /> 复制清单
+                  <button
+                    class="am-action-btn am-action-btn--copy b3-tooltips b3-tooltips__w"
+                    @click="copyChecklist"
+                    aria-label="复制待放回清单"
+                    title="复制待放回文件清单到剪贴板"
+                  >
+                    <Copy :size="14" style="fill: none !important;" />
                   </button>
                 </div>
               </div>
@@ -518,9 +498,68 @@ watch(
   }
 );
 
+const docInfoMap = ref<Map<string, { title: string; hpath: string }>>(new Map());
+
 async function loadData() {
   historyLimit.value = await getDeletionHistoryLimit();
   historyList.value = await getDeletionHistory();
+  await loadDocTitles();
+}
+
+/**
+ * 批量拉取所有被删文件关联文档的标题与可读路径
+ */
+async function loadDocTitles() {
+  const docIdsToFetch = new Set<string>();
+  for (const batch of historyList.value) {
+    for (const item of batch.items) {
+      if (item.affectedBlocks && item.affectedBlocks.length > 0) {
+        for (const ref of item.affectedBlocks) {
+          const docId = ref.root_id || ref.id;
+          if (docId && !docInfoMap.value.has(docId)) {
+            docIdsToFetch.add(docId);
+          }
+        }
+      }
+    }
+  }
+
+  if (docIdsToFetch.size === 0) return;
+
+  const idList = Array.from(docIdsToFetch);
+  const batchSize = 80;
+  for (let i = 0; i < idList.length; i += batchSize) {
+    const chunk = idList.slice(i, i + batchSize);
+    const sqlIds = chunk.map((id) => `'${id.replace(/'/g, "''")}'`).join(',');
+    try {
+      const rows = await sql(
+        `SELECT id, root_id, hpath, content FROM blocks WHERE id IN (${sqlIds}) OR root_id IN (${sqlIds})`
+      );
+      if (rows && Array.isArray(rows)) {
+        for (const row of rows) {
+          const docId = row.root_id || row.id;
+          let title = (row.content || '').trim();
+          if (!title && row.hpath) {
+            const segs = row.hpath.split('/').filter(Boolean);
+            title = segs.length > 0 ? segs[segs.length - 1] : row.hpath;
+          }
+          if (!title) {
+            title = docId;
+          }
+          const info = {
+            title,
+            hpath: row.hpath || '',
+          };
+          docInfoMap.value.set(docId, info);
+          if (row.id && !docInfoMap.value.has(row.id)) {
+            docInfoMap.value.set(row.id, info);
+          }
+        }
+      }
+    } catch (e) {
+      warn('[DeletionHistory] 查询文档标题出错:', e);
+    }
+  }
 }
 
 function handleClose() {
@@ -807,13 +846,65 @@ function getJumpToDocTitle(batch: IDeletionBatch): string {
  * 获取单个文件涉及的关联文档数量
  */
 function getItemDocCount(item: IDeletedItemRecord): number {
-  if (!item.affectedBlocks || item.affectedBlocks.length === 0) return 0;
+  return getItemDocIds(item).length;
+}
+
+/**
+ * 获取条目关联的所有有效文档 ID
+ */
+function getItemDocIds(item: IDeletedItemRecord): string[] {
+  if (!item.affectedBlocks || item.affectedBlocks.length === 0) return [];
   const docIds = new Set<string>();
   for (const ref of item.affectedBlocks) {
-    if (ref.root_id) docIds.add(ref.root_id);
-    else if (ref.id) docIds.add(ref.id);
+    const docId = ref.root_id || ref.id;
+    if (docId) docIds.add(docId);
   }
-  return docIds.size;
+  return Array.from(docIds);
+}
+
+/**
+ * 判断条目是否有可跳转的关联文档
+ */
+function hasItemDoc(item: IDeletedItemRecord): boolean {
+  return getItemDocIds(item).length > 0;
+}
+
+/**
+ * 获取明细行中显示的关联文档简称（单篇显示标题，多篇显示首篇加篇数）
+ */
+function getItemDocDisplayTitle(item: IDeletedItemRecord): string {
+  const docIds = getItemDocIds(item);
+  if (docIds.length === 0) return '无引用';
+  const firstId = docIds[0];
+  const info = docInfoMap.value.get(firstId);
+  const firstTitle = info?.title || firstId;
+
+  if (docIds.length === 1) {
+    return firstTitle;
+  }
+  return `${firstTitle} 等 ${docIds.length} 篇`;
+}
+
+/**
+ * 获取明细行悬浮显示的完整文档名或多文档清单
+ */
+function getItemDocTooltip(item: IDeletedItemRecord): string {
+  const docIds = getItemDocIds(item);
+  if (docIds.length === 0) return '该条目未被任何文档引用';
+
+  if (docIds.length === 1) {
+    const info = docInfoMap.value.get(docIds[0]);
+    if (info?.hpath) {
+      return `跳转到文档：${info.hpath}`;
+    }
+    return `跳转到文档：${info?.title || docIds[0]}`;
+  }
+
+  const titles = docIds.map((id) => {
+    const info = docInfoMap.value.get(id);
+    return info?.hpath || info?.title || id;
+  });
+  return `关联 ${docIds.length} 篇文档，点击跳转打开：\n${titles.join('\n')}`;
 }
 
 /**
@@ -1067,7 +1158,7 @@ async function handleJumpToItemDoc(item: IDeletedItemRecord) {
   border: 1px solid var(--b3-border-color);
   border-radius: 6px;
   background: var(--b3-theme-surface, var(--b3-theme-background));
-  overflow: hidden;
+  overflow: visible;
   transition: border-color 0.15s ease;
 
   &:hover {
@@ -1250,11 +1341,14 @@ async function handleJumpToItemDoc(item: IDeletedItemRecord) {
   display: flex;
   align-items: center;
   gap: 8px;
+  position: relative;
+  z-index: 3;
 }
 
 .files-table-container {
   max-height: 220px;
   overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--b3-border-color);
   border-radius: 4px;
 }
@@ -1568,33 +1662,143 @@ async function handleJumpToItemDoc(item: IDeletedItemRecord) {
   color: #dc2626;
 }
 
-// 头部缩略图预览触发小胶囊
-.header-thumb-trigger {
+.text-danger-emphasis {
+  color: var(--b3-theme-error, #ef4444);
+  font-weight: bold;
+}
+
+.doc-jump-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 1px 7px;
-  border-radius: 12px;
-  background: var(--b3-theme-surface-lighter, rgba(128, 128, 128, 0.12));
-  border: 1px solid var(--b3-border-color);
-  font-size: 11px;
-  color: var(--b3-theme-primary);
-  cursor: pointer;
-  transition: all 0.15s ease;
+  max-width: 150px;
+  line-height: 1.2;
 
-  &:hover {
-    background: var(--b3-theme-primary);
-    color: var(--b3-theme-on-primary, #fff);
-    border-color: var(--b3-theme-primary);
+  .doc-icon {
+    flex-shrink: 0;
+  }
+
+  .doc-title-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
-.header-thumb-icon {
+/* 显眼图标操作按钮体系（与资源浏览界面风格统一） */
+.am-action-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
   flex-shrink: 0;
-}
 
-.header-thumb-tip {
-  font-size: 11px;
+  &:active {
+    transform: translateY(0);
+  }
+
+  &--with-text {
+    width: auto;
+    padding: 0 10px;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  :deep(svg) {
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: 2px !important;
+    pointer-events: none;
+  }
+
+  // 1. 打开系统回收站按钮：翡翠绿/系统资源风
+  &--recycle {
+    color: #059669;
+    background: color-mix(in srgb, #059669 10%, transparent);
+    border-color: color-mix(in srgb, #059669 28%, transparent);
+
+    &:hover {
+      background: color-mix(in srgb, #059669 18%, transparent);
+      border-color: #059669;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(5, 150, 105, 0.15);
+    }
+  }
+
+  // 2. 清空日志按钮：警示红 (Danger Red)
+  &--clear {
+    color: var(--b3-theme-error, #ef4444);
+    background: color-mix(in srgb, var(--b3-theme-error, #ef4444) 10%, transparent);
+    border-color: color-mix(in srgb, var(--b3-theme-error, #ef4444) 28%, transparent);
+
+    &:hover {
+      background: color-mix(in srgb, var(--b3-theme-error, #ef4444) 20%, transparent);
+      border-color: var(--b3-theme-error, #ef4444);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+    }
+  }
+
+  // 3. 跳转文档按钮：沉稳主色蓝
+  &--jump-doc {
+    color: var(--b3-theme-primary);
+    background: color-mix(in srgb, var(--b3-theme-primary) 10%, transparent);
+    border-color: color-mix(in srgb, var(--b3-theme-primary) 28%, transparent);
+
+    &:hover {
+      background: color-mix(in srgb, var(--b3-theme-primary) 18%, transparent);
+      border-color: var(--b3-theme-primary);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    &.is-disabled,
+    &:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      pointer-events: none;
+      filter: grayscale(0.6);
+    }
+  }
+
+  // 4. 回退引用按钮：主色蓝色实心高光
+  &--rollback {
+    color: var(--b3-theme-on-primary, #fff);
+    background: var(--b3-theme-primary);
+    border-color: var(--b3-theme-primary);
+
+    &:hover {
+      background: color-mix(in srgb, var(--b3-theme-primary) 85%, #000);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    }
+  }
+
+  // 5. 复制清单按钮：紧凑工具栏图标
+  &--copy {
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    color: var(--b3-theme-on-surface);
+    background: var(--b3-theme-surface-lighter, rgba(128, 128, 128, 0.1));
+    border-color: var(--b3-border-color);
+
+    &:hover {
+      color: var(--b3-theme-primary);
+      border-color: var(--b3-theme-primary);
+      background: color-mix(in srgb, var(--b3-theme-primary) 12%, transparent);
+      transform: translateY(-1px);
+    }
+  }
 }
 
 .file-name-inner {
