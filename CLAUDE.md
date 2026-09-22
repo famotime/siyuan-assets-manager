@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) and coding agents wh
 
 | Command | Description |
 |---|---|
-| `npm test` | 运行全部 Vitest 单元测试（32 个测试文件 / 273+ 测试） |
+| `npm test` | 运行全部 Vitest 单元测试（39 个测试文件 / 356 测试） |
 | `npx vitest run tests/<file>.test.ts` | 运行单文件单元测试（如 `tests/asset-workflow.test.ts`） |
 | `npm run build` | 生产构建，输出到 `dist/` 并打包 `package.zip` |
 | `npm run dev` | Watch 构建至 `.env` 中 `VITE_SIYUAN_WORKSPACE_PATH` 配置的插件目录 |
@@ -24,8 +24,8 @@ This file provides guidance to Claude Code (claude.ai/code) and coding agents wh
 1. **Secondary Image Editing (矢量二次编辑)**:
    - 标注（矩形/箭头/序号/文字）以矢量结构保存在思源图像块属性 `custom-asset-reedit` 中，自动采用 `lz-string` 自适应压缩。
    - 原始干净底图隔离归档在 `/data/storage/petal/siyuan-assets-manager/originals/`，防止原生清理误删，二次编辑时底图无残留重影。
-2. **Business Workflow Layer (`src/utils/asset-workflow.ts`)**:
-   - 集中封装图片保存编辑工作流（保存位图、更新引用、归档底图、写入 `custom-asset-reedit` 块属性、原图删除确认）与重命名工作流，与 Vue 组件解耦。
+2. **Business Workflow Layer (`src/utils/asset-workflow.ts`, `src/utils/cleanup-workflow.ts`)**:
+   - 集中封装图片保存编辑工作流、重命名工作流、单文件/批量删除与综合清理业务编排，与 Vue 组件彻底解耦。
 3. **Image Export & Layer Restoration**:
    - `src/utils/image-editor.ts`: 导出流水线（`prepareCanvasExport`）、画布重置（`resetCanvasObjects`）、100% 分辨率换算、Alpha 像素级透明切边。
    - `src/utils/tui-image-editor-bridge.ts`: 抽取 Fabric 矢量图层、反序列化注入 Fabric Canvas、序号-形状双向关联恢复。
@@ -36,21 +36,32 @@ This file provides guidance to Claude Code (claude.ai/code) and coding agents wh
 |---|---|
 | `src/index.ts` | 插件类入口，顶栏图标、图片右键菜单（感知二次编辑状态） |
 | `src/App.vue` | 顶层弹窗与交互编排 |
-| `src/components/AssetsManager.vue` | 资源管理主面板：搜索、多维筛选、悬浮预览、孤儿/孤立底图清理 |
+| `src/components/AssetsManager.vue` | 资源管理主面板：搜索、多维筛选、平铺与文档归类切换、操作栏编排 |
+| `src/components/AssetMediaPreview.vue` | 媒体悬浮预览：图片、音视频悬浮播放器（默认静音、播放/暂停、快进、音频律动） |
 | `src/components/VirtualAssetList.vue` | 虚拟滚动列表：高性能渲染、类型徽章（`getAssetBadgeText`） |
+| `src/components/DocumentAssetGroupList.vue` | 按文档归类视图：扁平化虚拟列表与文档层级折叠 |
+| `src/components/DeletionHistoryDialog.vue` | 删除历史弹窗：容量配置、分类筛选、系统回收站跳转与逆向回退确认 |
+| `src/components/DeletionHistoryCard.vue` | 删除历史单批次卡片：折叠展开、明细表格、文档跳转与回退报告 |
 | `src/components/ImageEditorDialog.vue` | 图片编辑弹窗：图层注入还原、重置底图、合并固化、保存导出 |
+| `src/utils/cleanup-workflow.ts` | 单文件删除、批量删除与孤儿/孤立底图综合清理长业务编排服务层 |
 | `src/utils/asset-workflow.ts` | 保存编辑与重命名业务编排服务层 |
+| `src/utils/deduplicate.ts` | 去重扫描门面、大小分桶与感知哈希调度流水线、缓存持久化 |
+| `src/utils/dedup-hash.ts` | 图像 SHA-256、保底哈希与 64 位 dHash 感知哈希纯算法计算层 |
+| `src/utils/dedup-normalize.ts` | 去重归一化合并工作流层：引用重定向、数据库单元格改写与快照记录 |
+| `src/utils/editor-tools.ts` | 图片编辑器工具栏配置与 SVG 图标常量层 |
+| `src/utils/plugin-settings.ts` | 插件原生设置弹窗 DOM 构建与配置数据持久化 |
 | `src/utils/reedit-data.ts` | 二次编辑元数据自适应压缩/解压、HTML 实体兼容与校验 |
 | `src/utils/tui-image-editor-bridge.ts` | Fabric 矢量图层提取/注入/反序列化桥接 |
 | `src/utils/file-system.ts` | 资源文件与隔离底图存储（Electron FS 直写 / Web API 回退） |
 | `src/utils/siyuan-block.ts` | 块引用替换/清理、`custom-asset-reedit` 属性读写与批量查询 |
 | `src/utils/siyuan-db.ts` | 资源文件聚合、引用统计、孤立底图扫描与清理 |
+| `src/utils/rollback-engine.ts` | 批次逆向回退引擎：快照还原块正文、属性视图单元格与回退文件预检 |
+| `src/utils/rollback-anchor.ts` | AST 文档序位置锚点采集与还原再锚定链 |
 | `src/utils/image-editor.ts` | 导出流水线、画布重置、分辨率换算、Alpha 切边 |
 | `src/utils/asset-list.ts` | 资源过滤、排序、扩展名拆分、图标徽章、大小格式化与清理统计 |
 | `src/utils/asset-actions.ts` | 编辑后命名生成、重命名校验与扩展名决策 |
 | `src/utils/asset-markdown.ts` | Markdown 中 `assets/` 引用解析、正则转义、替换与移除 |
-| `src/api.ts` | 思源 Kernel 9 个核心 API 封装（SQL、通知、文件、块与属性） |
-| `src/utils/deduplicate.ts` | 去重扫描三阶段（size 分桶 → 精确哈希 → 感知哈希）、指纹复用增量、分组归一化、稳定组身份、缓存持久化 |
+| `src/api.ts` | 思源 Kernel 核心 API 封装（SQL、通知、文件、块与属性） |
 | `src/utils/dedup-fingerprint-store.ts` | per-asset 指纹失效校验、裁剪与持久化；仅走 `plugin.saveData` |
 | `src/utils/concurrency.ts` | 保序并发池：在飞数受限、可中止、进度上报 |
 

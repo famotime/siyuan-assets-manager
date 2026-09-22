@@ -1,11 +1,6 @@
-import { readAssetFile, deleteAsset, readAssetMetadataFile, saveAssetMetadataFile, isTrashSupported } from './file-system';
-import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, verifyAssetZeroReferences, getImageBlockReEditData, setImageBlockReEditData } from './siyuan-block';
-import { replaceAssetInAttributeViews, captureAttributeViewAssetCells, type IAffectedViewCell } from './attribute-view';
-import type { AssetInfo, BlockRef } from './siyuan-db';
-import type { IAssetReEditMetadata } from '../types/reedit';
+import { readAssetFile } from './file-system';
+import type { AssetInfo } from './siyuan-db';
 import { usePlugin } from './plugin-context';
-import { recordDeletionBatch, type IDeletedItemRecord, type DeleteDestination } from './deletion-logger';
-import { captureAssetThumbnail } from './image-editor';
 import {
   createEmptyFingerprintStore,
   isFingerprintValid,
@@ -15,6 +10,34 @@ import {
 } from './dedup-fingerprint-store';
 import { log, warn, error } from './logger';
 import { mapWithConcurrency, normalizeConcurrency } from './concurrency';
+
+// 重新导出纯算法模块中的函数与常量
+export {
+  IMAGE_EXTENSIONS,
+  isImageFile,
+  blobToArrayBuffer,
+  computeFileHash,
+  computeDHashFromGrayscale,
+  computeImageDHash,
+  calculateHammingDistance,
+  calculateDHashSimilarity,
+} from './dedup-hash';
+
+// 重新导出归一化合并工作流模块
+export {
+  normalizeDuplicateGroup,
+  batchNormalizeDuplicateGroups,
+  type INormalizeStats,
+  type INormalizeOptions,
+} from './dedup-normalize';
+
+import {
+  isImageFile,
+  computeFileHash,
+  computeImageDHash,
+  calculateHammingDistance,
+  calculateDHashSimilarity,
+} from './dedup-hash';
 
 export type DeduplicateMode = 'exact' | 'similar';
 
@@ -62,19 +85,6 @@ export interface IDeduplicateScanResult {
   stats: IDeduplicateScanStats;
 }
 
-export interface INormalizeStats {
-  affectedDocsCount: number;
-  affectedBlocksCount: number;
-  deletedFilesCount: number;
-  freedBytes: number;
-  /** 归一化未完全成功（安全复核拦截、物理删除失败等）的冗余资源数；已改写部分仍留有回退记录 */
-  failedItemsCount: number;
-}
-
-const IMAGE_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'svg', 'ico', 'avif', 'tiff'
-]);
-
 /** 阶段二并发度：IO + crypto.subtle.digest，后者真异步且不占主线程，每项仅一个 Blob */
 export const DEFAULT_HASH_CONCURRENCY = 8;
 /**
@@ -82,15 +92,6 @@ export const DEFAULT_HASH_CONCURRENCY = 8;
  * 内存是硬约束。故显著低于阶段二。
  */
 export const DEFAULT_DECODE_CONCURRENCY = 3;
-
-/**
- * 判断是否为图片资源
- */
-export function isImageFile(fileName: string): boolean {
-  if (!fileName) return false;
-  const ext = fileName.split('.').pop()?.toLowerCase() || '';
-  return IMAGE_EXTENSIONS.has(ext);
-}
 
 /**
  * 第一阶段：按文件大小快速初筛
@@ -119,198 +120,7 @@ export function groupBySize(assets: AssetInfo[]): Map<number, AssetInfo[]> {
   return duplicateSizeMap;
 }
 
-/**
- * 安全地将 Blob 转换为 ArrayBuffer (兼容各类环境)
- */
-export async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
-  if (typeof (blob as any).arrayBuffer === 'function') {
-    return await (blob as any).arrayBuffer();
-  }
-  if (typeof (blob as any).bytes === 'function') {
-    const bytes = await (blob as any).bytes();
-    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-  }
-  if (typeof (blob as any).text === 'function') {
-    try {
-      const text = await (blob as any).text();
-      const encoder = new TextEncoder();
-      const u8 = encoder.encode(text);
-      return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
-    } catch (e) {}
-  }
-  return new Promise((resolve) => {
-    if (typeof FileReader === 'undefined') {
-      resolve(new ArrayBuffer(0));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (event: any) => {
-      const res = event?.target?.result || reader.result;
-      resolve(res as ArrayBuffer);
-    };
-    reader.onerror = () => {
-      resolve(new ArrayBuffer(0));
-    };
-    reader.readAsArrayBuffer(blob);
-  });
-}
 
-/**
- * 计算 Blob 数据的 SHA-256 哈希值
- */
-export async function computeFileHash(blob: Blob): Promise<string> {
-  const arrayBuffer = await blobToArrayBuffer(blob);
-  if (typeof crypto !== 'undefined' && crypto.subtle) {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  // 简易保底哈希算法（极端无 crypto.subtle 环境）
-  const u8 = new Uint8Array(arrayBuffer);
-  let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
-  for (let i = 0; i < u8.length; i++) {
-    const ch = u8[i];
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(16, '0');
-}
-
-/**
- * 基于 9x8 灰度矩阵生成 64-bit dHash（差异哈希）
- * 比较水平相邻像素亮度差，每行 8 次比较，共 64 位
- */
-export function computeDHashFromGrayscale(grayMatrix: number[][]): string {
-  let bits = '';
-  for (let row = 0; row < 8; row++) {
-    for (let col = 0; col < 8; col++) {
-      const left = grayMatrix[row]?.[col] ?? 0;
-      const right = grayMatrix[row]?.[col + 1] ?? 0;
-      bits += left > right ? '1' : '0';
-    }
-  }
-  return bits.padEnd(64, '0');
-}
-
-/**
- * 从图片 Blob 计算 dHash 感知哈希与分辨率
- */
-export async function computeImageDHash(blob: Blob): Promise<{ dHash: string; width: number; height: number } | null> {
-  return new Promise((resolve) => {
-    if (typeof document === 'undefined' || typeof Image === 'undefined') {
-      resolve(null);
-      return;
-    }
-
-    const img = new Image();
-    let url = '';
-    try {
-      url = typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL(blob) : '';
-    } catch (e) {
-      resolve(null);
-      return;
-    }
-
-    let isDone = false;
-    const timer = setTimeout(() => {
-      if (!isDone) {
-        isDone = true;
-        if (url) {
-          try { URL.revokeObjectURL(url); } catch (e) {}
-        }
-        resolve(null);
-      }
-    }, 1500);
-
-    const cleanup = () => {
-      isDone = true;
-      clearTimeout(timer);
-      if (url) {
-        try { URL.revokeObjectURL(url); } catch (e) {}
-      }
-    };
-
-    img.crossOrigin = 'anonymous';
-
-    img.onload = () => {
-      if (isDone) return;
-      try {
-        const width = img.naturalWidth || img.width || 0;
-        const height = img.naturalHeight || img.height || 0;
-
-        const canvas = document.createElement('canvas');
-        canvas.width = 9;
-        canvas.height = 8;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) {
-          cleanup();
-          resolve(null);
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, 9, 8);
-        const imgData = ctx.getImageData(0, 0, 9, 8);
-        const data = imgData.data;
-
-        const grayMatrix: number[][] = [];
-        for (let row = 0; row < 8; row++) {
-          const rowData: number[] = [];
-          for (let col = 0; col < 9; col++) {
-            const idx = (row * 9 + col) * 4;
-            const r = data[idx];
-            const g = data[idx + 1];
-            const b = data[idx + 2];
-            // 标准灰度加权公式
-            const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-            rowData.push(gray);
-          }
-          grayMatrix.push(rowData);
-        }
-
-        const dHash = computeDHashFromGrayscale(grayMatrix);
-        cleanup();
-        resolve({ dHash, width, height });
-      } catch (err) {
-        warn('[deduplicate] computeImageDHash error:', err);
-        cleanup();
-        resolve(null);
-      }
-    };
-
-    img.onerror = () => {
-      if (isDone) return;
-      cleanup();
-      resolve(null);
-    };
-
-    img.src = url;
-  });
-}
-
-/**
- * 计算两个 64-bit 哈希的汉明距离（不同位的数量，0~64）
- */
-export function calculateHammingDistance(hashA: string, hashB: string): number {
-  if (!hashA || !hashB || hashA.length !== hashB.length) return 64;
-  let dist = 0;
-  for (let i = 0; i < hashA.length; i++) {
-    if (hashA[i] !== hashB[i]) {
-      dist++;
-    }
-  }
-  return dist;
-}
-
-/**
- * 将汉明距离转换为 0.0 ~ 1.0 的相似度百分比
- */
-export function calculateDHashSimilarity(hashA: string, hashB: string): number {
-  const dist = calculateHammingDistance(hashA, hashB);
-  return Math.max(0, 1 - dist / 64);
-}
 
 /**
  * 候选主资源智能评分算法
@@ -790,260 +600,7 @@ export async function scanDuplicates(
   return { exactGroups, similarGroups, fingerprints, stats: { reused, computed } };
 }
 
-export interface INormalizeOptions {
-  skipRecordBatch?: boolean;
-  outRecords?: IDeletedItemRecord[];
-}
 
-/**
- * 对单个重复组执行归一化合并
- */
-export async function normalizeDuplicateGroup(
-  group: IDuplicateGroup,
-  assetsMap?: Map<string, AssetInfo>,
-  options?: INormalizeOptions
-): Promise<INormalizeStats> {
-  const stats: INormalizeStats = {
-    affectedDocsCount: 0,
-    affectedBlocksCount: 0,
-    deletedFilesCount: 0,
-    freedBytes: 0,
-    failedItemsCount: 0,
-  };
-
-  const canonicalName = group.canonicalAssetName;
-  if (!canonicalName) {
-    throw new Error('未指定主保留资源文件');
-  }
-
-  const canonicalItem = group.items.find(it => it.asset.name === canonicalName);
-  const canonicalAsset = canonicalItem?.asset || assetsMap?.get(canonicalName);
-
-  // 检查主资源是否携带二次编辑元数据
-  let canonicalReEditMeta: IAssetReEditMetadata | null = null;
-  try {
-    canonicalReEditMeta = await readAssetMetadataFile(canonicalName);
-  } catch (e) {}
-
-  if (!canonicalReEditMeta && canonicalAsset?.isReEditable && canonicalAsset.reEditBlockId) {
-    try {
-      canonicalReEditMeta = await getImageBlockReEditData(canonicalAsset.reEditBlockId);
-    } catch (e) {
-      warn(`[deduplicate] 获取主资源二次编辑元数据失败:`, e);
-    }
-  }
-
-  if (canonicalReEditMeta) {
-    try {
-      await saveAssetMetadataFile(canonicalName, canonicalReEditMeta);
-    } catch (e) {}
-  }
-
-  const affectedRootIds = new Set<string>();
-  const deletedItemRecords: IDeletedItemRecord[] = [];
-
-  // 采集冗余资源在数据库中被引用的单元格快照：多对一合并的逆向还原必须按单元格进行，
-  // 否则按名全局反替换会把来自其它冗余图、以及本来就是主图的单元格一起改错
-  let viewCellsByName = new Map<string, IAffectedViewCell[]>();
-  const redundantNames = group.items
-    .filter((it) => it.asset.name !== canonicalName)
-    .map((it) => it.asset.name);
-  if (redundantNames.length > 0) {
-    try {
-      viewCellsByName = await captureAttributeViewAssetCells(redundantNames);
-    } catch (cellsErr) {
-      warn('[deduplicate] 采集数据库单元格快照失败，回退时将退回按名替换:', cellsErr);
-    }
-  }
-
-  for (const item of group.items) {
-    if (item.asset.name === canonicalName) continue;
-
-    const redundant = item.asset;
-    const markdownSnapshots: Record<string, string> = {};
-    const ialSnapshots: Record<string, Record<string, string>> = {};
-    const affectedViews = viewCellsByName.get(redundant.name) || [];
-
-    let combinedRefs: BlockRef[] = [];
-    let thumbnail: string | undefined;
-    let refsChanged = false;
-    let viewFilesChanged = 0;
-    let deleted = false;
-    let failureReason = '';
-
-    try {
-      // 1. 动态全库实时查询最新引用块，防止读取过期缓存导致漏掉后来新建或修改的文档
-      const latestRefs = await queryCurrentAssetBlockReferences(redundant.name);
-      const refMap = new Map<string, BlockRef>();
-      for (const r of (redundant.references || [])) {
-        if (r.id) refMap.set(r.id, r);
-      }
-      for (const r of latestRefs) {
-        if (r.id) refMap.set(r.id, r);
-      }
-      combinedRefs = Array.from(refMap.values());
-
-      if (combinedRefs.length > 0) {
-        // 2. 替换正文 Markdown 及 IAL 块属性（如封面图 title-img、custom-data-assets），
-        //    同时采集替换前的原始快照，供逆向回退精确还原
-        await replaceAssetInBlocks(combinedRefs, redundant.name, canonicalName, {
-          captureSnapshots: { markdown: markdownSnapshots, attrs: ialSnapshots },
-        });
-        stats.affectedBlocksCount += combinedRefs.length;
-        for (const r of combinedRefs) {
-          if (r.root_id) affectedRootIds.add(r.root_id);
-        }
-      }
-      refsChanged =
-        Object.keys(markdownSnapshots).length > 0 || Object.keys(ialSnapshots).length > 0;
-
-      // 3. 属性视图 (Attribute View) 全局原子替换（即便正文未引用，AV 中仍可能有引用）；
-      //    replaceAssetInBlocks 内部会同步一次，这里保留显式调用以覆盖"正文无引用"的情形
-      try {
-        viewFilesChanged = await replaceAssetInAttributeViews(redundant.name, canonicalName);
-      } catch (avErr) {
-        error(`[deduplicate] 归一化更新数据库属性视图失败:`, avErr);
-        throw avErr;
-      }
-
-      // 4. 【核心生死线】删除前强制二次安全复核 (Pre-delete Double Check)
-      // 结合思源内核事务主动刷新与内存 AST 树穿透核查，确认全库旧文件引用数确已为 0。
-      // 若经真实 AST 深度核查后仍有真实残留引用，坚决禁止删除物理文件！
-      const { isClean, remainingBlocks } = await verifyAssetZeroReferences(redundant.name);
-      if (!isClean && remainingBlocks.length > 0) {
-        throw new Error(
-          `[去重安全拦截] 冗余资源 [${redundant.name}] 尚有 ${remainingBlocks.length} 处文档引用未完成替换，已终止删除该物理文件！受影响块ID: ${remainingBlocks
-            .map((b) => b.id)
-            .slice(0, 3)
-            .join(', ')}`
-        );
-      }
-
-      // 5. 确认 0 引用后，安全删除多余冗余物理文件
-      try {
-        thumbnail = await captureAssetThumbnail(`/assets/${redundant.name}`);
-      } catch {}
-
-      if (!(await deleteAsset(redundant.name))) {
-        throw new Error(`删除冗余资源 [${redundant.name}] 失败：文件可能已不存在或不可写`);
-      }
-      deleted = true;
-      stats.deletedFilesCount += 1;
-      stats.freedBytes += redundant.size || 0;
-      log(`[deduplicate] 成功归一化并安全删除冗余资源: ${redundant.name}`);
-    } catch (itemErr) {
-      // 单条冗余失败不再中断整组/整批：引用可能已被改写，必须继续为已完成的部分留下回退记录
-      failureReason = itemErr instanceof Error ? itemErr.message : String(itemErr);
-      error(`[deduplicate] 冗余资源 ${redundant.name} 归一化未完全成功:`, itemErr);
-      stats.failedItemsCount += 1;
-    }
-
-    // 只要替换环节跑过且随后失败了，引用就可能已被部分改写 —— 必须留下回退记录，
-    // 否则会出现"引用改了、文件还在、日志没记录"的不可回退中间态
-    const replacementRan = combinedRefs.length > 0 || affectedViews.length > 0;
-    const anythingChanged =
-      refsChanged || viewFilesChanged > 0 || deleted || (Boolean(failureReason) && replacementRan);
-
-    if (anythingChanged) {
-      const record: IDeletedItemRecord = {
-        fileName: redundant.name,
-        originalRelativePath: `data/assets/${redundant.name}`,
-        size: redundant.size || 0,
-        canonicalName,
-        thumbnail,
-        affectedBlocks: combinedRefs.map((r) => ({ id: r.id, root_id: r.root_id })),
-        originalMarkdownSnippets:
-          Object.keys(markdownSnapshots).length > 0 ? markdownSnapshots : undefined,
-        originalIalSnapshots: Object.keys(ialSnapshots).length > 0 ? ialSnapshots : undefined,
-        affectedViews: affectedViews.length > 0 ? affectedViews : undefined,
-        partialFailure: failureReason ? true : undefined,
-        failureReason: failureReason || undefined,
-      };
-      deletedItemRecords.push(record);
-      if (options?.outRecords) {
-        options.outRecords.push(record);
-      }
-    }
-  }
-
-  stats.affectedDocsCount = affectedRootIds.size;
-  // 有未能完整归一的条目时保持未处理状态，便于用户处理后重试，而不是被静默标记为已完成
-  group.isProcessed = 0 === stats.failedItemsCount;
-
-  // 记录单组删除批次
-  if (!options?.skipRecordBatch && deletedItemRecords.length > 0) {
-    const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
-    try {
-      await recordDeletionBatch({
-        actionType: 'deduplicate',
-        destination,
-        items: deletedItemRecords,
-        freedBytes: stats.freedBytes,
-        canRollback: true,
-      });
-    } catch (logErr) {
-      warn('[deduplicate] 记录删除批次失败:', logErr);
-    }
-  }
-
-  return stats;
-}
-
-/**
- * 批量执行多个重复组归一化合并
- */
-export async function batchNormalizeDuplicateGroups(
-  groups: IDuplicateGroup[],
-  assetsMap?: Map<string, AssetInfo>,
-  onProgress?: (current: number, total: number) => void
-): Promise<INormalizeStats> {
-  const totalStats: INormalizeStats = {
-    affectedDocsCount: 0,
-    affectedBlocksCount: 0,
-    deletedFilesCount: 0,
-    freedBytes: 0,
-    failedItemsCount: 0,
-  };
-
-  const pendingGroups = groups.filter(g => !g.isProcessed && !g.isIgnored);
-  let processed = 0;
-  const allBatchRecords: IDeletedItemRecord[] = [];
-
-  for (const group of pendingGroups) {
-    const singleStats = await normalizeDuplicateGroup(group, assetsMap, {
-      skipRecordBatch: true,
-      outRecords: allBatchRecords,
-    });
-    totalStats.affectedDocsCount += singleStats.affectedDocsCount;
-    totalStats.affectedBlocksCount += singleStats.affectedBlocksCount;
-    totalStats.deletedFilesCount += singleStats.deletedFilesCount;
-    totalStats.freedBytes += singleStats.freedBytes;
-    totalStats.failedItemsCount += singleStats.failedItemsCount;
-
-    processed++;
-    if (onProgress) {
-      onProgress(processed, pendingGroups.length);
-    }
-  }
-
-  // 批量记录统一去重批次
-  if (allBatchRecords.length > 0) {
-    const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
-    try {
-      await recordDeletionBatch({
-        actionType: 'deduplicate',
-        destination,
-        items: allBatchRecords,
-        freedBytes: totalStats.freedBytes,
-        canRollback: true,
-      });
-    } catch (logErr) {
-      warn('[deduplicate] 批量记录删除批次失败:', logErr);
-    }
-  }
-
-  return totalStats;
-}
 
 // -------------------------------------------------------------
 // 持久化存储相关

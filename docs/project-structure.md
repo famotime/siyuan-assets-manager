@@ -39,36 +39,46 @@
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/components/AssetsManager.vue` | 资源管理主面板；加载资源、多维筛选（含可二次编辑）、大图预览、定位引用、删除、清理孤儿资源与清理孤立底图 |
+| `src/components/AssetsManager.vue` | 资源管理主面板；加载资源、多维筛选（含可二次编辑）、平铺与文档归类视图切换、操作工具栏编排 |
+| `src/components/AssetMediaPreview.vue` | 媒体悬浮预览子组件；支持图片大图自适应、音视频悬浮播放器（默认静音、进度快进、播放/暂停、音频声波律动与动态定位） |
 | `src/components/VirtualAssetList.vue` | 虚拟滚动资源列表；负责列表高性能渲染、非图片类型徽章展示（`getAssetBadgeText`）、`[可二次编辑]` 徽标展示和行级操作事件 |
 | `src/components/DocumentAssetGroupList.vue` | 按文档归类视图；把分组摊平成行序列后交由 `useVirtualList` 开窗渲染，折叠的文档不产生资源行，行高由 `DOC_ROW_HEIGHTS` 内联绑定 |
+| `src/components/DeletionHistoryDialog.vue` | 删除审计与回退历史弹窗；历史记录容量配置、分类筛选（全部/去重/清理/手动）、系统回收站跳转、清空日志、悬浮缩略图与逆向回退确认 |
+| `src/components/DeletionHistoryCard.vue` | 单批次操作卡片子组件；展示批次类型徽章、去向、时间、文件与容量统计、展开明细表格、关联文档快速跳转、回退报告与一键回退 |
 | `src/components/ImageEditorDialog.vue` | TUI Image Editor 弹窗；支持二次编辑模式、干净原始底图加载与矢量图层注入还原、重置为原始底图、合并固化图层、高保真导出与保存 |
 | `src/components/ConfirmDialog.vue` | 通用确认对话框组件 |
 
-## 工具模块
+## 工具与服务层模块
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/utils/asset-workflow.ts` | 业务服务层；封装图片保存编辑工作流（位图保存、引用更新、底图归档、属性同步写入、原图删除）与资源重命名工作流 |
+| `src/utils/cleanup-workflow.ts` | 删除与清理业务编排服务层；集中封装单文件删除、批量删除与综合清理长流程，实现二次确认提示、底图警告、文件删除、引用清理与审计批次记录 |
+| `src/utils/asset-workflow.ts` | 保存编辑与重命名长业务编排服务层；封装图片保存编辑工作流（位图保存、引用更新、底图归档、属性同步写入、原图删除）与资源重命名工作流 |
+| `src/utils/deduplicate.ts` | 去重扫描门面与调度流水线（大小分桶 → SHA-256 → 感知哈希）、指纹增量复用、多组归一化合并与缓存持久化 |
+| `src/utils/dedup-hash.ts` | 图像感知哈希算法纯计算层；提供高效 SHA-256 计算、环境保底哈希、9x8 灰度矩阵 64 位 dHash 生成与汉明距离计算 |
+| `src/utils/dedup-normalize.ts` | 去重归一化合并工作流层；执行单组冗余合并、块引用重定向、数据库单元格改写、二次编辑元数据迁移、合并前快照采集与物理文件删除 |
+| `src/utils/dedup-fingerprint-store.ts` | per-asset 指纹（sha256/dHash/分辨率）的失效校验、裁剪与持久化；仅走 `plugin.saveData`，不落 localStorage |
+| `src/utils/editor-tools.ts` | 图片编辑器工具栏配置与 SVG 图标常量层；管理画笔、形状、箭头、文本、序号、马赛克等工具选项与状态 |
+| `src/utils/plugin-settings.ts` | 插件设置面板原生 DOM 构建器与数据持久化；支持 7 项核心开关配置与 `imageEditorTools` 动态保存 |
 | `src/utils/asset-actions.ts` | 编辑后文件名生成、重命名输入校验和扩展名决策 |
 | `src/utils/asset-list.ts` | 资源过滤（支持 `reeditable`）、排序、扩展名拆分、类型徽章生成（`getAssetBadgeText`）、大小格式化、孤儿资源与孤立底图统计 |
 | `src/utils/asset-markdown.ts` | Markdown 中 assets 引用解析、替换、移除和正则转义 |
 | `src/utils/doc-group-rows.ts` | 按文档归类的行模型；把分组摊平为一维虚拟滚动行序列（`buildDocRows`），并集中定义行高常量 `DOC_ROW_HEIGHTS` |
-| `src/utils/file-system.ts` | 资源文件读取、保存、删除、重命名，以及原始底图隔离存储（`storage/petal/siyuan-assets-manager/originals/`）的安全保存、读取、删除与列表 |
+| `src/utils/file-system.ts` | 存储门面兼容桥接层；资源文件读取、保存、删除、重命名，以及原始底图隔离存储（`storage/petal/siyuan-assets-manager/originals/`）的安全读写 |
+| `src/utils/storage/` | 统一存储门面与 Seam 抽象（`IStorageAdapter`、`ElectronStorageAdapter`、`HttpStorageAdapter`、`MemoryStorageAdapter`） |
 | `src/utils/image-editor.ts` | 图片编辑器弹窗尺寸计算、导出流水线（`prepareCanvasExport`）、画布对象重置（`resetCanvasObjects`）、100% 物理分辨率换算、Alpha 像素切边与重采样、键盘快捷键处理 |
 | `src/utils/plugin-entry.ts` | 插件入口纯函数；从 DOM 获取资源文件名与最近块 `data-node-id` |
 | `src/utils/reedit-data.ts` | 二次编辑元数据合法性校验、自适应阈值压缩（<2KB 明文 vs >=2KB `lz-string` 编码）与反序列化 |
 | `src/utils/siyuan-block.ts` | 对引用资源的 blocks 执行替换/移除/删除，以及 `custom-asset-reedit` 块属性读写与批量查询 |
 | `src/utils/siyuan-db.ts` | 资源文件聚合、引用统计、二次编辑元数据绑定、孤立底图扫描与一键清理 |
 | `src/utils/rollback-engine.ts` | 删除批次逆向回退：去重批次按快照精确/近似还原块正文、块属性（题头图等）与数据库单元格，单文件/批量删除批次按快照与位置锚点还原被清空的块；并提供回退文件预检 `checkRollbackFilePresence` |
-| `src/utils/rollback-anchor.ts` | 回退位置锚点：删除前经 `/api/block/getChildBlocks`（内核 AST 文档序）采集真实前/后兄弟与父块、文档两级序号；回退时按"相邻块 → 父块序号 → 文档序号 → 旧候选链"再锚定，并标记位置降级。**不能用 `blocks.sort` 推导兄弟顺序**，它是块类型权重（标题 5 / 段落 10 / 列表 20 …），且内核在 `parentID` 定位时会 `PrependChild` 到容器首位 |
+| `src/utils/rollback-anchor.ts` | 回退位置锚点：删除前经 `/api/block/getChildBlocks`（内核 AST 文档序）采集真实前/后兄弟与父块、文档两级序号；回退时按"相邻块 → 父块序号 → 文档序号 → 旧候选链"再锚定，并标记位置降级 |
 | `src/utils/deletion-logger.ts` | 删除历史批次的持久化（`plugin.saveData`，上限 0~100）、回退状态与回退报告（成功/跳过/失败/位置降级/精确/近似/属性/数据库单元格）写入；批次条目含合并前快照、数据库单元格快照与部分失败标记 |
 | `src/utils/tui-image-editor-bridge.ts` | TUI / Fabric 桥接模块；抽取纯矢量图层、反序列化注入 Fabric Canvas、序号联动关系重建 |
-| `src/utils/deduplicate.ts` | 去重扫描三阶段流水线（size 分桶 → 精确哈希 → 感知哈希）、指纹复用增量、分组归一化（合并时采集块快照与数据库单元格快照、单条失败不中断整批且仍写回退日志）、内容派生组身份与缓存持久化 |
-| `src/utils/inverse-reference.ts` | 引用逆向还原决策层：借合并前快照区分 `exact`（正向变换等于当前值 ⇒ 整段写回快照）/ `approximate`（值已被改动 ⇒ 按原引用处数限量改回）/ `skip`（已不含主图引用 ⇒ 不动）。多对一合并的逆向必须按处数而非按名全局替换 |
+| `src/utils/inverse-reference.ts` | 引用逆向还原决策层：借合并前快照区分 `exact`（正向变换等于当前值 ⇒ 整段写回快照）/ `approximate`（值已被改动 ⇒ 按原引用处数限量改回）/ `skip`（已不含主图引用 ⇒ 不动） |
 | `src/utils/attribute-view.ts` | 属性视图（数据库）解析与改写：引用提取、按名全局替换，以及合并前单元格快照采集 `captureAttributeViewAssetCells` 与按单元格精确还原 `restoreAttributeViewAssetCells` |
-| `src/utils/dedup-fingerprint-store.ts` | per-asset 指纹（sha256/dHash/分辨率）的失效校验、裁剪与持久化；仅走 `plugin.saveData`，不落 localStorage |
 | `src/utils/concurrency.ts` | 保序并发池：在飞数受限、可中止、进度上报 |
+| `src/utils/host-isolation.ts` | 宿主视口滚动锁定拦截与 TUI 隐式 SVG 节点物理脱标清理 |
 
 ## 类型
 
@@ -78,10 +88,18 @@
 | `src/types/api.d.ts` | Siyuan API 返回结构补充声明 |
 | `src/types/reedit.d.ts` | 二次编辑元数据 `IAssetReEditMetadata`、矢量图层载荷与保存事件类型定义 |
 
-## 测试
+## 测试 (39 Suites / 356 Tests)
 
 | 路径 | 覆盖范围 |
 | --- | --- |
+| `tests/cleanup-workflow.test.ts` | 单文件删除、底图警告、批量删除与综合清理长流程业务编排 |
+| `tests/dedup-hash.test.ts` | SHA-256 算法计算、简易哈希保底、9x8 灰度矩阵与 dHash 汉明距离计算 |
+| `tests/asset-media-preview.test.ts` | 媒体悬浮预览组件：图片缩略图、音频律动与视频播放控制事件 |
+| `tests/asset-manager-video-preview.test.ts` | 视频悬浮预览播放控制、默认静音契约与重开重置状态 |
+| `tests/asset-manager-doc-sort.test.ts` | 文档归类分组的多种排序与空文档处理 |
+| `tests/deletion-history-card.test.ts` | 删除历史单批次卡片：头部概览、折叠展开、明细表格、回退报告与操作触发 |
+| `tests/deletion-history-dialog.test.ts` | 历史弹窗生命周期、可见性监听、清空记录与系统回收站调用 |
+| `tests/settings.test.ts` | 插件设置面板 DOM 渲染、开关切换与配置持久化保存 |
 | `tests/asset-workflow.test.ts` | 图片保存编辑与重命名长流程业务编排、底图归档分支与块属性广播 |
 | `tests/asset-actions.test.ts` | 编辑命名、重命名校验和扩展名确认 |
 | `tests/asset-list.test.ts` | 过滤（含二次编辑）、排序、扩展名、徽章文本提取、大小格式化、孤儿资源与底图统计 |
@@ -100,15 +118,23 @@
 | `tests/deduplicate.test.ts` | 去重扫描三阶段与指纹复用增量、`score` 每次重算、组身份顺序无关性、缓存 schema 版本判废、归一化安全复核 |
 | `tests/dedup-fingerprint-store.test.ts` | 指纹失效判据（size/updated/updated>0/字段缺失）、裁剪、存取往返与版本不符判空、不写 localStorage |
 | `tests/concurrency.test.ts` | 并发池契约：保序返回、在飞上限、中止不再启动、进度单调、非法 limit 回退 |
-| `tests/rollback-anchor.test.ts` | 位置锚点采集（真实兄弟、两级序号、同容器查询缓存、内核接口不可用降级）与回退再锚定链（相邻块精确、序号近似、容器为空、容器消失后转文档层、回归：有子块的容器绝不裸 `parentID` 兜底） |
+| `tests/rollback-anchor.test.ts` | 位置锚点采集（真实兄弟、两级序号、同容器查询缓存、内核接口不可用降级）与回退再锚定链（相邻块精确、序号近似、容器为空、容器消失后转文档层） |
 | `tests/rollback-engine.test.ts` | 去重批次按快照精确/近似还原、仅存于 IAL 的题头图引用还原、数据库单元格还原接线、单文件/批量删除批次快照还原与位置降级统计、候选锚点逐个重试、回退文件预检 |
 | `tests/inverse-reference.test.ts` | 逆向还原三态（精确整段写回、改动后按处数限量、已改走则跳过）、同组多冗余任意顺序回退的终态正确性、URI 编码形态、旧日志无快照时的降级 |
 | `tests/attribute-view.test.ts` | 引用提取与按名替换、合并前单元格快照采集、按单元格精确还原（不误伤同值其它行）、保持原 JSON 缩进风格、单元格消失时的跳过计数 |
+| `tests/module-boundaries.test.ts` | 架构边界约束：工具层禁止反向引用主入口模块 |
+| `tests/confirm.test.ts` | 交互式确认弹窗 Promise 契约测试 |
+| `tests/storage.test.ts` | 统一存储门面与多适配器（Electron/Http/Memory）读写测试 |
+| `tests/host-isolation.test.ts` | 宿主视口滚动锁定拦截与脱标清理测试 |
+| `tests/doc-asset-group.test.ts` | 文档资源分组逻辑测试 |
+| `tests/logger.test.ts` | 日志服务输出测试 |
+| `tests/plugin-context.test.ts` | 插件全局上下文安全获取测试 |
 
 ## 构建与验证
 
 | 命令 | 说明 |
 | --- | --- |
-| `npm test` | 运行全部 Vitest 单元测试 |
+| `npm test` | 运行全部 Vitest 单元测试（39 套件 / 356 测试，jsdom 环境） |
 | `npm run build` | 生产构建，输出 `dist/` 并生成 `package.zip` |
 | `npm run dev` | Vite watch 构建到配置的 Siyuan 工作空间插件目录 |
+

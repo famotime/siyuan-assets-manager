@@ -231,163 +231,15 @@
     </div>
 
     <!-- 限制在当前界面内的悬浮资源预览弹窗 (支持图片、MP4 视频与 MP3/常见音频) -->
-    <div
-      v-if="previewUrl"
-      class="asset-hover-preview image-hover-preview"
-      :class="{
-        'is-interactive': previewType === 'audio' || previewType === 'video',
-        'is-video': previewType === 'video',
-        'is-audio': previewType === 'audio'
-      }"
-      :style="previewStyle"
+    <AssetMediaPreview
+      :preview-url="previewUrl"
+      :preview-type="previewType"
+      :preview-asset="previewAsset"
+      :preview-style="previewStyle"
       @mouseenter="cancelHidePreview"
       @mouseleave="scheduleHidePreview(0)"
-    >
-      <!-- 图片预览 -->
-      <img v-if="previewType === 'image'" :src="previewUrl" alt="预览图" />
+    />
 
-      <!-- 视频预览 (带半透明悬浮控制栏与居中播放指示) -->
-      <div
-        v-else-if="previewType === 'video'"
-        class="video-preview-wrapper"
-        @click="toggleVideoPlay"
-      >
-        <video
-          ref="videoPreviewEl"
-          :src="previewUrl"
-          autoplay
-          loop
-          :muted="videoMuted"
-          playsinline
-          @loadedmetadata="handleVideoLoadedMetadata"
-          @timeupdate="handleVideoTimeUpdate"
-          @play="isVideoPlaying = true"
-          @pause="isVideoPlaying = false"
-          @error="handleVideoError"
-        ></video>
-
-        <!-- 暂停时居中半透明微质感播放图标 -->
-        <div v-if="!isVideoPlaying" class="video-center-play-badge" title="点击播放">
-          <Play :size="28" class="play-icon-offset" />
-        </div>
-
-        <!-- 底部平滑渐显的半透明控制条 -->
-        <div class="video-controls-overlay" @click.stop>
-          <!-- 播放/暂停按钮 -->
-          <button
-            class="video-ctrl-btn play-pause-btn"
-            :class="{ 'is-playing': isVideoPlaying }"
-            @click.stop="toggleVideoPlay"
-            :title="isVideoPlaying ? '暂停' : '播放'"
-          >
-            <Pause v-if="isVideoPlaying" :size="14" />
-            <Play v-else :size="14" class="play-icon-offset" />
-          </button>
-
-          <!-- 进度条区域 (支持点击与拖拽快进) -->
-          <div
-            class="video-progress-container"
-            ref="videoProgressBarEl"
-            @mousedown.stop="handleProgressMouseDown"
-          >
-            <div class="video-progress-track">
-              <div class="video-progress-fill" :style="{ width: videoProgressPercent + '%' }"></div>
-              <div class="video-progress-thumb" :style="{ left: videoProgressPercent + '%' }"></div>
-            </div>
-          </div>
-
-          <!-- 当前时间 / 总时长 -->
-          <span class="video-time-display">
-            {{ formatMediaTime(videoCurrentTime) }} / {{ formatMediaTime(videoDuration) }}
-          </span>
-
-          <!-- 静音/声音切换按钮 -->
-          <button
-            class="video-ctrl-btn mute-btn"
-            :class="{ 'is-muted': videoMuted }"
-            @click.stop="toggleVideoMute"
-            :title="videoMuted ? '取消静音 (恢复声音)' : '静音'"
-          >
-            <VolumeX v-if="videoMuted" :size="14" />
-            <Volume2 v-else :size="14" />
-          </button>
-        </div>
-      </div>
-
-      <!-- 音频预览卡片 -->
-      <div v-else-if="previewType === 'audio'" class="audio-preview-card">
-        <div class="audio-card-header">
-          <!-- 播放/暂停控制大按钮 -->
-          <button
-            class="audio-play-btn"
-            :class="{ 'is-playing': isAudioPlaying }"
-            @click.stop="toggleAudioPlay"
-            :title="isAudioPlaying ? '暂停试听' : '点击试听'"
-          >
-            <Pause v-if="isAudioPlaying" :size="16" />
-            <Play v-else :size="16" class="play-icon-offset" />
-          </button>
-
-          <div class="audio-info">
-            <div class="audio-title" :title="previewAsset?.name">
-              {{ previewAsset ? splitFileName(previewAsset.name).name : '' }}
-            </div>
-            <div class="audio-meta">
-              <span class="audio-timer">{{ formatMediaTime(audioCurrentTime) }} / {{ formatMediaTime(audioDuration) }}</span>
-              <span v-if="audioMuted" class="audio-muted-badge">已静音</span>
-              <span
-                v-else-if="audioBlocked && !isAudioPlaying"
-                class="audio-hint-badge"
-                @click.stop="toggleAudioPlay"
-                title="受浏览器策略限制需点击一次后播放"
-              >点击播放</span>
-              <span v-else-if="audioLoadError" class="audio-error-badge">加载失败</span>
-            </div>
-          </div>
-
-          <button
-            class="audio-mute-btn"
-            :class="{ 'is-muted': audioMuted }"
-            @click.stop="toggleAudioMute"
-            :title="audioMuted ? '取消静音 (恢复声音)' : '静音'"
-          >
-            <VolumeX v-if="audioMuted" :size="16" />
-            <Volume2 v-else :size="16" />
-          </button>
-        </div>
-
-        <!-- 动态声波效果条 (仅在实际播放且未静音时律动) -->
-        <div
-          class="audio-waveform-bars"
-          :class="{ 'is-playing': isAudioPlaying, 'is-muted': audioMuted }"
-          @click.stop="toggleAudioPlay"
-          :title="isAudioPlaying ? '点击暂停' : '点击播放试听'"
-        >
-          <span class="bar bar-1"></span>
-          <span class="bar bar-2"></span>
-          <span class="bar bar-3"></span>
-          <span class="bar bar-4"></span>
-          <span class="bar bar-5"></span>
-          <span class="bar bar-6"></span>
-          <span class="bar bar-7"></span>
-          <span class="bar bar-8"></span>
-        </div>
-
-        <audio
-          ref="audioPreviewEl"
-          :src="previewUrl"
-          preload="auto"
-          :muted="audioMuted"
-          @loadedmetadata="handleAudioLoadedMetadata"
-          @canplay="handleAudioCanPlay"
-          @timeupdate="handleAudioTimeUpdate"
-          @play="isAudioPlaying = true"
-          @pause="isAudioPlaying = false"
-          @ended="isAudioPlaying = false"
-          @error="handleAudioError"
-        ></audio>
-      </div>
-    </div>
 
     <!-- 去重比对弹窗 -->
     <DeduplicateDialog
@@ -442,10 +294,6 @@ import {
   Music,
   Video,
   Archive,
-  Volume2,
-  VolumeX,
-  Play,
-  Pause,
   AlertCircle,
   History,
   LayoutList,
@@ -462,11 +310,16 @@ import {
   Search,
   X,
 } from 'lucide-vue-next';
-import { getAllAssetsInfo, deleteAssetFile, countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
-import { deleteOriginalImage, readOriginalImage, normalizeOriginalStoragePath, isTrashSupported } from '../utils/file-system';
-import { removeAssetFromBlocks } from '../utils/siyuan-block';
-import { recordDeletionBatch, type DeleteDestination, type IDeletedItemRecord } from '../utils/deletion-logger';
-import { captureBlockAnchors, createChildBlocksCache } from '../utils/rollback-anchor';
+import { getAllAssetsInfo, countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
+import { normalizeOriginalStoragePath, readOriginalImage } from '../utils/file-system';
+import {
+  buildSingleDeleteConfirmMessage,
+  buildBatchDeleteConfirmMessage,
+  buildUnifiedCleanupConfirmMessage,
+  executeSingleAssetDeletion,
+  executeBatchAssetsDeletion,
+  executeUnifiedCleanup,
+} from '../utils/cleanup-workflow';
 import {
   calculateBatchDeleteSummary,
   calculateCategoryStats,
@@ -491,14 +344,14 @@ import {
   type DocSortOrder,
 } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
-import { pushMsg, sql } from '../api';
+import { pushMsg } from '../api';
 import { usePlugin } from '../utils/plugin-context';
 import { error } from '../utils/logger';
-import { captureAssetThumbnail } from '../utils/image-editor';
 import VirtualAssetList from './VirtualAssetList.vue';
 import DocumentAssetGroupList from './DocumentAssetGroupList.vue';
 import DeduplicateDialog from './DeduplicateDialog.vue';
 import DeletionHistoryDialog from './DeletionHistoryDialog.vue';
+import AssetMediaPreview from './AssetMediaPreview.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -601,201 +454,6 @@ const mouseY = ref(0);
 let previewTimeout: number | null = null;
 let previewBlobUrl: string | null = null;
 let hideTimeout: number | null = null;
-
-const videoPreviewEl = ref<HTMLVideoElement | null>(null);
-const audioPreviewEl = ref<HTMLAudioElement | null>(null);
-
-// 视频试听静音与控制状态 (每次新打开界面默认始终静音播放，但在同次打开期间切换视频保持会话状态)
-const videoMuted = ref(true);
-const isVideoPlaying = ref(true);
-const videoCurrentTime = ref(0);
-const videoDuration = ref(0);
-const videoLoadError = ref(false);
-const videoProgressBarEl = ref<HTMLElement | null>(null);
-let isDraggingVideoProgress = false;
-
-const videoProgressPercent = computed(() => {
-  if (!videoDuration.value || videoDuration.value <= 0) return 0;
-  return Math.min(100, Math.max(0, (videoCurrentTime.value / videoDuration.value) * 100));
-});
-
-function toggleVideoMute() {
-  videoMuted.value = !videoMuted.value;
-  if (videoPreviewEl.value) {
-    videoPreviewEl.value.muted = videoMuted.value;
-  }
-}
-
-function toggleVideoPlay() {
-  if (!videoPreviewEl.value) return;
-  if (isVideoPlaying.value) {
-    videoPreviewEl.value.pause();
-    isVideoPlaying.value = false;
-  } else {
-    const playPromise = videoPreviewEl.value.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => {
-          isVideoPlaying.value = true;
-        })
-        .catch((err) => {
-          console.warn('[AssetsManager] Video play failed:', err);
-          isVideoPlaying.value = false;
-        });
-    } else {
-      isVideoPlaying.value = true;
-    }
-  }
-}
-
-function handleVideoLoadedMetadata() {
-  if (videoPreviewEl.value) {
-    videoDuration.value = videoPreviewEl.value.duration || 0;
-    videoPreviewEl.value.muted = videoMuted.value;
-    const playPromise = videoPreviewEl.value.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => {
-          isVideoPlaying.value = true;
-        })
-        .catch((err) => {
-          console.warn('[AssetsManager] Video autoplay blocked or failed:', err);
-          isVideoPlaying.value = false;
-        });
-    }
-  }
-}
-
-function handleVideoTimeUpdate() {
-  if (videoPreviewEl.value && !isDraggingVideoProgress) {
-    videoCurrentTime.value = videoPreviewEl.value.currentTime;
-    if (!videoDuration.value && videoPreviewEl.value.duration) {
-      videoDuration.value = videoPreviewEl.value.duration;
-    }
-  }
-}
-
-function handleVideoError(e: Event) {
-  console.warn('[AssetsManager] Video loading error:', e);
-  videoLoadError.value = true;
-  isVideoPlaying.value = false;
-}
-
-function seekVideoByEvent(e: MouseEvent) {
-  if (!videoProgressBarEl.value || !videoPreviewEl.value || !videoDuration.value) return;
-  const rect = videoProgressBarEl.value.getBoundingClientRect();
-  if (rect.width <= 0) return;
-  const offsetX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-  const targetTime = (offsetX / rect.width) * videoDuration.value;
-  videoPreviewEl.value.currentTime = targetTime;
-  videoCurrentTime.value = targetTime;
-}
-
-function handleProgressMouseMove(e: MouseEvent) {
-  if (!isDraggingVideoProgress) return;
-  seekVideoByEvent(e);
-}
-
-function handleProgressMouseUp() {
-  if (isDraggingVideoProgress) {
-    isDraggingVideoProgress = false;
-    window.removeEventListener('mousemove', handleProgressMouseMove);
-    window.removeEventListener('mouseup', handleProgressMouseUp);
-  }
-}
-
-function handleProgressMouseDown(e: MouseEvent) {
-  if (!videoDuration.value) return;
-  isDraggingVideoProgress = true;
-  seekVideoByEvent(e);
-  window.addEventListener('mousemove', handleProgressMouseMove);
-  window.addEventListener('mouseup', handleProgressMouseUp);
-}
-
-// 音频试听静音状态 (全局记忆持久化)
-const AUDIO_MUTED_STORAGE_KEY = 'siyuan-assets-manager-audio-preview-muted';
-const audioMuted = ref(localStorage.getItem(AUDIO_MUTED_STORAGE_KEY) === 'true');
-
-function toggleAudioMute() {
-  audioMuted.value = !audioMuted.value;
-  try {
-    localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, String(audioMuted.value));
-  } catch (e) {}
-  if (audioPreviewEl.value) {
-    audioPreviewEl.value.muted = audioMuted.value;
-  }
-}
-
-const audioCurrentTime = ref(0);
-const audioDuration = ref(0);
-const isAudioPlaying = ref(false);
-const audioBlocked = ref(false);
-const audioLoadError = ref(false);
-
-async function startAudioPlayback() {
-  if (!audioPreviewEl.value) return;
-  const el = audioPreviewEl.value;
-  el.volume = 0.6;
-  el.muted = audioMuted.value;
-  try {
-    await el.play();
-    isAudioPlaying.value = true;
-    audioBlocked.value = false;
-    audioLoadError.value = false;
-  } catch (err) {
-    console.warn('[AssetsManager] Audio play failed or blocked:', err);
-    isAudioPlaying.value = false;
-    audioBlocked.value = true;
-  }
-}
-
-function toggleAudioPlay() {
-  if (!audioPreviewEl.value) return;
-  if (isAudioPlaying.value) {
-    audioPreviewEl.value.pause();
-    isAudioPlaying.value = false;
-  } else {
-    startAudioPlayback();
-  }
-}
-
-function handleAudioLoadedMetadata() {
-  if (audioPreviewEl.value) {
-    audioDuration.value = audioPreviewEl.value.duration || 0;
-    audioPreviewEl.value.volume = 0.6;
-    audioPreviewEl.value.muted = audioMuted.value;
-    startAudioPlayback();
-  }
-}
-
-function handleAudioCanPlay() {
-  if (!isAudioPlaying.value && !audioBlocked.value) {
-    startAudioPlayback();
-  }
-}
-
-function handleAudioError(e: Event) {
-  console.warn('[AssetsManager] Audio loading error:', e);
-  audioLoadError.value = true;
-  isAudioPlaying.value = false;
-}
-
-function handleAudioTimeUpdate() {
-  if (audioPreviewEl.value) {
-    audioCurrentTime.value = audioPreviewEl.value.currentTime;
-    if (!audioDuration.value && audioPreviewEl.value.duration) {
-      audioDuration.value = audioPreviewEl.value.duration;
-    }
-  }
-}
-
-function formatMediaTime(seconds: number): string {
-  if (!seconds || isNaN(seconds) || seconds < 0) return '00:00';
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
 function handleSelectionChange(nextSet: Set<string>) {
   selectedNames.value = nextSet;
 }
@@ -805,29 +463,6 @@ function clearSelection() {
 }
 
 function cleanupPreview() {
-  if (videoPreviewEl.value) {
-    try {
-      videoPreviewEl.value.pause();
-      videoPreviewEl.value.removeAttribute('src');
-      videoPreviewEl.value.load();
-    } catch (e) {}
-  }
-  if (audioPreviewEl.value) {
-    try {
-      audioPreviewEl.value.pause();
-      audioPreviewEl.value.removeAttribute('src');
-      audioPreviewEl.value.load();
-    } catch (e) {}
-  }
-  if (isDraggingVideoProgress) {
-    isDraggingVideoProgress = false;
-    window.removeEventListener('mousemove', handleProgressMouseMove);
-    window.removeEventListener('mouseup', handleProgressMouseUp);
-  }
-  videoCurrentTime.value = 0;
-  videoDuration.value = 0;
-  isVideoPlaying.value = true;
-  videoLoadError.value = false;
   if (previewBlobUrl) {
     URL.revokeObjectURL(previewBlobUrl);
     previewBlobUrl = null;
@@ -835,11 +470,6 @@ function cleanupPreview() {
   previewUrl.value = '';
   previewType.value = null;
   previewAsset.value = null;
-  audioCurrentTime.value = 0;
-  audioDuration.value = 0;
-  isAudioPlaying.value = false;
-  audioBlocked.value = false;
-  audioLoadError.value = false;
 }
 
 function cancelHidePreview() {
@@ -893,18 +523,10 @@ async function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo,
       previewType.value = 'video';
       const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
       previewUrl.value = `${encodeURI(`/assets/${asset.name}`)}${versionQuery}`;
-      isVideoPlaying.value = true;
-      videoLoadError.value = false;
     } else if (isAud) {
       previewType.value = 'audio';
       const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
       previewUrl.value = `${encodeURI(`/assets/${asset.name}`)}${versionQuery}`;
-      audioBlocked.value = false;
-      audioLoadError.value = false;
-      isAudioPlaying.value = false;
-      nextTick(() => {
-        startAudioPlayback();
-      });
     } else {
       previewType.value = 'image';
       if (asset.isOriginal) {
@@ -1008,11 +630,6 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 onUnmounted(() => {
-  if (isDraggingVideoProgress) {
-    isDraggingVideoProgress = false;
-    window.removeEventListener('mousemove', handleProgressMouseMove);
-    window.removeEventListener('mouseup', handleProgressMouseUp);
-  }
   handleHidePreview();
   window.removeEventListener('assets-manager-refresh', handleGlobalRefresh);
   window.removeEventListener('keydown', handleKeyDown);
@@ -1207,8 +824,6 @@ const handleGlobalRefresh = (event?: Event) => {
 };
 
 onMounted(() => {
-  // 每次新打开资源管家界面，视频预览默认始终静音播放
-  videoMuted.value = true;
   // 初次加载确立排序基准，之后除非用户点刷新或改排序字段，卡片顺序不再变动
   loadData({ resort: true });
   window.addEventListener('assets-manager-refresh', handleGlobalRefresh);
@@ -1380,151 +995,14 @@ function handleEdit(asset: AssetInfo) {
 }
 
 async function handleDelete(asset: AssetInfo) {
-  // 针对原始底图与普通资源的差异化删除确认
-  if (asset.isOriginal) {
-    let confirmMsg = `确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（文件将移入操作系统回收站）' : '【高危警告】当前运行环境不支持系统回收站，此操作将永久彻底删除底图物理文件！'}`;
-    if (asset.docCount > 0) {
-      confirmMsg = `【高风险警告】此原始底图正被 ${asset.docCount} 个文档中的二次编辑图片关联！\n删除此底图后，未来将无法对这些图片进行图层还原与二次编辑。\n\n确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（将移入操作系统回收站）' : '（Web/Docker 环境：将永久硬删除）'}`;
-    }
-
-    const confirmDelete = await showConfirm({
-      title: '确认删除原始底图',
-      message: confirmMsg,
-      confirmText: '删除底图',
-      danger: true,
-    });
-    if (!confirmDelete) return;
-
-    try {
-      // 0. 尝试在物理删除前捕获原始底图缩略图
-      let thumbnail: string | undefined;
-      try {
-        const blob = await readOriginalImage(asset.originalStoragePath || asset.name);
-        if (blob) {
-          thumbnail = await captureAssetThumbnail(blob);
-        }
-      } catch {}
-
-      await deleteOriginalImage(asset.originalStoragePath || asset.name);
-      pushMsg(`原始底图 ${asset.name} 已删除`);
-      assets.value = assets.value.filter(a => a.name !== asset.name);
-      selectedNames.value.delete(asset.name);
-
-      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
-      try {
-        await recordDeletionBatch({
-          actionType: 'single-delete',
-          destination,
-          items: [{
-            fileName: asset.name,
-            originalRelativePath: asset.originalStoragePath || asset.name,
-            size: asset.size || 0,
-            thumbnail,
-          }],
-          freedBytes: asset.size || 0,
-          canRollback: false,
-        });
-      } catch (logErr) {
-        error('[AssetsManager] 记录删除原始底图批次失败:', logErr);
-      }
-    } catch (e) {
-      error("Failed to delete original image:", e);
-      pushMsg("删除底图失败");
-    }
-    return;
-  }
-
-  let confirmMsg = isTrashSupported()
-    ? `确定要删除 ${asset.name} 吗？\n注意：文件将移入操作系统回收站，且文档中的对应引用块也将被清理。`
-    : `【高危警告】当前运行环境不支持系统回收站，确定要永久删除 ${asset.name} 吗？\n注意：物理文件将被直接抹除且不可撤销，文档中的对应引用块也将被清理。`;
-
-  if (asset.docCount > 1) {
-    confirmMsg = `【多文档共享警告】此资源正被 ${asset.docCount} 篇不同的文档共同引用！\n删除后将同步清理所有 ${asset.docCount} 篇文档中的引用块。\n\n` + confirmMsg;
-  }
-
-  const confirmDelete = await showConfirm({
-    title: '确认删除',
-    message: confirmMsg,
-    confirmText: '删除',
-    danger: true
-  });
+  const confirmOptions = buildSingleDeleteConfirmMessage(asset);
+  const confirmDelete = await showConfirm(confirmOptions);
   if (!confirmDelete) return;
 
-  try {
-    // 0. 尝试在物理删除前捕获图片缩略图
-    let thumbnail: string | undefined;
-    if (isImageAsset(asset.name)) {
-      try {
-        thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`);
-      } catch {}
-    }
-
-    // 0.1 备份受影响块的原始 Markdown 快照与真实位置锚点，用于支持逆向引用精准回退
-    // 兄弟顺序只能从内核 AST 取（blocks.sort 是块类型权重，不携带顺序信息）
-    const snippets: Record<string, string> = {};
-    const blocksToCapture: Array<{ id: string; root_id?: string; parent_id?: string }> = [];
-
-    if (asset.references && asset.references.length > 0) {
-      for (const ref of asset.references) {
-        if (!ref.id) continue;
-        try {
-          const rows = await sql(`SELECT id, parent_id, root_id, markdown FROM blocks WHERE id = '${ref.id}'`);
-          if (rows && rows.length > 0) {
-            const row = rows[0];
-            if (row.markdown) {
-              snippets[ref.id] = row.markdown;
-            }
-            blocksToCapture.push({
-              id: ref.id,
-              root_id: row.root_id || ref.root_id,
-              parent_id: row.parent_id,
-            });
-          } else {
-            blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
-          }
-        } catch {
-          blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
-        }
-      }
-    }
-
-    const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, createChildBlocksCache());
-
-    // 1. 删除物理文件
-    await deleteAssetFile(asset.name);
-    
-    // 2. 清除文档中的所有引用
-    if (asset.references && asset.references.length > 0) {
-      await removeAssetFromBlocks(asset.references, asset.name);
-    }
-    
-    pushMsg(`资源 ${asset.name} 及其文档引用已删除`);
-    assets.value = assets.value.filter(a => a.name !== asset.name);
+  const result = await executeSingleAssetDeletion(asset);
+  if (result.success) {
+    assets.value = assets.value.filter((a) => a.name !== asset.name);
     selectedNames.value.delete(asset.name);
-
-    const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
-    const hasRefs = Boolean(asset.references && asset.references.length > 0);
-    try {
-      await recordDeletionBatch({
-        actionType: 'single-delete',
-        destination,
-        items: [{
-          fileName: asset.name,
-          originalRelativePath: `data/assets/${asset.name}`,
-          size: asset.size || 0,
-          thumbnail,
-          affectedBlocks: affectedBlockRecords.length > 0 ? affectedBlockRecords : (asset.references || []).map(r => ({ id: r.id, root_id: r.root_id })),
-          originalMarkdownSnippets: Object.keys(snippets).length > 0 ? snippets : undefined,
-        }],
-        freedBytes: asset.size || 0,
-        canRollback: hasRefs,
-      });
-    } catch (logErr) {
-      error('[AssetsManager] 记录单文件删除批次失败:', logErr);
-    }
-  } catch (e) {
-    error(e);
-    pushMsg(`删除失败`);
   }
 }
 
@@ -1535,160 +1013,17 @@ async function handleBatchDelete() {
   const summary = selectedSummary.value;
   if (summary.totalCount === 0) return;
 
-  const messageLines = [
-    `确定要批量删除选中的 ${summary.totalCount} 个文件吗？`,
-    '',
-    '清单概要：',
-    `• 普通资源文件：${summary.regularCount} 个`,
-    `• 隔离原始底图：${summary.originalCount} 个`,
-    `• 预计释放总空间：${summary.sizeText}`,
-  ];
-
-  if (summary.referencedCount > 0) {
-    messageLines.push('');
-    messageLines.push(`【重要提示】所选资源中有 ${summary.referencedCount} 个已被文档引用，删除将自动清理文档中对应的引用块。`);
-  }
-
-  if (summary.referencedOriginalsCount > 0) {
-    messageLines.push('');
-    messageLines.push(`【高风险警告】所选底图中有 ${summary.referencedOriginalsCount} 个正被文档中的二次编辑图片关联，删除后将无法再次进行图层无损还原！`);
-  }
-
-  messageLines.push('');
-  if (isTrashSupported()) {
-    messageLines.push('文件将移入操作系统回收站，若误删可从回收站手工找回。确定要执行批量删除吗？');
-  } else {
-    messageLines.push('【高危警告】当前运行环境（Web / Docker）不支持系统回收站，此操作将永久彻底抹除物理文件，无法撤销！确定要执行批量删除吗？');
-  }
-
-  const confirmDelete = await showConfirm({
-    title: `批量删除资源 (${summary.totalCount} 个)`,
-    message: messageLines.join('\n'),
-    confirmText: '执行批量删除',
-    danger: true,
-  });
-
+  const confirmOptions = buildBatchDeleteConfirmMessage(summary);
+  const confirmDelete = await showConfirm(confirmOptions);
   if (!confirmDelete) return;
 
   loading.value = true;
   try {
-    let deletedRegularCount = 0;
-    let deletedOriginalCount = 0;
-    let freedBytes = 0;
-    const deletedRecords: IDeletedItemRecord[] = [];
-
-    let hasAnyRollbackableRefs = false;
-    // 同一批次内多个资源可能引用同一文档，共享容器子块查询缓存
-    const anchorCache = createChildBlocksCache();
-
-    // 1. 删除普通资源及其文档引用
-    for (const asset of summary.regularAssets) {
-      try {
-        let thumbnail: string | undefined;
-        if (isImageAsset(asset.name)) {
-          try {
-            thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`);
-          } catch {}
-        }
-
-        // 备份原始 Markdown 快照与真实位置锚点（兄弟顺序取自内核 AST，不依赖 blocks.sort）
-        const snippets: Record<string, string> = {};
-        const blocksToCapture: Array<{ id: string; root_id?: string; parent_id?: string }> = [];
-
-        if (asset.references && asset.references.length > 0) {
-          hasAnyRollbackableRefs = true;
-          for (const ref of asset.references) {
-            if (!ref.id) continue;
-            try {
-              const rows = await sql(`SELECT id, parent_id, root_id, markdown FROM blocks WHERE id = '${ref.id}'`);
-              if (rows && rows.length > 0) {
-                const row = rows[0];
-                if (row.markdown) {
-                  snippets[ref.id] = row.markdown;
-                }
-                blocksToCapture.push({
-                  id: ref.id,
-                  root_id: row.root_id || ref.root_id,
-                  parent_id: row.parent_id,
-                });
-              } else {
-                blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
-              }
-            } catch {
-              blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
-            }
-          }
-        }
-
-        const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, anchorCache);
-
-        await deleteAssetFile(asset.name);
-        if (asset.references && asset.references.length > 0) {
-          await removeAssetFromBlocks(asset.references, asset.name);
-        }
-        deletedRegularCount++;
-        freedBytes += asset.size || 0;
-        deletedRecords.push({
-          fileName: asset.name,
-          originalRelativePath: `data/assets/${asset.name}`,
-          size: asset.size || 0,
-          thumbnail,
-          affectedBlocks: affectedBlockRecords.length > 0 ? affectedBlockRecords : (asset.references || []).map(r => ({ id: r.id, root_id: r.root_id })),
-          originalMarkdownSnippets: Object.keys(snippets).length > 0 ? snippets : undefined,
-        });
-      } catch (err) {
-        error(`[batch-delete] 删除普通资源失败: ${asset.name}`, err);
-      }
+    const result = await executeBatchAssetsDeletion(summary);
+    if (result.success) {
+      clearSelection();
+      await loadData();
     }
-
-    // 2. 删除原始底图
-    for (const orig of summary.originalAssets) {
-      try {
-        let thumbnail: string | undefined;
-        try {
-          const blob = await readOriginalImage(orig.originalStoragePath || orig.name);
-          if (blob) {
-            thumbnail = await captureAssetThumbnail(blob);
-          }
-        } catch {}
-
-        const ok = await deleteOriginalImage(orig.originalStoragePath || orig.name);
-        if (ok) {
-          deletedOriginalCount++;
-          freedBytes += orig.size || 0;
-          deletedRecords.push({
-            fileName: orig.name,
-            originalRelativePath: orig.originalStoragePath || orig.name,
-            size: orig.size || 0,
-            thumbnail,
-          });
-        }
-      } catch (err) {
-        error(`[batch-delete] 删除原始底图失败: ${orig.name}`, err);
-      }
-    }
-
-    if (deletedRecords.length > 0) {
-      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
-      try {
-        await recordDeletionBatch({
-          actionType: 'batch-delete',
-          destination,
-          items: deletedRecords,
-          freedBytes,
-          canRollback: hasAnyRollbackableRefs,
-        });
-      } catch (logErr) {
-        error('[batch-delete] 记录删除批次失败:', logErr);
-      }
-    }
-
-    clearSelection();
-    pushMsg(`批量删除完成！已成功删除 ${deletedRegularCount} 个资源与 ${deletedOriginalCount} 个底图，释放 ${summary.sizeText} 空间。`);
-    await loadData();
-  } catch (e) {
-    error("Failed to batch delete assets:", e);
-    pushMsg("批量删除失败");
   } finally {
     loading.value = false;
   }
@@ -1710,108 +1045,16 @@ async function handleUnifiedCleanup() {
     return;
   }
 
-  const messageLines = [
-    isTrashSupported()
-      ? '【安全清理】此操作将清理所有未被文档引用的孤儿资源文件及孤立原始底图，所有文件将移入操作系统回收站。'
-      : '【高危警告】当前运行环境（Web / Docker）不支持系统回收站，此操作将永久彻底抹除文件且不可撤销！',
-    '',
-    '待清理清单：',
-    `• 孤儿资源文件：${summary.unreferencedCount} 个 (${summary.unreferencedSizeText})`,
-    `• 孤立原始底图：${summary.orphanOriginalsCount} 个 (${summary.orphanOriginalsSizeText})`,
-    `• 预计释放总空间：${summary.sizeText}`,
-    '',
-    isTrashSupported()
-      ? '确定要执行清理并将这些文件移入系统回收站吗？'
-      : '此操作将直接彻底删除物理文件，确定要继续吗？'
-  ];
-
-  const confirmCleanup = await showConfirm({
-    title: '清理未引用资源与孤立底图',
-    message: messageLines.join('\n'),
-    confirmText: '执行清理',
-    danger: true
-  });
-
+  const confirmOptions = buildUnifiedCleanupConfirmMessage(summary);
+  const confirmCleanup = await showConfirm(confirmOptions);
   if (!confirmCleanup) return;
 
   loading.value = true;
   try {
-    let deletedAssetsCount = 0;
-    let deletedOriginalsCount = 0;
-    let freedBytes = 0;
-    const deletedRecords: IDeletedItemRecord[] = [];
-
-    // 1. 清理普通孤儿资源
-    for (const asset of summary.unreferencedAssets) {
-      try {
-        let thumbnail: string | undefined;
-        if (isImageAsset(asset.name)) {
-          try {
-            thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`);
-          } catch {}
-        }
-
-        await deleteAssetFile(asset.name);
-        deletedAssetsCount++;
-        freedBytes += asset.size || 0;
-        deletedRecords.push({
-          fileName: asset.name,
-          originalRelativePath: `data/assets/${asset.name}`,
-          size: asset.size || 0,
-          thumbnail,
-        });
-      } catch (err) {
-        error(`删除孤儿资源失败: ${asset.name}`, err);
-      }
+    const result = await executeUnifiedCleanup(summary);
+    if (result.success) {
+      await loadData();
     }
-
-    // 2. 清理孤立底图
-    for (const orig of summary.orphanOriginals) {
-      try {
-        let thumbnail: string | undefined;
-        try {
-          const blob = await readOriginalImage(orig.originalStoragePath || orig.name);
-          if (blob) {
-            thumbnail = await captureAssetThumbnail(blob);
-          }
-        } catch {}
-
-        const ok = await deleteOriginalImage(orig.originalStoragePath || orig.name);
-        if (ok) {
-          deletedOriginalCount++;
-          freedBytes += orig.size || 0;
-          deletedRecords.push({
-            fileName: orig.name,
-            originalRelativePath: orig.originalStoragePath || orig.name,
-            size: orig.size || 0,
-            thumbnail,
-          });
-        }
-      } catch (err) {
-        error(`删除孤立底图失败: ${orig.name}`, err);
-      }
-    }
-
-    if (deletedRecords.length > 0) {
-      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
-      try {
-        await recordDeletionBatch({
-          actionType: 'orphan-cleanup',
-          destination,
-          items: deletedRecords,
-          freedBytes,
-          canRollback: false,
-        });
-      } catch (logErr) {
-        error('[cleanup] 记录清理批次失败:', logErr);
-      }
-    }
-
-    pushMsg(`清理完成！已成功删除 ${deletedAssetsCount} 个孤儿资源与 ${deletedOriginalsCount} 个孤立底图，共释放 ${summary.sizeText} 空间。`);
-    await loadData();
-  } catch (e) {
-    error("Failed to cleanup assets:", e);
-    pushMsg("清理失败");
   } finally {
     loading.value = false;
   }
@@ -2212,422 +1455,4 @@ html[data-theme-mode="dark"] {
   font-size: 16px;
 }
 
-.asset-hover-preview,
-.image-hover-preview {
-  position: absolute;
-  z-index: 9999;
-  pointer-events: none;
-  background-color: var(--b3-theme-background-light);
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  padding: 6px;
-  display: block;
-  overflow: hidden;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-sizing: border-box;
-  animation: am-preview-fade-in 0.15s ease-out;
-
-  &.is-interactive {
-    pointer-events: auto;
-  }
-
-  img {
-    display: block;
-    max-width: 400px;
-    max-height: 400px;
-    width: auto;
-    height: auto;
-    border-radius: 4px;
-  }
-
-  /* 视频预览容器 (支持悬浮交互与半透明控制栏) */
-  .video-preview-wrapper {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    overflow: hidden;
-    background-color: #000;
-    max-width: 440px;
-    max-height: 400px;
-    cursor: pointer;
-
-    video {
-      display: block;
-      max-width: 440px;
-      max-height: 400px;
-      width: auto;
-      height: auto;
-      border-radius: 4px;
-      background-color: #000;
-    }
-
-    /* 居中半透明微质感播放图标 */
-    .video-center-play-badge {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      background: rgba(0, 0, 0, 0.62);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.28);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-      z-index: 2;
-      pointer-events: none;
-
-      .play-icon-offset {
-        margin-left: 3px;
-      }
-    }
-
-    &:hover .video-center-play-badge {
-      transform: translate(-50%, -50%) scale(1.08);
-      background: rgba(0, 0, 0, 0.76);
-      border-color: rgba(255, 255, 255, 0.45);
-    }
-
-    /* 底部悬浮半透明渐变控制条 (移入预览窗口时平滑淡入) */
-    .video-controls-overlay {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 42px;
-      background: linear-gradient(to top, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.45) 70%, transparent 100%);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 0 10px;
-      box-sizing: border-box;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.22s ease-in-out;
-      z-index: 3;
-      cursor: default;
-    }
-
-    &:hover .video-controls-overlay {
-      opacity: 1;
-      pointer-events: auto;
-    }
-
-    /* 视频控制按钮 */
-    .video-ctrl-btn {
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.16);
-      border: 1px solid rgba(255, 255, 255, 0.22);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      padding: 0;
-      flex-shrink: 0;
-      transition: all 0.18s;
-
-      &:hover {
-        background: rgba(255, 255, 255, 0.32);
-        transform: scale(1.08);
-      }
-
-      &:active {
-        transform: scale(0.95);
-      }
-
-      .play-icon-offset {
-        margin-left: 1px;
-      }
-
-      &.mute-btn.is-muted {
-        color: #f87171;
-        border-color: rgba(248, 113, 113, 0.4);
-        background: rgba(239, 68, 68, 0.22);
-      }
-    }
-
-    /* 进度条轨道与滑块 */
-    .video-progress-container {
-      flex: 1;
-      height: 18px;
-      display: flex;
-      align-items: center;
-      cursor: pointer;
-      position: relative;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-
-    .video-progress-track {
-      width: 100%;
-      height: 3px;
-      background: rgba(255, 255, 255, 0.28);
-      border-radius: 2px;
-      position: relative;
-      transition: height 0.15s ease;
-    }
-
-    .video-progress-container:hover .video-progress-track {
-      height: 5px;
-    }
-
-    .video-progress-fill {
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      background: var(--b3-theme-primary);
-      border-radius: 2px;
-      pointer-events: none;
-    }
-
-    .video-progress-thumb {
-      position: absolute;
-      top: 50%;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #fff;
-      transform: translate(-50%, -50%) scale(0);
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
-      pointer-events: none;
-      transition: transform 0.15s ease;
-    }
-
-    .video-progress-container:hover .video-progress-thumb {
-      transform: translate(-50%, -50%) scale(1);
-    }
-
-    /* 时间文字展示 */
-    .video-time-display {
-      font-size: 11px;
-      font-variant-numeric: tabular-nums;
-      color: rgba(255, 255, 255, 0.88);
-      white-space: nowrap;
-      user-select: none;
-      flex-shrink: 0;
-      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-    }
-  }
-
-  /* 音频试听精致卡片 */
-  .audio-preview-card {
-    width: 310px;
-    padding: 10px 12px;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .audio-card-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .audio-play-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    background-color: var(--b3-theme-primary);
-    color: var(--b3-theme-on-primary);
-    border: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(66, 133, 244, 0.35);
-
-    &:hover {
-      transform: scale(1.06);
-      filter: brightness(1.1);
-    }
-
-    &:active {
-      transform: scale(0.96);
-    }
-
-    .play-icon-offset {
-      margin-left: 2px;
-    }
-
-    &.is-playing {
-      background-color: var(--b3-theme-primary);
-      animation: audioPulse 2s infinite;
-    }
-  }
-
-  .audio-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .audio-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--b3-theme-on-background);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    line-height: 1.4;
-  }
-
-  .audio-meta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 2px;
-    font-size: 11px;
-    color: var(--b3-theme-on-surface-light);
-  }
-
-  .audio-timer {
-    font-variant-numeric: tabular-nums;
-  }
-
-  .audio-muted-badge {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border-radius: 3px;
-    padding: 1px 4px;
-    font-size: 10px;
-    line-height: 1.4;
-  }
-
-  .audio-hint-badge {
-    background: rgba(66, 133, 244, 0.15);
-    color: var(--b3-theme-primary);
-    border-radius: 3px;
-    padding: 1px 5px;
-    font-size: 10px;
-    line-height: 1.4;
-    cursor: pointer;
-    font-weight: 500;
-    transition: background-color 0.15s;
-
-    &:hover {
-      background: rgba(66, 133, 244, 0.28);
-    }
-  }
-
-  .audio-error-badge {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border-radius: 3px;
-    padding: 1px 5px;
-    font-size: 10px;
-    line-height: 1.4;
-  }
-
-  .audio-mute-btn {
-    background: transparent;
-    border: 1px solid var(--b3-theme-surface-lighter);
-    color: var(--b3-theme-on-surface);
-    border-radius: 6px;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    flex-shrink: 0;
-
-    &:hover {
-      background-color: var(--b3-theme-surface-lighter);
-      color: var(--b3-theme-primary);
-    }
-
-    &.is-muted {
-      color: #ef4444;
-      border-color: rgba(239, 68, 68, 0.4);
-      background-color: rgba(239, 68, 68, 0.08);
-    }
-  }
-
-  /* 律动音波动画条 (仅在实际播放且未静音时律动) */
-  .audio-waveform-bars {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    height: 20px;
-    padding: 0 4px;
-    gap: 3px;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background-color 0.2s;
-
-    &:hover {
-      background-color: rgba(66, 133, 244, 0.06);
-    }
-
-    .bar {
-      flex: 1;
-      background-color: var(--b3-theme-primary);
-      border-radius: 2px;
-      height: 4px;
-      min-height: 3px;
-      opacity: 0.4;
-      transition: height 0.2s ease, opacity 0.2s ease;
-    }
-
-    &.is-playing:not(.is-muted) {
-      .bar {
-        opacity: 1;
-        animation: soundWave 1.1s ease-in-out infinite alternate;
-      }
-      .bar-1 { height: 35%; animation-delay: 0.1s; }
-      .bar-2 { height: 80%; animation-delay: 0.35s; }
-      .bar-3 { height: 45%; animation-delay: 0.5s; }
-      .bar-4 { height: 95%; animation-delay: 0.2s; }
-      .bar-5 { height: 60%; animation-delay: 0.65s; }
-      .bar-6 { height: 85%; animation-delay: 0.4s; }
-      .bar-7 { height: 40%; animation-delay: 0.75s; }
-      .bar-8 { height: 70%; animation-delay: 0.25s; }
-    }
-
-    &.is-muted .bar {
-      animation: none !important;
-      height: 3px !important;
-      opacity: 0.35;
-      background-color: var(--b3-theme-on-surface-light);
-    }
-  }
-}
-
-@keyframes soundWave {
-  0% {
-    height: 15%;
-  }
-  100% {
-    height: 100%;
-  }
-}
-
-@keyframes am-preview-fade-in {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
 </style>

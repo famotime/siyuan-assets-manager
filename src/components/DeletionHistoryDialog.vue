@@ -88,190 +88,19 @@
 
       <!-- 批次列表主体 -->
       <div class="dialog-body" v-if="filteredHistory.length > 0">
-        <div
+        <DeletionHistoryCard
           v-for="batch in filteredHistory"
           :key="batch.id"
-          class="history-card"
-          :class="{
-            'is-rolled-back': batch.isRolledBack,
-            'is-expanded': expandedBatchIds.has(batch.id),
-          }"
-        >
-          <!-- 卡片头部概览 -->
-          <div class="card-header" @click="toggleExpand(batch.id)">
-            <div class="card-header-left">
-              <span class="chevron-icon" :class="{ 'is-rotated': expandedBatchIds.has(batch.id) }">
-                <ChevronRight :size="16" />
-              </span>
-
-              <!-- 操作类型徽章 -->
-              <span class="badge badge-action" :class="getActionBadgeClass(batch.actionType)">
-                {{ getActionBadgeText(batch.actionType) }}
-              </span>
-
-              <!-- 删除去向徽章 -->
-              <span class="badge badge-dest" :class="batch.destination === 'os-trash' ? 'is-trash' : 'is-permanent'">
-                <Archive v-if="batch.destination === 'os-trash'" :size="11" class="badge-icon" />
-                <AlertTriangle v-else :size="11" class="badge-icon" />
-                {{ batch.destination === 'os-trash' ? '操作系统回收站' : '物理硬删' }}
-              </span>
-
-              <!-- 状态徽章 -->
-              <span v-if="batch.isRolledBack" class="badge badge-status is-rolled">
-                <Check :size="11" class="badge-icon" /> 已回退引用
-              </span>
-              <span v-else-if="batch.canRollback" class="badge badge-status is-can-rollback">
-                可回退
-              </span>
-
-              <span class="card-time">{{ formatTime(batch.timestamp) }}</span>
-            </div>
-
-            <div class="card-header-right">
-              <span class="card-stat">
-                <strong>{{ batch.items.length }}</strong> 个文件 · 释放 <strong>{{ formatSize(batch.freedBytes) }}</strong>
-              </span>
-
-              <!-- 回退主按钮（显眼图标 + 文字 + Tooltips） -->
-              <button
-                v-if="batch.canRollback && !batch.isRolledBack"
-                class="am-action-btn am-action-btn--rollback am-action-btn--with-text btn-rollback b3-tooltips b3-tooltips__sw"
-                @click.stop="openRollbackConfirm(batch)"
-                aria-label="逆向回退文档正文与属性视图中的图片引用"
-              >
-                <RotateCcw :size="14" style="fill: none !important;" />
-                <span>回退</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- 折叠展开明细详情 -->
-          <div v-if="expandedBatchIds.has(batch.id)" class="card-body">
-            <!-- 快捷工具栏（已精简：打开系统回收站仅在顶栏显示） -->
-            <div class="card-toolbar">
-              <span class="card-detail-hint">被删文件明细（共 {{ batch.items.length }} 项，支持鼠标悬浮预览图片）：</span>
-              <div class="card-toolbar-actions">
-                <button
-                  class="am-action-btn am-action-btn--copy b3-tooltips b3-tooltips__w"
-                  @click="copyBatchFilePaths(batch)"
-                  aria-label="复制文件名清单"
-                  title="一键复制本批次所有文件名到剪贴板，方便在操作系统回收站中检索"
-                >
-                  <Copy :size="14" style="fill: none !important;" />
-                </button>
-              </div>
-            </div>
-
-            <!-- 文件列表 -->
-            <div class="files-table-container">
-              <table class="files-table">
-                <thead>
-                  <tr>
-                    <th>文件名</th>
-                    <th style="width: 100px;">大小</th>
-                    <th v-if="batch.actionType === 'deduplicate'">合并替换为主保留项</th>
-                    <th v-if="batch.actionType === 'deduplicate'" style="width: 120px;">受影响引用</th>
-                    <th v-else style="width: 170px;">关联文档</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in batch.items" :key="item.fileName">
-                    <td
-                      class="file-name-cell"
-                      :class="{ 'has-preview': Boolean(item.thumbnail) }"
-                      :title="item.originalRelativePath"
-                      @mouseenter="handleShowPreview($event, item)"
-                      @mousemove="handleUpdatePreview($event)"
-                      @mouseleave="handleHidePreview"
-                    >
-                      <span class="file-name-inner">
-                        <Image v-if="item.thumbnail" :size="13" class="file-thumb-icon" title="悬浮查看被删图片预览" />
-                        <span class="file-name-text">{{ item.fileName }}</span>
-                        <span
-                          v-if="item.partialFailure"
-                          class="badge badge-status is-partial-failure"
-                          :title="item.failureReason || '该条目归一化未完全成功，已保留回退记录'"
-                        >
-                          未完成
-                        </span>
-                      </span>
-                    </td>
-                    <td class="file-size-cell">{{ formatSize(item.size) }}</td>
-                    <td v-if="batch.actionType === 'deduplicate'" class="canonical-cell">
-                      <span v-if="item.canonicalName" class="canonical-tag" :title="item.canonicalName">
-                        ↳ {{ item.canonicalName }}
-                      </span>
-                      <span v-else class="text-muted">-</span>
-                    </td>
-                    <td v-if="batch.actionType === 'deduplicate'" class="refs-cell">
-                      <button
-                        v-if="item.affectedBlocks && item.affectedBlocks.length > 0"
-                        class="am-link-btn"
-                        @click.stop="handleJumpToItemDoc(item)"
-                        :title="getItemDocTooltip(item)"
-                      >
-                        <FileText :size="11" />
-                        <span>{{ item.affectedBlocks.length }} 处引用</span>
-                      </button>
-                      <span v-else class="text-muted">无引用</span>
-                    </td>
-                    <td v-else class="doc-link-cell">
-                      <button
-                        v-if="hasItemDoc(item)"
-                        class="am-link-btn doc-jump-btn"
-                        :title="getItemDocTooltip(item)"
-                        @click.stop="handleJumpToItemDoc(item)"
-                      >
-                        <FileText :size="12" class="doc-icon" style="fill: none !important;" />
-                        <span class="doc-title-text">{{ getItemDocDisplayTitle(item) }}</span>
-                      </button>
-                      <span v-else class="text-muted">无引用</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- 回退报告（若已执行过回退） -->
-            <div v-if="batch.isRolledBack && batch.rollbackReport" class="rollback-report-box">
-              <div class="report-header">
-                <CheckCircle2 :size="14" class="report-icon" />
-                <span>已于 {{ formatTime(batch.rolledBackAt || 0) }} 执行逆向回退：</span>
-              </div>
-              <div class="report-stats">
-                <span>成功还原: <strong>{{ batch.rollbackReport.restoredBlocksCount }}</strong> 处块引用</span>
-                <span v-if="batch.rollbackReport.skippedBlocksCount > 0" class="text-warning">
-                  · 跳过漂移块: <strong>{{ batch.rollbackReport.skippedBlocksCount }}</strong> 处（块已修改或删除）
-                </span>
-                <span v-if="batch.rollbackReport.failedBlocksCount > 0" class="text-danger">
-                  · 失败: <strong>{{ batch.rollbackReport.failedBlocksCount }}</strong> 处
-                </span>
-                <span v-if="(batch.rollbackReport.degradedPositionCount || 0) > 0" class="text-warning">
-                  · {{ t('rollbackDegradedPosition', '位置降级') }}:
-                  <strong>{{ batch.rollbackReport.degradedPositionCount }}</strong>
-                  处（{{ t('rollbackDegradedPositionHint', '原相邻块已变化，已按近似位置还原') }}）
-                </span>
-                <span v-if="(batch.rollbackReport.exactRestoredCount || 0) > 0" class="text-muted">
-                  · 精确还原 <strong>{{ batch.rollbackReport.exactRestoredCount }}</strong> 块（按合并前快照整段还原）
-                </span>
-                <span v-if="(batch.rollbackReport.approximateRestoredCount || 0) > 0" class="text-warning">
-                  · {{ t('rollbackApproximate', '近似还原') }}
-                  <strong>{{ batch.rollbackReport.approximateRestoredCount }}</strong>
-                  处（值已被改动，按原引用处数限量还原）
-                </span>
-                <span v-if="(batch.rollbackReport.restoredIalCount || 0) > 0" class="text-muted">
-                  · 块属性引用（题头图等）<strong>{{ batch.rollbackReport.restoredIalCount }}</strong> 处
-                </span>
-                <span v-if="(batch.rollbackReport.restoredViewCellsCount || 0) > 0" class="text-muted">
-                  · 数据库单元格 <strong>{{ batch.rollbackReport.restoredViewCellsCount }}</strong> 处
-                  <template v-if="(batch.rollbackReport.skippedViewCellsCount || 0) > 0">
-                    （跳过 {{ batch.rollbackReport.skippedViewCellsCount }} 处已改动/已删除的单元格）
-                  </template>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+          :batch="batch"
+          :is-expanded="expandedBatchIds.has(batch.id)"
+          :doc-info-map="docInfoMap"
+          @toggle-expand="toggleExpand(batch.id)"
+          @rollback="openRollbackConfirm(batch)"
+          @jump-item-doc="handleJumpToItemDoc"
+          @show-preview="handleShowPreview"
+          @update-preview="handleUpdatePreview"
+          @hide-preview="handleHidePreview"
+        />
       </div>
 
       <!-- 空状态 -->
@@ -408,18 +237,14 @@ import {
   History,
   X,
   Trash2,
-  ChevronRight,
-  Archive,
   AlertTriangle,
   RotateCcw,
   Copy,
-  Check,
   CheckCircle2,
   AlertCircle,
   ExternalLink,
-  Image,
-  FileText,
 } from 'lucide-vue-next';
+import DeletionHistoryCard from './DeletionHistoryCard.vue';
 import {
   getDeletionHistory,
   getDeletionHistoryLimit,
@@ -635,35 +460,6 @@ function t(key: string, fallback: string): string {
   return (i18n && i18n[key]) || fallback;
 }
 
-function getActionBadgeText(type: DeletionActionType): string {
-  switch (type) {
-    case 'deduplicate':
-      return '图片去重合并';
-    case 'orphan-cleanup':
-      return '孤儿资源清理';
-    case 'orphan-original-cleanup':
-      return '孤立底图清理';
-    case 'single-delete':
-      return '单文件删除';
-    case 'batch-delete':
-      return '批量选中删除';
-    default:
-      return '删除操作';
-  }
-}
-
-function getActionBadgeClass(type: DeletionActionType): string {
-  switch (type) {
-    case 'deduplicate':
-      return 'badge-dedup';
-    case 'orphan-cleanup':
-    case 'orphan-original-cleanup':
-      return 'badge-clean';
-    default:
-      return 'badge-manual';
-  }
-}
-
 async function handleOpenRecycleBin() {
   const ok = await openOSRecycleBin();
   if (ok) {
@@ -671,13 +467,6 @@ async function handleOpenRecycleBin() {
   } else {
     showMessage('未能自动打开系统回收站，请您手动在操作系统桌面或文件管理器中打开', 5000, 'info');
   }
-}
-
-function copyBatchFilePaths(batch: IDeletionBatch) {
-  const text = batch.items.map((i) => i.fileName).join('\n');
-  navigator.clipboard.writeText(text).then(() => {
-    showMessage(`已复制 ${batch.items.length} 个文件名到剪贴板`);
-  });
 }
 
 function copyChecklist() {
@@ -822,34 +611,6 @@ function getBatchAffectedDocIds(batch: IDeletionBatch): string[] {
 }
 
 /**
- * 判断卡片是否有可跳转的关联文档
- */
-function hasRelatedDocs(batch: IDeletionBatch): boolean {
-  return getBatchAffectedDocIds(batch).length > 0;
-}
-
-/**
- * 按钮 hover 提示文案
- */
-function getJumpToDocTitle(batch: IDeletionBatch): string {
-  const docIds = getBatchAffectedDocIds(batch);
-  if (docIds.length === 0) {
-    return '该记录中的文件未被任何文档引用，无关联文档可跳转';
-  }
-  if (docIds.length === 1) {
-    return '点击跳转到被删除文件所在文档';
-  }
-  return `点击在后台打开所有关联文档（共 ${docIds.length} 篇）`;
-}
-
-/**
- * 获取单个文件涉及的关联文档数量
- */
-function getItemDocCount(item: IDeletedItemRecord): number {
-  return getItemDocIds(item).length;
-}
-
-/**
  * 获取条目关联的所有有效文档 ID
  */
 function getItemDocIds(item: IDeletedItemRecord): string[] {
@@ -860,51 +621,6 @@ function getItemDocIds(item: IDeletedItemRecord): string[] {
     if (docId) docIds.add(docId);
   }
   return Array.from(docIds);
-}
-
-/**
- * 判断条目是否有可跳转的关联文档
- */
-function hasItemDoc(item: IDeletedItemRecord): boolean {
-  return getItemDocIds(item).length > 0;
-}
-
-/**
- * 获取明细行中显示的关联文档简称（单篇显示标题，多篇显示首篇加篇数）
- */
-function getItemDocDisplayTitle(item: IDeletedItemRecord): string {
-  const docIds = getItemDocIds(item);
-  if (docIds.length === 0) return '无引用';
-  const firstId = docIds[0];
-  const info = docInfoMap.value.get(firstId);
-  const firstTitle = info?.title || firstId;
-
-  if (docIds.length === 1) {
-    return firstTitle;
-  }
-  return `${firstTitle} 等 ${docIds.length} 篇`;
-}
-
-/**
- * 获取明细行悬浮显示的完整文档名或多文档清单
- */
-function getItemDocTooltip(item: IDeletedItemRecord): string {
-  const docIds = getItemDocIds(item);
-  if (docIds.length === 0) return '该条目未被任何文档引用';
-
-  if (docIds.length === 1) {
-    const info = docInfoMap.value.get(docIds[0]);
-    if (info?.hpath) {
-      return `跳转到文档：${info.hpath}`;
-    }
-    return `跳转到文档：${info?.title || docIds[0]}`;
-  }
-
-  const titles = docIds.map((id) => {
-    const info = docInfoMap.value.get(id);
-    return info?.hpath || info?.title || id;
-  });
-  return `关联 ${docIds.length} 篇文档，点击跳转打开：\n${titles.join('\n')}`;
 }
 
 /**
@@ -960,36 +676,6 @@ async function openDocumentByIds(docIds: string[]) {
     warn('[DeletionHistory] 跳转文档失败:', err);
     showMessage(`跳转文档失败: ${err.message || err}`, 5000, 'error');
   }
-}
-
-/**
- * 点击卡片头部的“跳转到文档”
- */
-async function handleJumpToDoc(batch: IDeletionBatch) {
-  let docIds = getBatchAffectedDocIds(batch);
-
-  // 若没有记录的 affectedBlocks，尝试按文件名在思源数据库中检索潜在引用
-  if (docIds.length === 0 && batch.items.length > 0) {
-    try {
-      for (const item of batch.items) {
-        const queryFile = item.fileName.replace(/'/g, "''");
-        const rows = await sql(
-          `SELECT root_id FROM blocks WHERE (markdown LIKE '%assets/${queryFile}%' OR ial LIKE '%assets/${queryFile}%') AND root_id != '' LIMIT 1`
-        );
-        if (rows && rows.length > 0 && rows[0].root_id) {
-          docIds.push(rows[0].root_id);
-          break;
-        }
-      }
-    } catch {}
-  }
-
-  if (docIds.length === 0) {
-    showMessage('该记录中的文件未被任何文档引用，无关联文档可跳转', 4000, 'info');
-    return;
-  }
-
-  await openDocumentByIds(docIds);
 }
 
 /**

@@ -25,10 +25,20 @@
 | `src/index.ts` | 插件类入口，注册顶栏图标、图片右键菜单（动态感知二次编辑状态）与生命周期 |
 | `src/main.ts` | Vue 应用挂载与卸载绑定 |
 | `src/App.vue` | 顶层弹窗与交互编排 |
-| `src/components/AssetsManager.vue` | 资源管理主面板：搜索、多维筛选（含可二次编辑）、悬浮预览、孤儿资源与孤立底图清理 |
+| `src/components/AssetsManager.vue` | 资源管理主面板：搜索、多维筛选（含可二次编辑）、平铺与文档归类视图切换、操作工具栏编排 |
+| `src/components/AssetMediaPreview.vue` | 媒体悬浮预览子组件：图片预览、音视频悬浮播放器（默认静音、播放/暂停、快进、音频律动） |
 | `src/components/VirtualAssetList.vue` | 虚拟滚动列表：高性能渲染、类型徽章（`getAssetBadgeText`）与行级操作 |
+| `src/components/DocumentAssetGroupList.vue` | 按文档归类视图：扁平化虚拟列表与文档层级折叠 |
+| `src/components/DeletionHistoryDialog.vue` | 删除历史弹窗：容量配置、分类筛选、系统回收站跳转与逆向回退确认 |
+| `src/components/DeletionHistoryCard.vue` | 删除历史单批次卡片：折叠展开、明细表格、文档跳转与回退报告 |
 | `src/components/ImageEditorDialog.vue` | TUI Editor 弹窗：矢量图层还原注入、重置底图、固化图层、导出与保存 |
+| `src/utils/cleanup-workflow.ts` | 单文件删除、批量删除与孤儿/孤立底图综合清理长业务编排服务层 |
 | `src/utils/asset-workflow.ts` | 保存编辑与重命名长业务编排服务层 |
+| `src/utils/deduplicate.ts` | 去重扫描门面、大小分桶与感知哈希调度流水线、缓存持久化 |
+| `src/utils/dedup-hash.ts` | 图像 SHA-256、保底哈希与 64 位 dHash 感知哈希纯算法计算层 |
+| `src/utils/dedup-normalize.ts` | 去重归一化合并工作流层：引用重定向、数据库单元格改写与快照记录 |
+| `src/utils/editor-tools.ts` | 图片编辑器工具栏配置与 SVG 图标常量层 |
+| `src/utils/plugin-settings.ts` | 插件原生设置弹窗 DOM 构建与配置数据持久化 |
 | `src/utils/reedit-data.ts` | 二次编辑元数据自适应压缩/解压、HTML 实体兼容与校验 |
 | `src/utils/tui-image-editor-bridge.ts` | Fabric 矢量图层抽取、反序列化注入、序号-形状双向关联恢复 |
 | `src/utils/storage/` | 统一存储门面与 Seam 抽象（`IStorageAdapter`、`ElectronStorageAdapter`、`HttpStorageAdapter`、`MemoryStorageAdapter`） |
@@ -36,6 +46,8 @@
 | `src/utils/siyuan-block.ts` | 块引用原子替换/清理、`custom-asset-reedit` 块属性原子维护与批量查询 |
 | `src/utils/asset-catalog.ts` | 统一资产目录装配流水线（`resolveCatalogPipeline`、`fetchCatalogInventory`）：关联映射与孤立底图判定 |
 | `src/utils/siyuan-db.ts` | 资源文件聚合、引用统计门面、二次编辑元数据绑定与孤立底图扫描清理 |
+| `src/utils/rollback-engine.ts` | 批次逆向回退引擎：快照还原块正文、属性视图单元格与回退文件预检 |
+| `src/utils/rollback-anchor.ts` | AST 文档序位置锚点采集与还原再锚定链 |
 | `src/utils/host-isolation.ts` | 宿主视口滚动锁定拦截与 TUI 隐式 SVG 节点物理脱标清理 |
 | `src/utils/image-editor.ts` | 导出流水线（`prepareCanvasExport`）、画布重置、100% 分辨率换算、Alpha 切边 |
 | `src/utils/asset-list.ts` | 资源过滤、排序、扩展名拆分、图标徽章（`getAssetBadgeText`）、大小格式化与清理统计 |
@@ -46,7 +58,7 @@
 ## 4. 开发与测试命令
 
 - `npm install` — 安装依赖。
-- `npm test` — 运行 Vitest 单元测试（20 套件 / 129 测试，jsdom 环境）。
+- `npm test` — 运行 Vitest 单元测试（39 套件 / 356 测试，jsdom 环境）。
 - `npx vitest run tests/asset-workflow.test.ts` — 运行指定测试文件。
 - `npm run build` — 生产构建，输出到 `dist/` 并生成 `package.zip`。
 - `npm run dev` — Watch 构建至 `.env` 中 `VITE_SIYUAN_WORKSPACE_PATH` 配置的插件目录。
