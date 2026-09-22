@@ -235,7 +235,7 @@
       v-if="previewUrl"
       class="asset-hover-preview image-hover-preview"
       :class="{
-        'is-interactive': previewType === 'audio',
+        'is-interactive': previewType === 'audio' || previewType === 'video',
         'is-video': previewType === 'video',
         'is-audio': previewType === 'audio'
       }"
@@ -246,16 +246,73 @@
       <!-- 图片预览 -->
       <img v-if="previewType === 'image'" :src="previewUrl" alt="预览图" />
 
-      <!-- 视频预览 (静音循环自动播放) -->
-      <video
+      <!-- 视频预览 (带半透明悬浮控制栏与居中播放指示) -->
+      <div
         v-else-if="previewType === 'video'"
-        ref="videoPreviewEl"
-        :src="previewUrl"
-        autoplay
-        loop
-        muted
-        playsinline
-      ></video>
+        class="video-preview-wrapper"
+        @click="toggleVideoPlay"
+      >
+        <video
+          ref="videoPreviewEl"
+          :src="previewUrl"
+          autoplay
+          loop
+          :muted="videoMuted"
+          playsinline
+          @loadedmetadata="handleVideoLoadedMetadata"
+          @timeupdate="handleVideoTimeUpdate"
+          @play="isVideoPlaying = true"
+          @pause="isVideoPlaying = false"
+          @error="handleVideoError"
+        ></video>
+
+        <!-- 暂停时居中半透明微质感播放图标 -->
+        <div v-if="!isVideoPlaying" class="video-center-play-badge" title="点击播放">
+          <Play :size="28" class="play-icon-offset" />
+        </div>
+
+        <!-- 底部平滑渐显的半透明控制条 -->
+        <div class="video-controls-overlay" @click.stop>
+          <!-- 播放/暂停按钮 -->
+          <button
+            class="video-ctrl-btn play-pause-btn"
+            :class="{ 'is-playing': isVideoPlaying }"
+            @click.stop="toggleVideoPlay"
+            :title="isVideoPlaying ? '暂停' : '播放'"
+          >
+            <Pause v-if="isVideoPlaying" :size="14" />
+            <Play v-else :size="14" class="play-icon-offset" />
+          </button>
+
+          <!-- 进度条区域 (支持点击与拖拽快进) -->
+          <div
+            class="video-progress-container"
+            ref="videoProgressBarEl"
+            @mousedown.stop="handleProgressMouseDown"
+          >
+            <div class="video-progress-track">
+              <div class="video-progress-fill" :style="{ width: videoProgressPercent + '%' }"></div>
+              <div class="video-progress-thumb" :style="{ left: videoProgressPercent + '%' }"></div>
+            </div>
+          </div>
+
+          <!-- 当前时间 / 总时长 -->
+          <span class="video-time-display">
+            {{ formatMediaTime(videoCurrentTime) }} / {{ formatMediaTime(videoDuration) }}
+          </span>
+
+          <!-- 静音/声音切换按钮 -->
+          <button
+            class="video-ctrl-btn mute-btn"
+            :class="{ 'is-muted': videoMuted }"
+            @click.stop="toggleVideoMute"
+            :title="videoMuted ? '取消静音 (恢复声音)' : '静音'"
+          >
+            <VolumeX v-if="videoMuted" :size="14" />
+            <Volume2 v-else :size="14" />
+          </button>
+        </div>
+      </div>
 
       <!-- 音频预览卡片 -->
       <div v-else-if="previewType === 'audio'" class="audio-preview-card">
@@ -548,6 +605,113 @@ let hideTimeout: number | null = null;
 const videoPreviewEl = ref<HTMLVideoElement | null>(null);
 const audioPreviewEl = ref<HTMLAudioElement | null>(null);
 
+// 视频试听静音与控制状态 (每次新打开界面默认始终静音播放，但在同次打开期间切换视频保持会话状态)
+const videoMuted = ref(true);
+const isVideoPlaying = ref(true);
+const videoCurrentTime = ref(0);
+const videoDuration = ref(0);
+const videoLoadError = ref(false);
+const videoProgressBarEl = ref<HTMLElement | null>(null);
+let isDraggingVideoProgress = false;
+
+const videoProgressPercent = computed(() => {
+  if (!videoDuration.value || videoDuration.value <= 0) return 0;
+  return Math.min(100, Math.max(0, (videoCurrentTime.value / videoDuration.value) * 100));
+});
+
+function toggleVideoMute() {
+  videoMuted.value = !videoMuted.value;
+  if (videoPreviewEl.value) {
+    videoPreviewEl.value.muted = videoMuted.value;
+  }
+}
+
+function toggleVideoPlay() {
+  if (!videoPreviewEl.value) return;
+  if (isVideoPlaying.value) {
+    videoPreviewEl.value.pause();
+    isVideoPlaying.value = false;
+  } else {
+    const playPromise = videoPreviewEl.value.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          isVideoPlaying.value = true;
+        })
+        .catch((err) => {
+          console.warn('[AssetsManager] Video play failed:', err);
+          isVideoPlaying.value = false;
+        });
+    } else {
+      isVideoPlaying.value = true;
+    }
+  }
+}
+
+function handleVideoLoadedMetadata() {
+  if (videoPreviewEl.value) {
+    videoDuration.value = videoPreviewEl.value.duration || 0;
+    videoPreviewEl.value.muted = videoMuted.value;
+    const playPromise = videoPreviewEl.value.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          isVideoPlaying.value = true;
+        })
+        .catch((err) => {
+          console.warn('[AssetsManager] Video autoplay blocked or failed:', err);
+          isVideoPlaying.value = false;
+        });
+    }
+  }
+}
+
+function handleVideoTimeUpdate() {
+  if (videoPreviewEl.value && !isDraggingVideoProgress) {
+    videoCurrentTime.value = videoPreviewEl.value.currentTime;
+    if (!videoDuration.value && videoPreviewEl.value.duration) {
+      videoDuration.value = videoPreviewEl.value.duration;
+    }
+  }
+}
+
+function handleVideoError(e: Event) {
+  console.warn('[AssetsManager] Video loading error:', e);
+  videoLoadError.value = true;
+  isVideoPlaying.value = false;
+}
+
+function seekVideoByEvent(e: MouseEvent) {
+  if (!videoProgressBarEl.value || !videoPreviewEl.value || !videoDuration.value) return;
+  const rect = videoProgressBarEl.value.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const offsetX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+  const targetTime = (offsetX / rect.width) * videoDuration.value;
+  videoPreviewEl.value.currentTime = targetTime;
+  videoCurrentTime.value = targetTime;
+}
+
+function handleProgressMouseMove(e: MouseEvent) {
+  if (!isDraggingVideoProgress) return;
+  seekVideoByEvent(e);
+}
+
+function handleProgressMouseUp() {
+  if (isDraggingVideoProgress) {
+    isDraggingVideoProgress = false;
+    window.removeEventListener('mousemove', handleProgressMouseMove);
+    window.removeEventListener('mouseup', handleProgressMouseUp);
+  }
+}
+
+function handleProgressMouseDown(e: MouseEvent) {
+  if (!videoDuration.value) return;
+  isDraggingVideoProgress = true;
+  seekVideoByEvent(e);
+  window.addEventListener('mousemove', handleProgressMouseMove);
+  window.addEventListener('mouseup', handleProgressMouseUp);
+}
+
 // 音频试听静音状态 (全局记忆持久化)
 const AUDIO_MUTED_STORAGE_KEY = 'siyuan-assets-manager-audio-preview-muted';
 const audioMuted = ref(localStorage.getItem(AUDIO_MUTED_STORAGE_KEY) === 'true');
@@ -655,6 +819,15 @@ function cleanupPreview() {
       audioPreviewEl.value.load();
     } catch (e) {}
   }
+  if (isDraggingVideoProgress) {
+    isDraggingVideoProgress = false;
+    window.removeEventListener('mousemove', handleProgressMouseMove);
+    window.removeEventListener('mouseup', handleProgressMouseUp);
+  }
+  videoCurrentTime.value = 0;
+  videoDuration.value = 0;
+  isVideoPlaying.value = true;
+  videoLoadError.value = false;
   if (previewBlobUrl) {
     URL.revokeObjectURL(previewBlobUrl);
     previewBlobUrl = null;
@@ -720,6 +893,8 @@ async function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo,
       previewType.value = 'video';
       const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
       previewUrl.value = `${encodeURI(`/assets/${asset.name}`)}${versionQuery}`;
+      isVideoPlaying.value = true;
+      videoLoadError.value = false;
     } else if (isAud) {
       previewType.value = 'audio';
       const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
@@ -757,8 +932,8 @@ function handleUpdatePreview(payload: { event: MouseEvent }) {
   const { event } = payload;
   mouseX.value = event.clientX;
   mouseY.value = event.clientY;
-  // 当音频卡片已展示时，固定坐标不再跟手乱晃，以便用户鼠标平滑移入卡片进行交互
-  if (previewUrl.value && previewType.value !== 'audio') {
+  // 当音视频卡片已展示时，固定坐标不再跟手乱晃，以便用户鼠标平滑移入卡片进行交互
+  if (previewUrl.value && previewType.value !== 'audio' && previewType.value !== 'video') {
     positionPreview(mouseX.value, mouseY.value);
   }
 }
@@ -794,8 +969,8 @@ function positionPreview(clientX: number, clientY: number) {
 }
 
 function handleHidePreview() {
-  // 如果是可交互的音频卡片，提供 200ms 缓冲桥接延时，方便鼠标平滑移入卡片点击静音
-  if (previewType.value === 'audio') {
+  // 如果是可交互的音频或视频卡片，提供 200ms 缓冲桥接延时，方便鼠标平滑移入卡片点击控件
+  if (previewType.value === 'audio' || previewType.value === 'video') {
     scheduleHidePreview(200);
   } else {
     scheduleHidePreview(0);
@@ -833,6 +1008,11 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 onUnmounted(() => {
+  if (isDraggingVideoProgress) {
+    isDraggingVideoProgress = false;
+    window.removeEventListener('mousemove', handleProgressMouseMove);
+    window.removeEventListener('mouseup', handleProgressMouseUp);
+  }
   handleHidePreview();
   window.removeEventListener('assets-manager-refresh', handleGlobalRefresh);
   window.removeEventListener('keydown', handleKeyDown);
@@ -1027,6 +1207,8 @@ const handleGlobalRefresh = (event?: Event) => {
 };
 
 onMounted(() => {
+  // 每次新打开资源管家界面，视频预览默认始终静音播放
+  videoMuted.value = true;
   // 初次加载确立排序基准，之后除非用户点刷新或改排序字段，卡片顺序不再变动
   loadData({ resort: true });
   window.addEventListener('assets-manager-refresh', handleGlobalRefresh);
@@ -2060,14 +2242,185 @@ html[data-theme-mode="dark"] {
     border-radius: 4px;
   }
 
-  video {
-    display: block;
-    max-width: 420px;
-    max-height: 380px;
-    width: auto;
-    height: auto;
+  /* 视频预览容器 (支持悬浮交互与半透明控制栏) */
+  .video-preview-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 4px;
+    overflow: hidden;
     background-color: #000;
+    max-width: 440px;
+    max-height: 400px;
+    cursor: pointer;
+
+    video {
+      display: block;
+      max-width: 440px;
+      max-height: 400px;
+      width: auto;
+      height: auto;
+      border-radius: 4px;
+      background-color: #000;
+    }
+
+    /* 居中半透明微质感播放图标 */
+    .video-center-play-badge {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.62);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 2;
+      pointer-events: none;
+
+      .play-icon-offset {
+        margin-left: 3px;
+      }
+    }
+
+    &:hover .video-center-play-badge {
+      transform: translate(-50%, -50%) scale(1.08);
+      background: rgba(0, 0, 0, 0.76);
+      border-color: rgba(255, 255, 255, 0.45);
+    }
+
+    /* 底部悬浮半透明渐变控制条 (移入预览窗口时平滑淡入) */
+    .video-controls-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 42px;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.45) 70%, transparent 100%);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      box-sizing: border-box;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s ease-in-out;
+      z-index: 3;
+      cursor: default;
+    }
+
+    &:hover .video-controls-overlay {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* 视频控制按钮 */
+    .video-ctrl-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.16);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      flex-shrink: 0;
+      transition: all 0.18s;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.32);
+        transform: scale(1.08);
+      }
+
+      &:active {
+        transform: scale(0.95);
+      }
+
+      .play-icon-offset {
+        margin-left: 1px;
+      }
+
+      &.mute-btn.is-muted {
+        color: #f87171;
+        border-color: rgba(248, 113, 113, 0.4);
+        background: rgba(239, 68, 68, 0.22);
+      }
+    }
+
+    /* 进度条轨道与滑块 */
+    .video-progress-container {
+      flex: 1;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      position: relative;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .video-progress-track {
+      width: 100%;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.28);
+      border-radius: 2px;
+      position: relative;
+      transition: height 0.15s ease;
+    }
+
+    .video-progress-container:hover .video-progress-track {
+      height: 5px;
+    }
+
+    .video-progress-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      background: var(--b3-theme-primary);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+
+    .video-progress-thumb {
+      position: absolute;
+      top: 50%;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #fff;
+      transform: translate(-50%, -50%) scale(0);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+      transition: transform 0.15s ease;
+    }
+
+    .video-progress-container:hover .video-progress-thumb {
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    /* 时间文字展示 */
+    .video-time-display {
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      color: rgba(255, 255, 255, 0.88);
+      white-space: nowrap;
+      user-select: none;
+      flex-shrink: 0;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    }
   }
 
   /* 音频试听精致卡片 */
