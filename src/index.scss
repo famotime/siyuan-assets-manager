@@ -56,6 +56,10 @@ $transition-slow: 0.3s ease;
   --am-primary-hover: color-mix(in srgb, var(--b3-theme-primary, #4285f4) 18%, transparent);
   --am-primary-border: color-mix(in srgb, var(--b3-theme-primary, #4285f4) 40%, transparent);
 
+  // 2.1 资源列表行悬浮背景色：与卡片标题栏(var(--b3-theme-background-light))形成明晰视觉区分
+  --am-row-hover: color-mix(in srgb, var(--b3-theme-primary, #4285f4) 6%, var(--b3-theme-surface, #fff));
+  --am-row-hover-unref: color-mix(in srgb, #f59e0b 6%, var(--b3-theme-surface, #fff));
+
   // 3. 危险与警告色阶
   --am-error-subtle: color-mix(in srgb, var(--b3-theme-error, #d23f31) 10%, transparent);
   --am-error-hover: color-mix(in srgb, var(--b3-theme-error, #d23f31) 16%, transparent);
@@ -87,6 +91,8 @@ html[data-theme-mode="dark"] {
   --am-cat-video: #f87171;
   --am-cat-archive: #a78bfa;
   --am-badge-original-color: #fbbf24;
+  --am-row-hover: color-mix(in srgb, var(--b3-theme-primary, #4285f4) 9%, var(--b3-theme-surface, #2c2c2c));
+  --am-row-hover-unref: color-mix(in srgb, #fbbf24 8%, var(--b3-theme-surface, #2c2c2c));
 }
 
 // ===== 线框图标绝对防御屏障 (Anti-Pollution Shield) =====

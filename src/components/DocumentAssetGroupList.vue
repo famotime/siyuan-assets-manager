@@ -209,7 +209,7 @@
             <div class="col-actions asset-actions" @click.stop>
               <button
                 v-if="row.data.asset.docCount > 0"
-                class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
+                class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('open-docs', row.data.asset)"
                 aria-label="在后台打开并定位引用此资源的文档"
               >
@@ -217,7 +217,7 @@
               </button>
               <button
                 v-if="isImage(row.data.asset.name) || row.data.asset.isOriginal"
-                class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__s"
+                class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('edit', row.data.asset)"
                 aria-label="二次编辑与矢量标注"
               >
@@ -225,7 +225,7 @@
               </button>
               <button
                 v-if="!row.data.asset.isOriginal"
-                class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
+                class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('rename', row.data.asset)"
                 aria-label="重命名此资源并自动更新引用"
               >
@@ -509,7 +509,6 @@ onUnmounted(() => {
  */
 .doc-row {
   box-sizing: border-box;
-  overflow: hidden;
   flex-shrink: 0;
 }
 
@@ -523,6 +522,7 @@ onUnmounted(() => {
   border: 1px solid var(--b3-theme-surface-lighter);
   border-radius: 8px 8px 0 0;
   background-color: var(--b3-theme-surface);
+  overflow: hidden;
 
   /* 折叠时这一行就是整张卡片，四角都收圆 */
   &.is-collapsed {
@@ -775,11 +775,19 @@ onUnmounted(() => {
   }
 
   &:hover {
-    background-color: var(--b3-theme-background-light);
+    /* 悬浮时提升层级，确保下方相邻行背景与边框不会遮挡其 tooltip 与浮层 */
+    position: relative;
+    z-index: 5;
+    /* 悬浮底色使用主题微混色，与标题栏(var(--b3-theme-background-light))形成鲜明区分 */
+    background-color: var(--am-row-hover, color-mix(in srgb, var(--b3-theme-primary, #4285f4) 6%, var(--b3-theme-surface, #fff)));
 
     .asset-title-text {
       color: var(--b3-theme-primary);
     }
+  }
+
+  &.is-unreferenced:hover {
+    background-color: var(--am-row-hover-unref, color-mix(in srgb, #f59e0b 6%, var(--b3-theme-surface, #fff)));
   }
 
   &.is-selected {
@@ -968,6 +976,8 @@ onUnmounted(() => {
   /* 渐进式呈现：未悬停时淡化 */
   opacity: 0.25;
   transition: opacity 0.15s ease;
+  position: relative;
+  z-index: 2;
 }
 
 .asset-item:hover .asset-actions,
@@ -989,16 +999,19 @@ onUnmounted(() => {
   justify-content: center;
   cursor: pointer;
   transition: all 0.15s ease;
+  position: relative;
 
   &:hover {
     background-color: var(--am-surface-hover);
     color: var(--b3-theme-on-surface);
+    z-index: 10;
   }
 
   :deep(svg),
   svg {
     fill: none !important;
     stroke: currentColor !important;
+    pointer-events: none;
   }
 }
 

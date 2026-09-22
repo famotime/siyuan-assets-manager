@@ -133,7 +133,7 @@
           <div class="col-actions asset-actions" @click.stop>
             <button
               v-if="item.data.docCount > 0"
-              class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
+              class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('open-docs', item.data)"
               aria-label="在后台打开并定位引用此资源的文档"
             >
@@ -141,7 +141,7 @@
             </button>
             <button
               v-if="isImage(item.data.name) || item.data.isOriginal"
-              class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__s"
+              class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('edit', item.data)"
               aria-label="二次编辑与矢量标注"
             >
@@ -149,7 +149,7 @@
             </button>
             <button
               v-if="!item.data.isOriginal"
-              class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
+              class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('rename', item.data)"
               aria-label="重命名此资源并自动更新引用"
             >
@@ -399,7 +399,9 @@ onUnmounted(() => {
   transition: background-color 0.15s ease;
 
   &:hover {
-    background-color: var(--b3-theme-background-light);
+    position: relative;
+    z-index: 5;
+    background-color: var(--am-row-hover, color-mix(in srgb, var(--b3-theme-primary, #4285f4) 6%, var(--b3-theme-surface, #fff)));
     
     .asset-title-text {
       color: var(--b3-theme-primary);
@@ -581,6 +583,8 @@ onUnmounted(() => {
   opacity: 0.25;
   transition: opacity 0.15s ease;
   pointer-events: auto;
+  position: relative;
+  z-index: 2;
 }
 
 .asset-item:hover .asset-actions,
@@ -596,10 +600,12 @@ onUnmounted(() => {
   background-color: transparent;
   color: var(--b3-theme-on-surface-light);
   border: 1px solid transparent;
+  position: relative;
 
   &:hover {
     background-color: var(--b3-theme-surface-lighter);
     color: var(--b3-theme-on-surface);
+    z-index: 10;
   }
 
   /* 强制使用线框样式，防止全局被填充 */
@@ -607,6 +613,7 @@ onUnmounted(() => {
     fill: none !important;
     stroke: currentColor !important;
     stroke-width: 2px !important;
+    pointer-events: none;
   }
 }
 

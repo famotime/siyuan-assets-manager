@@ -372,4 +372,19 @@ describe('DocumentAssetGroupList component', () => {
     // 资源翻倍，DOM 行数不变：渲染量与数据量解耦才是虚拟滚动
     expect(largeCount).toBe(smallCount);
   }, 120000);
+
+  it('renders action buttons with b3-tooltips__sw to avoid clipping at boundaries', async () => {
+    mountList();
+    await nextTick();
+
+    const actionButtons = mountContainer.querySelectorAll<HTMLButtonElement>('.asset-actions .am-btn--icon');
+    expect(actionButtons.length).toBeGreaterThan(0);
+
+    for (const btn of actionButtons) {
+      expect(btn.classList.contains('b3-tooltips')).toBe(true);
+      expect(btn.classList.contains('b3-tooltips__sw')).toBe(true);
+      expect(btn.hasAttribute('aria-label')).toBe(true);
+      expect(btn.getAttribute('aria-label')?.length).toBeGreaterThan(0);
+    }
+  });
 });
