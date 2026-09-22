@@ -264,6 +264,11 @@
                 <span v-if="batch.rollbackReport.failedBlocksCount > 0" class="text-danger">
                   · 失败: <strong>{{ batch.rollbackReport.failedBlocksCount }}</strong> 处
                 </span>
+                <span v-if="(batch.rollbackReport.degradedPositionCount || 0) > 0" class="text-warning">
+                  · {{ t('rollbackDegradedPosition', '位置降级') }}:
+                  <strong>{{ batch.rollbackReport.degradedPositionCount }}</strong>
+                  处（{{ t('rollbackDegradedPositionHint', '原相邻块已变化，已按近似位置还原') }}）
+                </span>
               </div>
             </div>
           </div>
@@ -527,6 +532,12 @@ function formatTime(timestamp: number): string {
 
 function formatSize(bytes: number): string {
   return formatAssetSize(bytes);
+}
+
+/** 用户可见文案优先取插件 i18n，缺失时回落中文（取值方式与 src/index.ts 一致） */
+function t(key: string, fallback: string): string {
+  const i18n = (usePlugin() as any)?.i18n;
+  return (i18n && i18n[key]) || fallback;
 }
 
 function getActionBadgeText(type: DeletionActionType): string {

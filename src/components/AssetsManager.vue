@@ -403,6 +403,7 @@ import { getAllAssetsInfo, deleteAssetFile, countReferencedDocs, type AssetInfo 
 import { deleteOriginalImage, readOriginalImage, normalizeOriginalStoragePath, isTrashSupported } from '../utils/file-system';
 import { removeAssetFromBlocks } from '../utils/siyuan-block';
 import { recordDeletionBatch, type DeleteDestination, type IDeletedItemRecord } from '../utils/deletion-logger';
+import { captureBlockAnchors, createChildBlocksCache } from '../utils/rollback-anchor';
 import {
   calculateBatchDeleteSummary,
   calculateCategoryStats,
@@ -1270,56 +1271,36 @@ async function handleDelete(asset: AssetInfo) {
       } catch {}
     }
 
-    // 0.1 备份受影响块的原始 Markdown 快照与相对位置元数据，用于支持逆向引用精准回退
+    // 0.1 备份受影响块的原始 Markdown 快照与真实位置锚点，用于支持逆向引用精准回退
+    // 兄弟顺序只能从内核 AST 取（blocks.sort 是块类型权重，不携带顺序信息）
     const snippets: Record<string, string> = {};
-    const affectedBlockRecords: Array<{
-      id: string;
-      root_id?: string;
-      parent_id?: string;
-      previous_id?: string;
-      next_id?: string;
-    }> = [];
+    const blocksToCapture: Array<{ id: string; root_id?: string; parent_id?: string }> = [];
 
     if (asset.references && asset.references.length > 0) {
       for (const ref of asset.references) {
-        if (ref.id) {
-          try {
-            const rows = await sql(`SELECT id, parent_id, root_id, sort, markdown FROM blocks WHERE id = '${ref.id}'`);
-            if (rows && rows.length > 0) {
-              const row = rows[0];
-              if (row.markdown) {
-                snippets[ref.id] = row.markdown;
-              }
-              let previous_id: string | undefined;
-              let next_id: string | undefined;
-              if (row.parent_id && typeof row.sort === 'number') {
-                try {
-                  const prevRows = await sql(`SELECT id FROM blocks WHERE parent_id = '${row.parent_id}' AND sort < ${row.sort} ORDER BY sort DESC LIMIT 1`);
-                  if (prevRows && prevRows[0]?.id) {
-                    previous_id = prevRows[0].id;
-                  }
-                  const nextRows = await sql(`SELECT id FROM blocks WHERE parent_id = '${row.parent_id}' AND sort > ${row.sort} ORDER BY sort ASC LIMIT 1`);
-                  if (nextRows && nextRows[0]?.id) {
-                    next_id = nextRows[0].id;
-                  }
-                } catch {}
-              }
-              affectedBlockRecords.push({
-                id: ref.id,
-                root_id: row.root_id || ref.root_id,
-                parent_id: row.parent_id,
-                previous_id,
-                next_id,
-              });
-            } else {
-              affectedBlockRecords.push({ id: ref.id, root_id: ref.root_id });
+        if (!ref.id) continue;
+        try {
+          const rows = await sql(`SELECT id, parent_id, root_id, markdown FROM blocks WHERE id = '${ref.id}'`);
+          if (rows && rows.length > 0) {
+            const row = rows[0];
+            if (row.markdown) {
+              snippets[ref.id] = row.markdown;
             }
-          } catch {
-            affectedBlockRecords.push({ id: ref.id, root_id: ref.root_id });
+            blocksToCapture.push({
+              id: ref.id,
+              root_id: row.root_id || ref.root_id,
+              parent_id: row.parent_id,
+            });
+          } else {
+            blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
           }
+        } catch {
+          blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
         }
       }
     }
+
+    const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, createChildBlocksCache());
 
     // 1. 删除物理文件
     await deleteAssetFile(asset.name);
@@ -1409,6 +1390,8 @@ async function handleBatchDelete() {
     const deletedRecords: IDeletedItemRecord[] = [];
 
     let hasAnyRollbackableRefs = false;
+    // 同一批次内多个资源可能引用同一文档，共享容器子块查询缓存
+    const anchorCache = createChildBlocksCache();
 
     // 1. 删除普通资源及其文档引用
     for (const asset of summary.regularAssets) {
@@ -1420,56 +1403,36 @@ async function handleBatchDelete() {
           } catch {}
         }
 
+        // 备份原始 Markdown 快照与真实位置锚点（兄弟顺序取自内核 AST，不依赖 blocks.sort）
         const snippets: Record<string, string> = {};
-        const affectedBlockRecords: Array<{
-          id: string;
-          root_id?: string;
-          parent_id?: string;
-          previous_id?: string;
-          next_id?: string;
-        }> = [];
+        const blocksToCapture: Array<{ id: string; root_id?: string; parent_id?: string }> = [];
 
         if (asset.references && asset.references.length > 0) {
           hasAnyRollbackableRefs = true;
           for (const ref of asset.references) {
-            if (ref.id) {
-              try {
-                const rows = await sql(`SELECT id, parent_id, root_id, sort, markdown FROM blocks WHERE id = '${ref.id}'`);
-                if (rows && rows.length > 0) {
-                  const row = rows[0];
-                  if (row.markdown) {
-                    snippets[ref.id] = row.markdown;
-                  }
-                  let previous_id: string | undefined;
-                  let next_id: string | undefined;
-                  if (row.parent_id && typeof row.sort === 'number') {
-                    try {
-                      const prevRows = await sql(`SELECT id FROM blocks WHERE parent_id = '${row.parent_id}' AND sort < ${row.sort} ORDER BY sort DESC LIMIT 1`);
-                      if (prevRows && prevRows[0]?.id) {
-                        previous_id = prevRows[0].id;
-                      }
-                      const nextRows = await sql(`SELECT id FROM blocks WHERE parent_id = '${row.parent_id}' AND sort > ${row.sort} ORDER BY sort ASC LIMIT 1`);
-                      if (nextRows && nextRows[0]?.id) {
-                        next_id = nextRows[0].id;
-                      }
-                    } catch {}
-                  }
-                  affectedBlockRecords.push({
-                    id: ref.id,
-                    root_id: row.root_id || ref.root_id,
-                    parent_id: row.parent_id,
-                    previous_id,
-                    next_id,
-                  });
-                } else {
-                  affectedBlockRecords.push({ id: ref.id, root_id: ref.root_id });
+            if (!ref.id) continue;
+            try {
+              const rows = await sql(`SELECT id, parent_id, root_id, markdown FROM blocks WHERE id = '${ref.id}'`);
+              if (rows && rows.length > 0) {
+                const row = rows[0];
+                if (row.markdown) {
+                  snippets[ref.id] = row.markdown;
                 }
-              } catch {
-                affectedBlockRecords.push({ id: ref.id, root_id: ref.root_id });
+                blocksToCapture.push({
+                  id: ref.id,
+                  root_id: row.root_id || ref.root_id,
+                  parent_id: row.parent_id,
+                });
+              } else {
+                blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
               }
+            } catch {
+              blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
             }
           }
         }
+
+        const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, anchorCache);
 
         await deleteAssetFile(asset.name);
         if (asset.references && asset.references.length > 0) {

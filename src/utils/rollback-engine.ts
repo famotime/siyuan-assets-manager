@@ -1,6 +1,7 @@
 import { sql, updateBlock, insertBlock } from '../api';
 import { replaceAssetInMarkdown } from './asset-markdown';
 import { replaceAssetInAttributeViews } from './attribute-view';
+import { createChildBlocksCache, planInsertAnchors } from './rollback-anchor';
 import {
   getDeletionHistory,
   updateBatchStatus,
@@ -32,6 +33,25 @@ export function getRollbackChecklist(batch: IDeletionBatch): string[] {
 }
 
 /**
+ * 判断容器块是否已从库中消失（回退插入全部失败时用于区分"安全跳过"与"真失败"）
+ */
+async function isBlockMissing(id: string | undefined, cache: Map<string, boolean>): Promise<boolean> {
+  if (!id) return false;
+  if (cache.has(id)) return cache.get(id) as boolean;
+
+  let missing = false;
+  try {
+    const rows = await sql(`SELECT id FROM blocks WHERE id = '${id}'`);
+    missing = !rows || 0 === rows.length;
+  } catch (e) {
+    missing = false;
+  }
+
+  cache.set(id, missing);
+  return missing;
+}
+
+/**
  * 执行指定批次的文档引用逆向回退（支持去重批次、单文件删除与批量删除批次）
  * @param batchId 批次唯一标识
  */
@@ -54,6 +74,7 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
   let restoredBlocksCount = 0;
   let skippedBlocksCount = 0;
   let failedBlocksCount = 0;
+  let degradedPositionCount = 0;
   const restoredFileNames: string[] = [];
 
   if (batch.actionType === 'deduplicate') {
@@ -111,6 +132,10 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
     }
   } else {
     // 2. 单文件删除或批量删除回退：还原被清空的文档块图片引用
+    const anchorCache = createChildBlocksCache();
+    // 仅在候选锚点全部失败时才查库区分"跳过"与"失败"
+    const missingCache = new Map<string, boolean>();
+
     for (const item of batch.items) {
       restoredFileNames.push(item.fileName);
       const affectedBlocks = item.affectedBlocks || [];
@@ -143,58 +168,47 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
             restoredBlocksCount++;
           } else {
             // 原块因被清理后变为空白块而被思源原生 deleteBlock 删除了
-            // 此时调用 insertBlock 在原位置或原文档根块内重新创建并插入图片块
+            // 依据删除前采集的真实位置锚点重建块：内核在 parentID 定位时会
+            // PrependChild 到容器首位，因此绝不能把裸 parentID 当作默认落点
+            const plans = await planInsertAnchors(ref, anchorCache);
             let inserted = false;
 
-            // 1. 优先按 previous_id 锚定插入原位置
-            if (ref.previous_id) {
+            for (const plan of plans) {
               try {
-                const prevRows = await sql(`SELECT id FROM blocks WHERE id = '${ref.previous_id}'`);
-                if (prevRows && prevRows.length > 0) {
-                  const res = await insertBlock('markdown', restoredMd, { previousID: ref.previous_id });
-                  if (res !== null && res !== undefined) inserted = true;
+                const res = await insertBlock('markdown', restoredMd, {
+                  previousID: plan.previousID,
+                  nextID: plan.nextID,
+                  parentID: plan.parentID,
+                });
+                if (res !== null && res !== undefined) {
+                  inserted = true;
+                  if (plan.degraded) {
+                    degradedPositionCount++;
+                    warn(
+                      `[rollback-engine] 块 [${ref.id}] 原相邻块已变化，已按近似位置还原（位置降级）`
+                    );
+                  }
+                  break;
                 }
-              } catch {}
-            }
-
-            // 2. 其次按 next_id 锚定插入原位置
-            if (!inserted && ref.next_id) {
-              try {
-                const nextRows = await sql(`SELECT id FROM blocks WHERE id = '${ref.next_id}'`);
-                if (nextRows && nextRows.length > 0) {
-                  const res = await insertBlock('markdown', restoredMd, { nextID: ref.next_id });
-                  if (res !== null && res !== undefined) inserted = true;
-                }
-              } catch {}
-            }
-
-            // 3. 再次尝试按 parent_id 插入到父块
-            if (!inserted && ref.parent_id) {
-              try {
-                const parentRows = await sql(`SELECT id FROM blocks WHERE id = '${ref.parent_id}'`);
-                if (parentRows && parentRows.length > 0) {
-                  const res = await insertBlock('markdown', restoredMd, { parentID: ref.parent_id });
-                  if (res !== null && res !== undefined) inserted = true;
-                }
-              } catch {}
-            }
-
-            // 4. 兜底插入到文档根块 root_id
-            if (!inserted && ref.root_id) {
-              try {
-                const docRows = await sql(`SELECT id FROM blocks WHERE id = '${ref.root_id}'`);
-                if (docRows && docRows.length > 0) {
-                  const res = await insertBlock('markdown', restoredMd, { parentID: ref.root_id });
-                  if (res !== null && res !== undefined) inserted = true;
-                }
-              } catch {}
+                warn(
+                  `[rollback-engine] 块 [${ref.id}] 候选锚点插入失败，尝试下一候选:`,
+                  plan.previousID || plan.nextID || plan.parentID
+                );
+              } catch (planErr) {
+                warn(`[rollback-engine] 块 [${ref.id}] 候选锚点插入异常，尝试下一候选:`, planErr);
+              }
             }
 
             if (inserted) {
               restoredBlocksCount++;
-            } else {
-              // 若原文档与父块均已被用户物理移除，方记录为安全跳过
+            } else if (
+              0 === plans.length ||
+              (await isBlockMissing(ref.root_id || ref.parent_id, missingCache))
+            ) {
+              // 无候选锚点，或原文档/父块均已被用户物理移除 ⇒ 记录为安全跳过
               skippedBlocksCount++;
+            } else {
+              failedBlocksCount++;
             }
           }
         } catch (blockErr) {
@@ -209,6 +223,7 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
     restoredBlocksCount,
     skippedBlocksCount,
     failedBlocksCount,
+    degradedPositionCount,
   };
 
   await updateBatchStatus(batchId, {
@@ -217,7 +232,9 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
     rollbackReport: report,
   });
 
-  log(`[rollback-engine] 批次 [${batchId}] 回退完成: 成功 ${restoredBlocksCount} 块，跳过 ${skippedBlocksCount} 块，失败 ${failedBlocksCount} 块`);
+  log(
+    `[rollback-engine] 批次 [${batchId}] 回退完成: 成功 ${restoredBlocksCount} 块（其中位置降级 ${degradedPositionCount} 块），跳过 ${skippedBlocksCount} 块，失败 ${failedBlocksCount} 块`
+  );
 
   return {
     success: true,

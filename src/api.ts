@@ -89,6 +89,35 @@ export async function insertBlock(
   });
 }
 
+// **************************************** 子块查询 ****************************************
+
+/** `/api/block/getChildBlocks` 返回的直接子块（严格文档序） */
+export interface IChildBlock {
+  id: string;
+  type?: string;
+  subType?: string;
+  content?: string;
+  markdown?: string;
+}
+
+/**
+ * 查询指定容器的直接子块，返回顺序即内核 AST 的文档顺序。
+ *
+ * 这是获取块真实前后兄弟位置的唯一可靠途径：`blocks` 表的 `sort` 列是块类型权重
+ * （见内核 `kernel/sql/database.go` 的 `nSort`），不能用于推导兄弟顺序；
+ * 本接口自 v2.10.0 起提供（内核 `kernel/model/block.go` 的 `getChildBlocksFromTree`
+ * 按 FirstChild → Next 遍历并过滤非块节点）。
+ *
+ * @returns 子块数组；`null` 表示接口不可用或请求失败（与"容器为空数组"区分）
+ */
+export async function getChildBlocks(id: string): Promise<IChildBlock[] | null> {
+  if (!id) return null;
+  const url = "/api/block/getChildBlocks";
+  const data = await request(url, { id });
+  if (!Array.isArray(data)) return null;
+  return data as IChildBlock[];
+}
+
 // **************************************** 块属性 ****************************************
 export async function getBlockAttrs(id: BlockId): Promise<{ [key: string]: string }> {
   const url = "/api/attr/getBlockAttrs";

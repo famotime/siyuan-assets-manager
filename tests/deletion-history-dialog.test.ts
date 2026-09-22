@@ -219,6 +219,64 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
     expect(openTabSpy).toHaveBeenCalled();
   });
 
+  it('renders degraded position count in the rollback report', async () => {
+    const mockBatches: deletionLogger.IDeletionBatch[] = [
+      {
+        id: 'batch_rolled_back',
+        timestamp: Date.now(),
+        actionType: 'single-delete',
+        destination: 'os-trash',
+        items: [
+          {
+            fileName: 'rolled_back.png',
+            originalRelativePath: 'data/assets/rolled_back.png',
+            size: 1024,
+          },
+        ],
+        freedBytes: 1024,
+        canRollback: true,
+        isRolledBack: true,
+        rolledBackAt: Date.now(),
+        rollbackReport: {
+          restoredBlocksCount: 3,
+          skippedBlocksCount: 1,
+          failedBlocksCount: 0,
+          degradedPositionCount: 2,
+        },
+      },
+    ];
+
+    vi.spyOn(deletionLogger, 'getDeletionHistory').mockResolvedValue(mockBatches);
+    vi.spyOn(deletionLogger, 'getDeletionHistoryLimit').mockResolvedValue(10);
+
+    const isVisible = ref(true);
+    const Wrapper = {
+      components: { DeletionHistoryDialog },
+      setup() {
+        return { isVisible };
+      },
+      template: `<DeletionHistoryDialog :visible="isVisible" />`,
+    };
+
+    app = createApp(Wrapper);
+    app.mount(mountContainer);
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await nextTick();
+
+    const cardHeader = mountContainer.querySelector<HTMLDivElement>('.history-card .card-header');
+    cardHeader?.click();
+    await nextTick();
+
+    const reportBox = mountContainer.querySelector('.rollback-report-box');
+    expect(reportBox).not.toBeNull();
+    expect(reportBox?.textContent).toContain('成功还原');
+    // 位置降级需如实展示，避免回退块静默错位
+    const reportText = (reportBox?.textContent || '').replace(/\s+/g, ' ');
+    expect(reportText).toMatch(/位置降级: 2 处/);
+    expect(reportText).toContain('原相邻块已变化，已按近似位置还原');
+  });
+
   it('verifies that DeletionHistoryDialog SFC style contains flex-shrink: 0 and min-height: 0 to prevent card crushing', async () => {
     const fs = await import('fs');
     const path = await import('path');

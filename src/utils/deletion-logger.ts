@@ -1,5 +1,6 @@
 import { usePlugin } from './plugin-context';
 import { log, warn } from './logger';
+import type { IBlockAnchor } from './rollback-anchor';
 
 export type DeletionActionType =
   | 'deduplicate'
@@ -15,13 +16,8 @@ export interface IDeletedItemRecord {
   originalRelativePath: string;
   size: number;
   canonicalName?: string;
-  affectedBlocks?: Array<{
-    id: string;
-    root_id?: string;
-    parent_id?: string;
-    previous_id?: string;
-    next_id?: string;
-  }>;
+  /** 受影响块及其删除前的位置锚点（真兄弟与两级序号，见 rollback-anchor） */
+  affectedBlocks?: IBlockAnchor[];
   affectedViews?: Array<{
     viewId: string;
     keyId: string;
@@ -37,6 +33,8 @@ export interface IRollbackReport {
   restoredBlocksCount: number;
   skippedBlocksCount: number;
   failedBlocksCount: number;
+  /** 位置降级的块数：原相邻块已漂移，按近似位置再锚定还原（历史批次无此字段） */
+  degradedPositionCount?: number;
 }
 
 export interface IDeletionBatch {
