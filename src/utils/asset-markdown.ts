@@ -135,19 +135,74 @@ function findMarkdownLinkTargetEnd(markdown: string, assetStart: number): number
  */
 const ASSET_PATH_TERMINATOR = '(?=[)"\'\\s?#{}\\]>，。、；：！？,!;:|/]|$)'
 
+/** 构造资源路径匹配正则；替换、计数、限量替换必须共用同一套匹配语义 */
+function buildAssetPathRegex(assetName: string): RegExp {
+  return new RegExp(`assets/${escapeRegExp(assetName)}${ASSET_PATH_TERMINATOR}`, 'g')
+}
+
+export function safeEncodeURIComponent(value: string): string {
+  try {
+    return encodeURIComponent(value)
+  } catch (e) {
+    return value
+  }
+}
+
 export function replaceAssetInMarkdown(markdown: string, oldAssetName: string, newAssetName: string): string {
   let res = markdown
   // 若包含中文或特殊字符，同步支持被 URI 编码过的旧名称替换
-  try {
-    const encodedOld = encodeURIComponent(oldAssetName)
-    if (encodedOld !== oldAssetName) {
-      const encRegex = new RegExp(`assets/${escapeRegExp(encodedOld)}${ASSET_PATH_TERMINATOR}`, 'g')
-      res = res.replace(encRegex, `assets/${newAssetName}`)
-    }
-  } catch (e) {}
+  const encodedOld = safeEncodeURIComponent(oldAssetName)
+  if (encodedOld !== oldAssetName) {
+    res = res.replace(buildAssetPathRegex(encodedOld), `assets/${newAssetName}`)
+  }
+  return res.replace(buildAssetPathRegex(oldAssetName), `assets/${newAssetName}`)
+}
 
-  const regex = new RegExp(`assets/${escapeRegExp(oldAssetName)}${ASSET_PATH_TERMINATOR}`, 'g')
-  return res.replace(regex, `assets/${newAssetName}`)
+/**
+ * 统计文本中某资源的引用处数（原始名 + URI 编码名，与 {@link replaceAssetInMarkdown} 同语义）
+ */
+export function countAssetOccurrences(text: string, assetName: string): number {
+  if (!text || !assetName) return 0
+
+  let count = 0
+  const encoded = safeEncodeURIComponent(assetName)
+  if (encoded !== assetName) {
+    count += (text.match(buildAssetPathRegex(encoded)) || []).length
+  }
+  count += (text.match(buildAssetPathRegex(assetName)) || []).length
+  return count
+}
+
+/**
+ * 限量替换：只替换前 `limit` 处引用。
+ *
+ * 用于"目标文本已被用户改动过"时的近似逆向还原：逆向只能按原文中的引用处数
+ * 逐个改回，避免把文本里本来就存在的同名引用一并改错（过还原）。
+ */
+export function replaceAssetInMarkdownLimited(
+  markdown: string,
+  oldAssetName: string,
+  newAssetName: string,
+  limit: number,
+): string {
+  if (!markdown || !oldAssetName || limit <= 0) return markdown
+
+  let remaining = limit
+  const replaceUpTo = (text: string, name: string): string => {
+    if (remaining <= 0) return text
+    return text.replace(buildAssetPathRegex(name), (match) => {
+      if (remaining <= 0) return match
+      remaining--
+      return `assets/${newAssetName}`
+    })
+  }
+
+  let res = markdown
+  const encodedOld = safeEncodeURIComponent(oldAssetName)
+  if (encodedOld !== oldAssetName) {
+    res = replaceUpTo(res, encodedOld)
+  }
+  return replaceUpTo(res, oldAssetName)
 }
 
 export function removeAssetFromMarkdown(markdown: string, assetName: string): string {

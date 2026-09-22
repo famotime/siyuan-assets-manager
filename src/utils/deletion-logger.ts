@@ -1,6 +1,7 @@
 import { usePlugin } from './plugin-context';
 import { log, warn } from './logger';
 import type { IBlockAnchor } from './rollback-anchor';
+import type { IAffectedViewCell } from './attribute-view';
 
 export type DeletionActionType =
   | 'deduplicate'
@@ -18,15 +19,18 @@ export interface IDeletedItemRecord {
   canonicalName?: string;
   /** 受影响块及其删除前的位置锚点（真兄弟与两级序号，见 rollback-anchor） */
   affectedBlocks?: IBlockAnchor[];
-  affectedViews?: Array<{
-    viewId: string;
-    keyId: string;
-    rowId: string;
-  }>;
+  /** 去重合并：被改写的数据库单元格快照，用于按单元格精确逆向还原 */
+  affectedViews?: IAffectedViewCell[];
   /** 轻量 WebP 缩略图 DataURL（供被删后悬浮预览） */
   thumbnail?: string;
   /** 受影响块在删除前的原始 Markdown 片段快照，按 blockId 映射 */
   originalMarkdownSnippets?: Record<string, string>;
+  /** 受影响块在改写前的原始属性值快照（仅记录被改写的属性），按 blockId 映射 */
+  originalIalSnapshots?: Record<string, Record<string, string>>;
+  /** 该条目的物理删除/安全复核未成功完成（引用可能已被改写，仍需保留回退记录） */
+  partialFailure?: boolean;
+  /** 部分失败的原因描述，便于日志排查 */
+  failureReason?: string;
 }
 
 export interface IRollbackReport {
@@ -35,6 +39,16 @@ export interface IRollbackReport {
   failedBlocksCount: number;
   /** 位置降级的块数：原相邻块已漂移，按近似位置再锚定还原（历史批次无此字段） */
   degradedPositionCount?: number;
+  /** 去重回退：按替换前快照整段精确还原的块数 */
+  exactRestoredCount?: number;
+  /** 去重回退：值已被改动、按出现处数限量还原的处数（块 / 属性 / 数据库单元格合计） */
+  approximateRestoredCount?: number;
+  /** 去重回退：还原的块属性（IAL，如题头图 title-img）引用处数 */
+  restoredIalCount?: number;
+  /** 去重回退：还原的数据库单元格字段处数 */
+  restoredViewCellsCount?: number;
+  /** 去重回退：跳过未改动的数据库单元格字段处数（单元格已消失或已不再引用主图） */
+  skippedViewCellsCount?: number;
 }
 
 export interface IDeletionBatch {

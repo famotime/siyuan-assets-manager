@@ -5,18 +5,30 @@ vi.mock('../src/api', () => ({
   updateBlock: vi.fn(),
   insertBlock: vi.fn().mockResolvedValue([{ id: 'new-block' }]),
   getChildBlocks: vi.fn(),
+  getBlockAttrs: vi.fn(),
+  setBlockAttrs: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('../src/utils/attribute-view', () => ({
   replaceAssetInAttributeViews: vi.fn().mockResolvedValue(1),
+  restoreAttributeViewAssetCells: vi.fn().mockResolvedValue({
+    restoredCount: 0,
+    approximateCount: 0,
+    skippedCount: 0,
+  }),
 }));
 
-import { sql, updateBlock, insertBlock, getChildBlocks } from '../src/api';
-import { replaceAssetInAttributeViews } from '../src/utils/attribute-view';
+import { sql, updateBlock, insertBlock, getChildBlocks, getBlockAttrs, setBlockAttrs } from '../src/api';
+import {
+  replaceAssetInAttributeViews,
+  restoreAttributeViewAssetCells,
+} from '../src/utils/attribute-view';
+import { defaultStorage } from '../src/utils/storage';
 import {
   rollbackBatch,
   rollbackDeduplicationBatch,
   getRollbackChecklist,
+  checkRollbackFilePresence,
 } from '../src/utils/rollback-engine';
 import {
   recordDeletionBatch,
@@ -125,6 +137,172 @@ describe('rollback-engine unit tests', () => {
 
     // 重复回退应抛出错误
     await expect(rollbackDeduplicationBatch(batch!.id)).rejects.toThrow('此前已执行过回退');
+  });
+
+  it('restores block attribute (title-img) references that live only in IAL', async () => {
+    vi.mocked(sql).mockImplementation(async (query: string) => {
+      if (query.includes("id = 'doc-block'")) {
+        // 文档块的 markdown 为空，题头图引用只存在于 IAL 属性里
+        return [{ id: 'doc-block', markdown: '', ial: '{: title-img="assets/keep.png"}' }];
+      }
+      return [];
+    });
+    vi.mocked(getBlockAttrs).mockResolvedValue({ 'title-img': 'assets/keep.png' } as any);
+
+    const batch = await recordDeletionBatch({
+      actionType: 'deduplicate',
+      destination: 'os-trash',
+      freedBytes: 1024,
+      canRollback: true,
+      items: [
+        {
+          fileName: 'dup.png',
+          originalRelativePath: 'data/assets/dup.png',
+          size: 1024,
+          canonicalName: 'keep.png',
+          affectedBlocks: [{ id: 'doc-block', root_id: 'doc-block' }],
+          originalIalSnapshots: { 'doc-block': { 'title-img': 'assets/dup.png' } },
+        },
+      ],
+    });
+
+    const result = await rollbackBatch(batch!.id);
+
+    expect(setBlockAttrs).toHaveBeenCalledWith('doc-block', { 'title-img': 'assets/dup.png' });
+    expect(result.report.restoredIalCount).toBe(1);
+    expect(result.report.restoredBlocksCount).toBe(1);
+    expect(result.report.skippedBlocksCount).toBe(0);
+  });
+
+  it('prefers the pre-merge snapshot for exact markdown restoration', async () => {
+    const original = '![a](assets/keep.png) ![b](assets/dup.png)';
+    vi.mocked(sql).mockImplementation(async (query: string) => {
+      if (query.includes("id = 'block-mixed'")) {
+        // 合并后：本块原有引用与冗余图引用都变成了 keep.png
+        return [{ id: 'block-mixed', markdown: '![a](assets/keep.png) ![b](assets/keep.png)', ial: '' }];
+      }
+      return [];
+    });
+
+    const batch = await recordDeletionBatch({
+      actionType: 'deduplicate',
+      destination: 'os-trash',
+      freedBytes: 1024,
+      canRollback: true,
+      items: [
+        {
+          fileName: 'dup.png',
+          originalRelativePath: 'data/assets/dup.png',
+          size: 1024,
+          canonicalName: 'keep.png',
+          affectedBlocks: [{ id: 'block-mixed', root_id: 'doc-1' }],
+          originalMarkdownSnippets: { 'block-mixed': original },
+        },
+      ],
+    });
+
+    const result = await rollbackBatch(batch!.id);
+
+    // 精确还原整段：原有的 keep 引用保持不变，零误伤
+    expect(updateBlock).toHaveBeenCalledWith('markdown', original, 'block-mixed');
+    expect(result.report.exactRestoredCount).toBe(1);
+    expect(result.report.approximateRestoredCount).toBe(0);
+  });
+
+  it('falls back to limited approximate restoration when the block was edited after the merge', async () => {
+    vi.mocked(sql).mockImplementation(async (query: string) => {
+      if (query.includes("id = 'block-edited'")) {
+        // 用户合并后又补了一张主图
+        return [{ id: 'block-edited', markdown: '![b](assets/keep.png) 新增 ![a](assets/keep.png)', ial: '' }];
+      }
+      return [];
+    });
+
+    const batch = await recordDeletionBatch({
+      actionType: 'deduplicate',
+      destination: 'os-trash',
+      freedBytes: 1024,
+      canRollback: true,
+      items: [
+        {
+          fileName: 'dup.png',
+          originalRelativePath: 'data/assets/dup.png',
+          size: 1024,
+          canonicalName: 'keep.png',
+          affectedBlocks: [{ id: 'block-edited', root_id: 'doc-1' }],
+          originalMarkdownSnippets: { 'block-edited': '![b](assets/dup.png)' },
+        },
+      ],
+    });
+
+    const result = await rollbackBatch(batch!.id);
+
+    expect(updateBlock).toHaveBeenCalledWith(
+      'markdown',
+      '![b](assets/dup.png) 新增 ![a](assets/keep.png)',
+      'block-edited'
+    );
+    expect(result.report.exactRestoredCount).toBe(0);
+    expect(result.report.approximateRestoredCount).toBe(1);
+  });
+
+  it('restores attribute view cells by snapshot and aggregates view stats', async () => {
+    vi.mocked(sql).mockResolvedValue([] as any);
+    vi.mocked(restoreAttributeViewAssetCells).mockResolvedValue({
+      restoredCount: 2,
+      approximateCount: 1,
+      skippedCount: 1,
+    });
+
+    const cells = [
+      { viewId: 'av-1', keyId: 'key-cover', rowId: 'row-1', originalAssetContents: ['assets/dup.png'] },
+    ];
+
+    const batch = await recordDeletionBatch({
+      actionType: 'deduplicate',
+      destination: 'os-trash',
+      freedBytes: 1024,
+      canRollback: true,
+      items: [
+        {
+          fileName: 'dup.png',
+          originalRelativePath: 'data/assets/dup.png',
+          size: 1024,
+          canonicalName: 'keep.png',
+          affectedBlocks: [],
+          affectedViews: cells,
+        },
+      ],
+    });
+
+    const result = await rollbackBatch(batch!.id);
+
+    expect(restoreAttributeViewAssetCells).toHaveBeenCalledWith(cells, 'keep.png', 'dup.png');
+    expect(result.report.restoredViewCellsCount).toBe(2);
+    expect(result.report.skippedViewCellsCount).toBe(1);
+    // 命中单元格快照时不再触发整文件按名替换
+    expect(replaceAssetInAttributeViews).not.toHaveBeenCalled();
+  });
+
+  it('reports which rollback files are not yet restored into data/assets', async () => {
+    vi.spyOn(defaultStorage, 'statAsset').mockImplementation(async (fileName: string) => {
+      return fileName === 'present.png' ? ({ size: 10, updated: 1 } as any) : null;
+    });
+
+    const batch: any = {
+      id: 'batch_presence',
+      items: [
+        { fileName: 'present.png', canonicalName: 'keep.png' },
+        { fileName: 'missing.png', canonicalName: 'keep.png' },
+      ],
+    };
+
+    const presence = await checkRollbackFilePresence(batch);
+
+    expect(presence).toEqual([
+      { fileName: 'present.png', present: true },
+      { fileName: 'missing.png', present: false },
+    ]);
   });
 
   it('rejects rollback for non-rollbackable batches', async () => {

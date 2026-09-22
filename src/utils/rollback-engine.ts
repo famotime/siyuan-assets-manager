@@ -1,7 +1,9 @@
-import { sql, updateBlock, insertBlock } from '../api';
-import { replaceAssetInMarkdown } from './asset-markdown';
-import { replaceAssetInAttributeViews } from './attribute-view';
+import { sql, updateBlock, insertBlock, getBlockAttrs, setBlockAttrs } from '../api';
+import { replaceAssetInMarkdown, countAssetOccurrences, safeEncodeURIComponent } from './asset-markdown';
+import { replaceAssetInAttributeViews, restoreAttributeViewAssetCells } from './attribute-view';
+import { restoreAssetReference } from './inverse-reference';
 import { createChildBlocksCache, planInsertAnchors } from './rollback-anchor';
+import { defaultStorage } from './storage';
 import {
   getDeletionHistory,
   updateBatchStatus,
@@ -30,6 +32,96 @@ export function getRollbackChecklist(batch: IDeletionBatch): string[] {
   }
   // 单文件或批量删除：返回该批次所有被删文件
   return batch.items.map((item) => item.fileName);
+}
+
+/**
+ * 还原块属性（IAL）中的资源引用，如文档题头图 `title-img`、`custom-data-assets`。
+ *
+ * 去重合同时会改写这些属性，但文档块的 `markdown` 为空，
+ * 只查 markdown 的旧实现会把这类引用"报告为已还原"却什么都没改。
+ */
+async function restoreBlockAttrReferences(
+  blockId: string,
+  currentIal: string,
+  snapshots: Record<string, string> | undefined,
+  canonicalName: string,
+  redundantName: string
+): Promise<{ restoredCount: number; approximateCount: number }> {
+  const result = { restoredCount: 0, approximateCount: 0 };
+
+  // 快速排除：当前 IAL 未提及主图且没有快照可依据时无需查询块属性
+  const hasCanonicalInIal =
+    currentIal.includes(`assets/${canonicalName}`) ||
+    currentIal.includes(`assets/${safeEncodeURIComponent(canonicalName)}`);
+  if (!snapshots && !hasCanonicalInIal) {
+    return result;
+  }
+
+  let attrs: { [key: string]: string } | null = null;
+  try {
+    attrs = await getBlockAttrs(blockId);
+  } catch (attrErr) {
+    warn(`[rollback-engine] 读取块 [${blockId}] 属性失败，跳过属性回退:`, attrErr);
+    return result;
+  }
+  if (!attrs || typeof attrs !== 'object') return result;
+
+  const updatedAttrs: { [key: string]: string } = {};
+
+  for (const [key, value] of Object.entries(attrs)) {
+    if (typeof value !== 'string' || !value) continue;
+
+    const original = snapshots?.[key];
+    if (typeof original !== 'string' && 0 === countAssetOccurrences(value, canonicalName)) {
+      continue;
+    }
+
+    const restored = restoreAssetReference({
+      current: value,
+      original,
+      redundantName,
+      canonicalName,
+    });
+    if (restored.mode === 'skip') continue;
+
+    updatedAttrs[key] = restored.text;
+    result.restoredCount++;
+    if (restored.mode === 'approximate') {
+      result.approximateCount++;
+    }
+  }
+
+  if (result.restoredCount > 0) {
+    await setBlockAttrs(blockId, updatedAttrs);
+  }
+
+  return result;
+}
+
+/**
+ * 预检：列出回退清单中的文件当前是否已在 `data/assets/` 中就位。
+ *
+ * 文件尚未从回收站放回时，回退只会把引用改回一个不存在的文件（坏图），
+ * 因此界面需要在执行前如实提示；永久删除（无回收站）环境下更是不可恢复。
+ */
+export async function checkRollbackFilePresence(
+  batch: IDeletionBatch
+): Promise<Array<{ fileName: string; present: boolean }>> {
+  const names = getRollbackChecklist(batch);
+  const result: Array<{ fileName: string; present: boolean }> = [];
+
+  for (const fileName of names) {
+    let present = false;
+    try {
+      const stat = await defaultStorage.statAsset(fileName);
+      present = Boolean(stat);
+    } catch (e) {
+      present = false;
+    }
+    result.push({ fileName, present });
+  }
+
+  return result;
 }
 
 /**
@@ -75,10 +167,17 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
   let skippedBlocksCount = 0;
   let failedBlocksCount = 0;
   let degradedPositionCount = 0;
+  let exactRestoredCount = 0;
+  let approximateRestoredCount = 0;
+  let restoredIalCount = 0;
+  let restoredViewCellsCount = 0;
+  let skippedViewCellsCount = 0;
   const restoredFileNames: string[] = [];
 
   if (batch.actionType === 'deduplicate') {
-    // 1. 去重批次回退：将保留主图 canonical 逆向替换回冗余图 redundant
+    // 1. 去重批次回退：把保留主图 canonical 逆向还原回冗余图 redundant。
+    //    合并是"多对一"变换，必须借替换前快照区分"合并确实改过的引用"与"本来就在的同名引用"，
+    //    否则按名全局反替换会把两者一起改错。
     for (const item of batch.items) {
       if (!item.canonicalName) continue;
       const canonicalName = item.canonicalName;
@@ -86,6 +185,9 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
       restoredFileNames.push(redundantName);
 
       const affectedBlocks = item.affectedBlocks || [];
+      const markdownSnapshots = item.originalMarkdownSnippets || {};
+      const ialSnapshots = item.originalIalSnapshots || {};
+
       for (const ref of affectedBlocks) {
         if (!ref.id) continue;
         try {
@@ -97,37 +199,66 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
 
           const currentMd = rows[0].markdown || '';
           const currentIal = rows[0].ial || '';
-          const encodedCanonical = encodeURIComponent(canonicalName);
+          let touched = false;
 
-          const hasCanonicalInMd =
-            currentMd.includes(`assets/${canonicalName}`) ||
-            (encodedCanonical !== canonicalName && currentMd.includes(`assets/${encodedCanonical}`));
-          const hasCanonicalInIal =
-            currentIal.includes(`assets/${canonicalName}`) ||
-            (encodedCanonical !== canonicalName && currentIal.includes(`assets/${encodedCanonical}`));
+          // 1.1 正文 Markdown 逆向还原
+          if (currentMd) {
+            const restored = restoreAssetReference({
+              current: currentMd,
+              original: markdownSnapshots[ref.id],
+              redundantName,
+              canonicalName,
+            });
+            if (restored.mode !== 'skip') {
+              await updateBlock('markdown', restored.text, ref.id);
+              if (restored.mode === 'exact') {
+                exactRestoredCount++;
+              } else {
+                approximateRestoredCount++;
+              }
+              touched = true;
+            }
+          }
 
-          if (!hasCanonicalInMd && !hasCanonicalInIal) {
+          // 1.2 块属性（IAL，如题头图 title-img、custom-data-assets）逆向还原
+          const ialRestored = await restoreBlockAttrReferences(
+            ref.id,
+            currentIal,
+            ialSnapshots[ref.id],
+            canonicalName,
+            redundantName
+          );
+          if (ialRestored.restoredCount > 0) {
+            restoredIalCount += ialRestored.restoredCount;
+            approximateRestoredCount += ialRestored.approximateCount;
+            touched = true;
+          }
+
+          if (touched) {
+            restoredBlocksCount++;
+          } else {
             skippedBlocksCount++;
-            continue;
           }
-
-          if (hasCanonicalInMd) {
-            const newMd = replaceAssetInMarkdown(currentMd, canonicalName, redundantName);
-            await updateBlock('markdown', newMd, ref.id);
-          }
-
-          restoredBlocksCount++;
         } catch (blockErr) {
           error(`[rollback-engine] 逆向回退块 [${ref.id}] 失败:`, blockErr);
           failedBlocksCount++;
         }
       }
 
-      // 逆向还原属性视图（Attribute View）中的单元格引用
-      try {
-        await replaceAssetInAttributeViews(canonicalName, redundantName);
-      } catch (avErr) {
-        warn(`[rollback-engine] 逆向还原属性视图失败 (${canonicalName} -> ${redundantName}):`, avErr);
+      // 1.3 数据库（属性视图）：优先按单元格快照精确还原；
+      //     老日志没有单元格快照时退回按名全局替换（历史行为）
+      const affectedViews = item.affectedViews || [];
+      if (affectedViews.length > 0) {
+        const viewStats = await restoreAttributeViewAssetCells(affectedViews, canonicalName, redundantName);
+        restoredViewCellsCount += viewStats.restoredCount;
+        approximateRestoredCount += viewStats.approximateCount;
+        skippedViewCellsCount += viewStats.skippedCount;
+      } else {
+        try {
+          await replaceAssetInAttributeViews(canonicalName, redundantName);
+        } catch (avErr) {
+          warn(`[rollback-engine] 逆向还原属性视图失败 (${canonicalName} -> ${redundantName}):`, avErr);
+        }
       }
     }
   } else {
@@ -224,6 +355,11 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
     skippedBlocksCount,
     failedBlocksCount,
     degradedPositionCount,
+    exactRestoredCount,
+    approximateRestoredCount,
+    restoredIalCount,
+    restoredViewCellsCount,
+    skippedViewCellsCount,
   };
 
   await updateBatchStatus(batchId, {
@@ -233,7 +369,10 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
   });
 
   log(
-    `[rollback-engine] 批次 [${batchId}] 回退完成: 成功 ${restoredBlocksCount} 块（其中位置降级 ${degradedPositionCount} 块），跳过 ${skippedBlocksCount} 块，失败 ${failedBlocksCount} 块`
+    `[rollback-engine] 批次 [${batchId}] 回退完成: 成功 ${restoredBlocksCount} 块` +
+      `（精确 ${exactRestoredCount} / 近似 ${approximateRestoredCount} / 位置降级 ${degradedPositionCount}）` +
+      `，属性 ${restoredIalCount} 处，数据库单元格 ${restoredViewCellsCount} 处（跳过 ${skippedViewCellsCount}），` +
+      `跳过 ${skippedBlocksCount} 块，失败 ${failedBlocksCount} 块`
   );
 
   return {

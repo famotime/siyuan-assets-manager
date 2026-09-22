@@ -27,5 +27,6 @@
   "dedupDecodeConcurrencyTitle": "Dedup scan: decode concurrency",
   "dedupDecodeConcurrencyDesc": "Parallel decode count for the perceptual-hash phase (range 1-8, default 3). Each decoded image holds a full-resolution bitmap in memory; lower this if images are large or memory is tight",
   "rollbackDegradedPosition": "Position degraded",
-  "rollbackDegradedPositionHint": "original neighbour blocks changed, restored at an approximate position"
+  "rollbackDegradedPositionHint": "original neighbour blocks changed, restored at an approximate position",
+  "rollbackApproximate": "Approximate restore"
 }

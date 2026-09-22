@@ -16,11 +16,13 @@ vi.mock('../src/utils/siyuan-block', () => ({
 
 vi.mock('../src/utils/attribute-view', () => ({
   replaceAssetInAttributeViews: vi.fn().mockResolvedValue(0),
+  captureAttributeViewAssetCells: vi.fn().mockResolvedValue(new Map()),
 }));
 
 import { readAssetFile, deleteAsset } from '../src/utils/file-system';
 import { replaceAssetInBlocks, queryCurrentAssetBlockReferences, verifyAssetZeroReferences, getImageBlockReEditData, setImageBlockReEditData } from '../src/utils/siyuan-block';
-import { replaceAssetInAttributeViews } from '../src/utils/attribute-view';
+import { replaceAssetInAttributeViews, captureAttributeViewAssetCells } from '../src/utils/attribute-view';
+import { getDeletionHistory } from '../src/utils/deletion-logger';
 import {
   isImageFile,
   groupBySize,
@@ -53,6 +55,7 @@ const replaceAssetInBlocksMock = vi.mocked(replaceAssetInBlocks);
 const queryCurrentAssetBlockReferencesMock = vi.mocked(queryCurrentAssetBlockReferences);
 const verifyAssetZeroReferencesMock = vi.mocked(verifyAssetZeroReferences);
 const replaceAssetInAttributeViewsMock = vi.mocked(replaceAssetInAttributeViews);
+const captureAttributeViewAssetCellsMock = vi.mocked(captureAttributeViewAssetCells);
 const getImageBlockReEditDataMock = vi.mocked(getImageBlockReEditData);
 const setImageBlockReEditDataMock = vi.mocked(setImageBlockReEditData);
 
@@ -88,6 +91,9 @@ describe('deduplicate utils', () => {
     queryCurrentAssetBlockReferencesMock.mockResolvedValue([]);
     verifyAssetZeroReferencesMock.mockResolvedValue({ isClean: true, remainingBlocks: [] });
     replaceAssetInAttributeViewsMock.mockResolvedValue(0);
+    // 物理删除成功是默认前提（deleteAsset 的返回值此前被忽略，现已作为判定依据）
+    deleteAssetMock.mockResolvedValue(true);
+    captureAttributeViewAssetCellsMock.mockResolvedValue(new Map());
   });
 
   describe('isImageFile', () => {
@@ -481,7 +487,9 @@ describe('deduplicate utils', () => {
       expect(replaceAssetInBlocksMock).toHaveBeenCalledWith(
         redundant.references,
         'copy.png',
-        'main.png'
+        'main.png',
+        // 合并时必须顺带采集替换前快照，供逆向回退精确还原
+        expect.objectContaining({ captureSnapshots: expect.anything() })
       );
       expect(deleteAssetMock).toHaveBeenCalledWith('copy.png');
       expect(stats.affectedBlocksCount).toBe(1);
@@ -524,11 +532,100 @@ describe('deduplicate utils', () => {
         ],
       });
 
-      await expect(normalizeDuplicateGroup(group)).rejects.toThrow('去重安全拦截');
+      const stats = await normalizeDuplicateGroup(group);
+
+      // 安全拦截不再中断整批，而是如实计入失败数并保持该组未处理状态
+      expect(stats.failedItemsCount).toBe(1);
+      expect(stats.deletedFilesCount).toBe(0);
+      expect(group.isProcessed).toBeFalsy();
 
       // 绝不能调用物理文件删除！
       expect(deleteAssetMock).not.toHaveBeenCalled();
-      expect(group.isProcessed).toBeFalsy();
+
+      // 但引用可能已被改写，必须留下可回退记录（否则出现"改了引用却没日志"的不可回退状态）
+      const history = await getDeletionHistory();
+      const batch = history.find((b) => b.items.some((it) => it.partialFailure));
+      expect(batch).toBeTruthy();
+      const record = batch!.items.find((it) => it.partialFailure)!;
+      expect(record.canonicalName).toBe('main.png');
+      expect(record.partialFailure).toBe(true);
+      expect(record.failureReason).toContain('去重安全拦截');
+    });
+
+    it('records pre-merge markdown/attribute snapshots and database cells for precise rollback', async () => {
+      const canonical = makeAsset('main.png', 4000, 1);
+      const redundant = makeAsset('copy.png', 4000, 1);
+      const cell = {
+        viewId: 'av-1',
+        keyId: 'key-cover',
+        rowId: 'row-1',
+        originalAssetContents: ['assets/copy.png'],
+      };
+
+      // 真实实现会在替换时回填快照
+      replaceAssetInBlocksMock.mockImplementation(async (refs: any, _old: string, _new: string, opts: any) => {
+        opts?.captureSnapshots?.markdown && (opts.captureSnapshots.markdown[refs[0].id] = '![img](assets/copy.png)');
+        opts?.captureSnapshots?.attrs &&
+          (opts.captureSnapshots.attrs[refs[0].id] = { 'title-img': 'assets/copy.png' });
+      });
+      captureAttributeViewAssetCellsMock.mockResolvedValue(new Map([['copy.png', [cell]]]) as any);
+
+      const group: IDuplicateGroup = {
+        id: 'exact_snapshots',
+        mode: 'exact',
+        similarity: 1.0,
+        canonicalAssetName: 'main.png',
+        items: [
+          { asset: canonical, score: 500, isCanonical: true },
+          { asset: redundant, score: 100, isCanonical: false },
+        ],
+        redundantCount: 1,
+        redundantSize: 4000,
+      };
+
+      await normalizeDuplicateGroup(group);
+
+      expect(captureAttributeViewAssetCellsMock).toHaveBeenCalledWith(['copy.png']);
+
+      const history = await getDeletionHistory();
+      const batch = history.find((b) => b.items.some((it) => it.canonicalName === 'main.png'));
+      const record = batch!.items.find((it) => it.fileName === 'copy.png')!;
+
+      expect(record.originalMarkdownSnippets).toEqual({ 'block-copy.png-0': '![img](assets/copy.png)' });
+      expect(record.originalIalSnapshots).toEqual({ 'block-copy.png-0': { 'title-img': 'assets/copy.png' } });
+      expect(record.affectedViews).toEqual([cell]);
+      expect(record.partialFailure).toBeUndefined();
+    });
+
+    it('keeps a rollback record when the physical deletion fails', async () => {
+      const canonical = makeAsset('main.png', 4000, 1);
+      const redundant = makeAsset('copy.png', 4000, 1);
+      deleteAssetMock.mockResolvedValue(false);
+
+      const group: IDuplicateGroup = {
+        id: 'exact_delete_fail',
+        mode: 'exact',
+        similarity: 1.0,
+        canonicalAssetName: 'main.png',
+        items: [
+          { asset: canonical, score: 500, isCanonical: true },
+          { asset: redundant, score: 100, isCanonical: false },
+        ],
+        redundantCount: 1,
+        redundantSize: 4000,
+      };
+
+      const stats = await normalizeDuplicateGroup(group);
+
+      expect(stats.failedItemsCount).toBe(1);
+      expect(stats.deletedFilesCount).toBe(0);
+
+      const history = await getDeletionHistory();
+      const batch = history.find((b) => b.items.some((it) => it.partialFailure));
+      const record = batch!.items.find((it) => it.partialFailure)!;
+      expect(record.fileName).toBe('copy.png');
+      expect(record.affectedBlocks?.length).toBe(1);
+      expect(record.failureReason).toContain('删除冗余资源');
     });
 
     it('combines fresh block references from live query when cached references are empty or stale', async () => {
@@ -567,7 +664,8 @@ describe('deduplicate utils', () => {
       expect(replaceAssetInBlocksMock).toHaveBeenCalledWith(
         [liveRef],
         'copy.png',
-        'main.png'
+        'main.png',
+        expect.objectContaining({ captureSnapshots: expect.anything() })
       );
       expect(deleteAssetMock).toHaveBeenCalledWith('copy.png');
       expect(stats.affectedBlocksCount).toBe(1);

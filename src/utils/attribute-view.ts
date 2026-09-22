@@ -1,6 +1,7 @@
 import { sql } from '../api';
 import { defaultStorage, blobToText } from './storage';
 import { extractAssetNamesFromMarkdown, escapeRegExp } from './asset-markdown';
+import { restoreAssetReference } from './inverse-reference';
 import { type BlockRef, formatReadableDocPath } from './siyuan-db';
 import { log, warn, error } from './logger';
 
@@ -324,4 +325,266 @@ export async function replaceAssetInAttributeViews(oldAssetName: string, newAsse
   }
 
   return updatedCount;
+}
+
+/**
+ * 数据库中被合并改写过的单元格快照。
+ *
+ * 去重合并是"多对一"变换，按名字对整份 JSON 做全局反替换会把所有单元格
+ * （含来自其它冗余图的、以及本来就是主图的）一起改错。因此合并前按
+ * (viewId, keyId, rowId) 记录被改单元格的内容快照，回退时只改这些单元格。
+ */
+export interface IAffectedViewCell {
+  /** 属性视图 JSON 文件名（不含扩展名，即 avId） */
+  viewId: string;
+  /** 列 key id */
+  keyId: string;
+  /** 行 id（行块 id / itemID） */
+  rowId: string;
+  /** 该行文本字段 `content` 的合并前快照 */
+  originalContent?: string;
+  /** 该行资源字段 `mAsset[].content` 的合并前快照（按下标对应） */
+  originalAssetContents?: string[];
+}
+
+export interface IViewCellRestoreStats {
+  /** 实际改回的字段处数（精确 + 近似） */
+  restoredCount: number;
+  /** 其中属于近似还原（值已被用户改动）的处数 */
+  approximateCount: number;
+  /** 未改动的处数：单元格已消失、或已不再引用主图 */
+  skippedCount: number;
+}
+
+interface IViewValueField {
+  kind: 'content' | 'asset';
+  index?: number;
+  text: string;
+}
+
+/** 提取一个数据库行值节点中可能承载资源引用的字段 */
+function extractValueFields(value: any): IViewValueField[] {
+  const fields: IViewValueField[] = [];
+  if (!value) return fields;
+
+  if (typeof value.content === 'string' && value.content) {
+    fields.push({ kind: 'content', text: value.content });
+  }
+  if (Array.isArray(value.mAsset)) {
+    value.mAsset.forEach((item: any, index: number) => {
+      if (typeof item?.content === 'string' && item.content) {
+        fields.push({ kind: 'asset', index, text: item.content });
+      }
+    });
+  }
+  return fields;
+}
+
+/**
+ * 采集指定资源在各数据库文件中被引用的单元格快照（供删除日志持久化）
+ * @returns assetName -> 单元格快照列表
+ */
+export async function captureAttributeViewAssetCells(
+  assetNames: string[]
+): Promise<Map<string, IAffectedViewCell[]>> {
+  const result = new Map<string, IAffectedViewCell[]>();
+  const targets = Array.from(new Set((assetNames || []).filter(Boolean)));
+  if (targets.length === 0) return result;
+
+  try {
+    const entries = await defaultStorage.list(ATTRIBUTE_VIEW_STORAGE_DIR);
+    const jsonFiles = entries.filter((e) => !e.isDir && e.name.endsWith('.json'));
+
+    for (const file of jsonFiles) {
+      const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${file.name}`;
+      const blob = await defaultStorage.read(filePath);
+      if (!blob) continue;
+      const text = await blobToText(blob);
+      if (!text) continue;
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
+        // 解析失败（格式异常）时不记录单元格：回退侧会退回按名替换的兜底逻辑
+        continue;
+      }
+      if (!Array.isArray(parsed?.keyValues)) continue;
+
+      const viewId = String(parsed?.id || file.name.replace(/\.json$/, ''));
+
+      for (const keyValue of parsed.keyValues) {
+        const keyId = keyValue?.key?.id;
+        if (!keyId || !Array.isArray(keyValue.values)) continue;
+
+        for (const value of keyValue.values) {
+          const rowId = value?.blockID || value?.itemID || value?.id;
+          if (!rowId) continue;
+
+          const fields = extractValueFields(value);
+          if (fields.length === 0) continue;
+
+          const matchedNames = targets.filter((name) =>
+            fields.some((field) => extractAssetNamesFromMarkdown(field.text).includes(name))
+          );
+          if (matchedNames.length === 0) continue;
+
+          for (const name of matchedNames) {
+            let list = result.get(name);
+            if (!list) {
+              list = [];
+              result.set(name, list);
+            }
+            list.push({
+              viewId,
+              keyId: String(keyId),
+              rowId: String(rowId),
+              originalContent: typeof value.content === 'string' ? value.content : undefined,
+              originalAssetContents: Array.isArray(value.mAsset)
+                ? value.mAsset.map((item: any) => (typeof item?.content === 'string' ? item.content : ''))
+                : undefined,
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    warn('[attribute-view] 采集数据库单元格快照失败:', err);
+  }
+
+  return result;
+}
+
+/** 按原文件缩进风格序列化，尽量不产生无关的格式 diff */
+function serializeLikeOriginal(parsed: any, originalText: string): string {
+  const isPretty = /^\s*\{\s*\n/.test(originalText);
+  return JSON.stringify(parsed, null, isPretty ? '\t' : undefined);
+}
+
+/**
+ * 按单元格快照精确逆向还原数据库引用
+ *
+ * 每个字段独立判断：与"合并后应有形态"一致则写回快照（精确），
+ * 已被用户改动则按原快照中的出现处数限量改回（近似），
+ * 已不再引用主图或单元格已消失则跳过并如实计入 skip。
+ */
+export async function restoreAttributeViewAssetCells(
+  cells: IAffectedViewCell[],
+  canonicalName: string,
+  redundantName: string
+): Promise<IViewCellRestoreStats> {
+  const stats: IViewCellRestoreStats = { restoredCount: 0, approximateCount: 0, skippedCount: 0 };
+  if (!Array.isArray(cells) || cells.length === 0 || !canonicalName || !redundantName) {
+    return stats;
+  }
+
+  const cellsByView = new Map<string, IAffectedViewCell[]>();
+  for (const cell of cells) {
+    if (!cell?.viewId || !cell.keyId || !cell.rowId) continue;
+    let list = cellsByView.get(cell.viewId);
+    if (!list) {
+      list = [];
+      cellsByView.set(cell.viewId, list);
+    }
+    list.push(cell);
+  }
+
+  for (const [viewId, viewCells] of cellsByView) {
+    const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${viewId}.json`;
+    try {
+      const blob = await defaultStorage.read(filePath);
+      if (!blob) {
+        stats.skippedCount += countRestorableFields(viewCells);
+        continue;
+      }
+      const text = await blobToText(blob);
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
+        warn(`[attribute-view] 数据库文件 ${viewId}.json 解析失败，跳过单元格级还原:`, parseErr);
+        stats.skippedCount += countRestorableFields(viewCells);
+        continue;
+      }
+      if (!Array.isArray(parsed?.keyValues)) {
+        stats.skippedCount += countRestorableFields(viewCells);
+        continue;
+      }
+
+      let fileChanged = false;
+
+      for (const cell of viewCells) {
+        const keyValue = parsed.keyValues.find((kv: any) => String(kv?.key?.id) === cell.keyId);
+        const value = Array.isArray(keyValue?.values)
+          ? keyValue.values.find(
+              (v: any) => String(v?.blockID || v?.itemID || v?.id) === cell.rowId
+            )
+          : null;
+
+        if (!value) {
+          stats.skippedCount += countRestorableFields([cell]);
+          continue;
+        }
+
+        const applyField = (
+          currentText: string,
+          originalText: string | undefined,
+          write: (next: string) => void
+        ) => {
+          const restored = restoreAssetReference({
+            current: currentText,
+            original: originalText,
+            redundantName,
+            canonicalName,
+          });
+          if (restored.mode === 'skip') {
+            stats.skippedCount++;
+            return;
+          }
+          if (restored.mode === 'approximate') {
+            stats.approximateCount++;
+          }
+          stats.restoredCount++;
+          write(restored.text);
+          fileChanged = true;
+        };
+
+        if (typeof value.content === 'string' && value.content) {
+          applyField(value.content, cell.originalContent, (next) => {
+            value.content = next;
+          });
+        }
+
+        if (Array.isArray(value.mAsset)) {
+          value.mAsset.forEach((item: any, index: number) => {
+            if (!item || typeof item.content !== 'string' || !item.content) return;
+            applyField(item.content, cell.originalAssetContents?.[index], (next) => {
+              item.content = next;
+            });
+          });
+        }
+      }
+
+      if (fileChanged) {
+        const nextText = serializeLikeOriginal(parsed, text);
+        await defaultStorage.write(filePath, new Blob([nextText], { type: 'application/json' }));
+        log(`[attribute-view] 已按单元格快照还原数据库文件: ${viewId}.json`);
+      }
+    } catch (err) {
+      error(`[attribute-view] 还原数据库文件 ${viewId}.json 单元格失败:`, err);
+      stats.skippedCount += countRestorableFields(viewCells);
+    }
+  }
+
+  return stats;
+}
+
+/** 统计一组单元格中可承载资源引用的字段数（用于异常路径下的 skip 计数） */
+function countRestorableFields(cells: IAffectedViewCell[]): number {
+  let count = 0;
+  for (const cell of cells) {
+    if (typeof cell.originalContent === 'string') count++;
+    if (Array.isArray(cell.originalAssetContents)) count += cell.originalAssetContents.length;
+  }
+  return count;
 }

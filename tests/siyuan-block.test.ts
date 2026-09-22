@@ -130,6 +130,36 @@ describe('siyuan block asset updates', () => {
     expect(setBlockAttrsMock).toHaveBeenCalledWith('block-extra', expect.anything())
   })
 
+  it('captures pre-replacement markdown and attribute snapshots when requested', async () => {
+    sqlMock.mockResolvedValue([
+      {
+        markdown: '![img](assets/old.png)',
+        ial: '{: id="block-1" title-img="assets/old.png"}',
+      },
+    ])
+    getBlockAttrsMock.mockResolvedValue({ 'title-img': 'assets/old.png', 'custom-x': 'keep' })
+    setBlockAttrsMock.mockResolvedValue({} as any)
+
+    const markdownSnapshots: Record<string, string> = {}
+    const attrSnapshots: Record<string, Record<string, string>> = {}
+
+    await replaceAssetInBlocks([ref('block-1')], 'old.png', 'new.png', {
+      captureSnapshots: { markdown: markdownSnapshots, attrs: attrSnapshots },
+    })
+
+    // 快照必须是替换前的原始值，供逆向回退精确还原
+    expect(markdownSnapshots['block-1']).toBe('![img](assets/old.png)')
+    expect(attrSnapshots['block-1']).toEqual({ 'title-img': 'assets/old.png' })
+  })
+
+  it('does not touch snapshots when the option is omitted', async () => {
+    sqlMock.mockResolvedValue([{ markdown: '![img](assets/old.png)' }])
+
+    await replaceAssetInBlocks([ref('block-1')], 'old.png', 'new.png')
+
+    expect(updateBlockMock).toHaveBeenCalledWith('markdown', '![img](assets/new.png)', 'block-1')
+  })
+
   it('removes asset references and updates non-empty blocks', async () => {
     sqlMock.mockResolvedValue([
       {

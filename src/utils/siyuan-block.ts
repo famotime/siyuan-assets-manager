@@ -19,6 +19,16 @@ export interface ReplaceAssetOptions {
   newReEditMetadata?: IAssetReEditMetadata;
   /** 额外的目标块 ID 集合（例如当前正在编辑但可能尚未建立 Markdown 引用的块 ID） */
   additionalBlockIds?: string[];
+  /**
+   * 采集替换前的原始快照（供逆向回退精确还原）。
+   * 复用本函数已有的实时读取，不额外查库。
+   */
+  captureSnapshots?: {
+    /** blockId -> 替换前的原始 markdown */
+    markdown?: Record<string, string>;
+    /** blockId -> 替换前的原始属性值（仅记录会被改写的属性） */
+    attrs?: Record<string, Record<string, string>>;
+  };
 }
 
 /**
@@ -91,6 +101,12 @@ export async function replaceAssetInBlocks(
       const currentMarkdown = blocks[0].markdown || "";
       const currentIal = blocks[0].ial || "";
 
+      // 0. 采集替换前的原始快照：逆向回退要区分"合并确实改过的引用"与"本来就在的同名引用"，
+      //    没有快照就只能按名全局反替换，会误伤后者
+      if (options?.captureSnapshots?.markdown && ref.id && currentMarkdown) {
+        options.captureSnapshots.markdown[ref.id] = currentMarkdown;
+      }
+
       // 1. 替换正文 Markdown 中的引用（兼容普通与 URI 编码路径）
       const hasMdOld = currentMarkdown.includes(`assets/${oldAssetName}`) ||
                        (encodedOld !== oldAssetName && currentMarkdown.includes(`assets/${encodedOld}`));
@@ -120,6 +136,15 @@ export async function replaceAssetInBlocks(
             }
 
             if (attrChanged) {
+              // 采集属性快照（仅记录会被改写的属性）
+              if (options?.captureSnapshots?.attrs && ref.id) {
+                const snapshot: Record<string, string> = {};
+                for (const key of Object.keys(updatedAttrs)) {
+                  snapshot[key] = attrs[key];
+                }
+                options.captureSnapshots.attrs[ref.id] = snapshot;
+              }
+
               const setRes = await setBlockAttrs(ref.id, updatedAttrs);
               if (setRes === null) {
                 throw new Error(`[siyuan-block] 更新块属性失败: setBlockAttrs 返回异常 (块ID: ${ref.id})`);

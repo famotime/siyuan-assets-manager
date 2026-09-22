@@ -212,6 +212,13 @@
                       <span class="file-name-inner">
                         <Image v-if="item.thumbnail" :size="13" class="file-thumb-icon" title="悬浮查看被删图片预览" />
                         <span class="file-name-text">{{ item.fileName }}</span>
+                        <span
+                          v-if="item.partialFailure"
+                          class="badge badge-status is-partial-failure"
+                          :title="item.failureReason || '该条目归一化未完全成功，已保留回退记录'"
+                        >
+                          未完成
+                        </span>
                       </span>
                     </td>
                     <td class="file-size-cell">{{ formatSize(item.size) }}</td>
@@ -269,6 +276,23 @@
                   <strong>{{ batch.rollbackReport.degradedPositionCount }}</strong>
                   处（{{ t('rollbackDegradedPositionHint', '原相邻块已变化，已按近似位置还原') }}）
                 </span>
+                <span v-if="(batch.rollbackReport.exactRestoredCount || 0) > 0" class="text-muted">
+                  · 精确还原 <strong>{{ batch.rollbackReport.exactRestoredCount }}</strong> 块（按合并前快照整段还原）
+                </span>
+                <span v-if="(batch.rollbackReport.approximateRestoredCount || 0) > 0" class="text-warning">
+                  · {{ t('rollbackApproximate', '近似还原') }}
+                  <strong>{{ batch.rollbackReport.approximateRestoredCount }}</strong>
+                  处（值已被改动，按原引用处数限量还原）
+                </span>
+                <span v-if="(batch.rollbackReport.restoredIalCount || 0) > 0" class="text-muted">
+                  · 块属性引用（题头图等）<strong>{{ batch.rollbackReport.restoredIalCount }}</strong> 处
+                </span>
+                <span v-if="(batch.rollbackReport.restoredViewCellsCount || 0) > 0" class="text-muted">
+                  · 数据库单元格 <strong>{{ batch.rollbackReport.restoredViewCellsCount }}</strong> 处
+                  <template v-if="(batch.rollbackReport.skippedViewCellsCount || 0) > 0">
+                    （跳过 {{ batch.rollbackReport.skippedViewCellsCount }} 处已改动/已删除的单元格）
+                  </template>
+                </span>
               </div>
             </div>
           </div>
@@ -323,8 +347,34 @@
               <ul class="checklist-items">
                 <li v-for="name in rollbackChecklist" :key="name">
                   <code>{{ name }}</code>
+                  <span
+                    v-if="isRollbackFileMissing(name)"
+                    class="badge badge-status is-missing-file"
+                    title="该文件尚未放回 data/assets/，现在回退会把引用指向不存在的文件"
+                  >
+                    未还原
+                  </span>
                 </li>
               </ul>
+            </div>
+
+            <!-- 物理文件预检：文件未就位时回退只会产生坏引用，永久删除环境更是不可恢复 -->
+            <div v-if="isRollbackBlocked" class="presence-warning is-blocked">
+              <AlertCircle :size="14" class="presence-icon" />
+              <div>
+                <strong>已禁用回退：</strong>
+                本批次为永久删除（当前环境无系统回收站），且上述
+                <strong>{{ missingRollbackFiles.length }}</strong>
+                个文件已无法找回。回退只会把文档引用指向不存在的文件，因此不提供该操作。
+              </div>
+            </div>
+            <div v-else-if="missingRollbackFiles.length > 0" class="presence-warning">
+              <AlertCircle :size="14" class="presence-icon" />
+              <div>
+                <strong>提示：</strong>
+                上述 <strong>{{ missingRollbackFiles.length }}</strong> 个文件尚未放回
+                <code>data/assets/</code>。现在回退会把这些引用指向不存在的文件；建议先从回收站还原文件再回退。
+              </div>
             </div>
 
             <div class="drift-defense-tip">
@@ -336,8 +386,13 @@
             <button class="am-btn am-btn--secondary" @click="rollbackConfirmBatch = null" :disabled="isRollingBack">
               取消
             </button>
-            <button class="am-btn am-btn--primary" @click="executeRollback" :disabled="isRollingBack">
+            <button
+              class="am-btn am-btn--primary"
+              @click="executeRollback"
+              :disabled="isRollingBack || isRollbackBlocked"
+            >
               <span v-if="isRollingBack">正在执行逆向恢复...</span>
+              <span v-else-if="isRollbackBlocked">不可回退（文件已永久删除）</span>
               <span v-else>确认开始回退</span>
             </button>
           </div>
@@ -397,6 +452,7 @@ import {
 import {
   rollbackBatch,
   getRollbackChecklist,
+  checkRollbackFilePresence,
 } from '../utils/rollback-engine';
 import { formatAssetSize } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
@@ -640,18 +696,63 @@ function positionHoverPreview(clientX: number, clientY: number) {
   };
 }
 
-function openRollbackConfirm(batch: IDeletionBatch) {
+const rollbackFilePresence = ref<Array<{ fileName: string; present: boolean }>>([]);
+const isLoadingPresence = ref(false);
+
+/** 尚未放回 data/assets/ 的文件（回退后会成为坏引用） */
+const missingRollbackFiles = computed(() =>
+  rollbackFilePresence.value.filter((entry) => !entry.present).map((entry) => entry.fileName)
+);
+/** 永久删除（无系统回收站）且文件已不可找回时，回退只会破坏文档，直接禁用 */
+const isRollbackBlocked = computed(
+  () => rollbackConfirmBatch.value?.destination === 'permanent' && missingRollbackFiles.value.length > 0
+);
+
+function isRollbackFileMissing(fileName: string): boolean {
+  const entry = rollbackFilePresence.value.find((it) => it.fileName === fileName);
+  return Boolean(entry && !entry.present);
+}
+
+async function openRollbackConfirm(batch: IDeletionBatch) {
   rollbackConfirmBatch.value = batch;
+  rollbackFilePresence.value = [];
+  isLoadingPresence.value = true;
+
+  try {
+    rollbackFilePresence.value = await checkRollbackFilePresence(batch);
+  } catch (presenceErr) {
+    warn('[DeletionHistoryDialog] 回退文件预检失败:', presenceErr);
+  } finally {
+    isLoadingPresence.value = false;
+  }
 }
 
 async function executeRollback() {
   if (!rollbackConfirmBatch.value) return;
+  if (isRollbackBlocked.value) {
+    showMessage('该批次文件已被永久删除且无法找回，回退只会产生坏引用，已阻止操作', 5000, 'error');
+    return;
+  }
   const batchId = rollbackConfirmBatch.value.id;
   isRollingBack.value = true;
 
   try {
     const result = await rollbackBatch(batchId);
-    showMessage(`回退完成！已成功恢复 ${result.report.restoredBlocksCount} 处块引用${result.report.skippedBlocksCount > 0 ? `，跳过 ${result.report.skippedBlocksCount} 处漂移块` : ''}`);
+    const extraParts: string[] = [];
+    if ((result.report.approximateRestoredCount || 0) > 0) {
+      extraParts.push(`近似还原 ${result.report.approximateRestoredCount} 处`);
+    }
+    if ((result.report.restoredViewCellsCount || 0) > 0) {
+      extraParts.push(`数据库单元格 ${result.report.restoredViewCellsCount} 处`);
+    }
+    if (result.report.skippedBlocksCount > 0) {
+      extraParts.push(`跳过 ${result.report.skippedBlocksCount} 处已漂移/无变化的块`);
+    }
+    showMessage(
+      `回退完成！已成功恢复 ${result.report.restoredBlocksCount} 处块引用${
+        extraParts.length > 0 ? `（${extraParts.join('，')}）` : ''
+      }`
+    );
     rollbackConfirmBatch.value = null;
     await loadData();
     emit('refresh');
@@ -1075,6 +1176,56 @@ async function handleJumpToItemDoc(item: IDeletedItemRecord) {
     background: rgba(59, 130, 246, 0.12);
     color: #2563eb;
     border: 1px solid rgba(59, 130, 246, 0.25);
+  }
+
+  &.is-partial-failure {
+    margin-left: 6px;
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+
+  &.is-missing-file {
+    margin-left: 6px;
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+}
+
+/* 回退前的物理文件预检提示 */
+.presence-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  color: var(--b3-theme-on-surface);
+
+  .presence-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: #b45309;
+  }
+
+  code {
+    padding: 0 3px;
+    border-radius: 3px;
+    background: var(--b3-theme-surface);
+  }
+
+  &.is-blocked {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+
+    .presence-icon {
+      color: #dc2626;
+    }
   }
 }
 

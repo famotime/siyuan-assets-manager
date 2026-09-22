@@ -10,6 +10,8 @@ import {
   extractAssetsFromAttributeViewJson,
   resolveAttributeViewReferences,
   replaceAssetInAttributeViews,
+  captureAttributeViewAssetCells,
+  restoreAttributeViewAssetCells,
   ATTRIBUTE_VIEW_STORAGE_DIR,
 } from '../src/utils/attribute-view';
 import { defaultStorage, blobToText } from '../src/utils/storage';
@@ -247,6 +249,125 @@ describe('attribute-view helper module', () => {
       const writtenText = await blobToText(writtenBlob);
       expect(writtenText).toContain('assets/new_name.png');
       expect(writtenText).not.toContain('assets/old_name.png');
+    });
+  });
+
+  describe('attribute view cell snapshot & precise rollback', () => {
+    const buildAvJson = (values: any[]) =>
+      JSON.stringify({
+        spec: 1,
+        id: 'av-dup-db',
+        name: '素材库',
+        keyValues: [
+          {
+            key: { id: 'key-cover', name: '封面', type: 'mAsset' },
+            values,
+          },
+        ],
+      });
+
+    const mockAvFile = (json: string) => {
+      vi.spyOn(defaultStorage, 'list').mockResolvedValue([
+        { name: 'av-dup-db.json', isDir: false, size: 100, updated: 100 },
+      ]);
+      vi.spyOn(defaultStorage, 'read').mockResolvedValue(new Blob([json], { type: 'application/json' }));
+      return vi.spyOn(defaultStorage, 'write').mockResolvedValue(undefined);
+    };
+
+    it('captures only the cells that reference the asset, with content snapshots', async () => {
+      const json = buildAvJson([
+        { id: 'v1', blockID: 'row-1', mAsset: [{ content: 'assets/dup.png' }] },
+        { id: 'v2', blockID: 'row-2', mAsset: [{ content: 'assets/other.png' }] },
+      ]);
+      mockAvFile(json);
+
+      const captured = await captureAttributeViewAssetCells(['dup.png']);
+
+      const cells = captured.get('dup.png') || [];
+      expect(cells).toHaveLength(1);
+      expect(cells[0]).toMatchObject({ viewId: 'av-dup-db', keyId: 'key-cover', rowId: 'row-1' });
+      expect(cells[0].originalAssetContents).toEqual(['assets/dup.png']);
+    });
+
+    it('restores only the recorded cell, leaving other cells and other assets untouched', async () => {
+      const json = buildAvJson([
+        { id: 'v1', blockID: 'row-1', mAsset: [{ content: 'assets/keep.png' }] },
+        { id: 'v2', blockID: 'row-2', mAsset: [{ content: 'assets/keep.png' }] },
+      ]);
+      const writeSpy = mockAvFile(json);
+
+      const stats = await restoreAttributeViewAssetCells(
+        [
+          {
+            viewId: 'av-dup-db',
+            keyId: 'key-cover',
+            rowId: 'row-1',
+            originalAssetContents: ['assets/dup.png'],
+          },
+        ],
+        'keep.png',
+        'dup.png'
+      );
+
+      expect(stats.restoredCount).toBe(1);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
+
+      const writtenText = await blobToText(writeSpy.mock.calls[0][1]);
+      const parsed = JSON.parse(writtenText);
+      // 只有被记录的单元格改回冗余图；同值的另一行（可能来自其它冗余图或本就是主图）保持不动
+      expect(parsed.keyValues[0].values[0].mAsset[0].content).toBe('assets/dup.png');
+      expect(parsed.keyValues[0].values[1].mAsset[0].content).toBe('assets/keep.png');
+    });
+
+    it('keeps the original JSON formatting style (pretty tabs vs compact)', async () => {
+      const prettyJson = '{\n\t"spec": 1,\n\t"id": "av-dup-db",\n\t"keyValues": [\n\t\t{\n\t\t\t"key": {\n\t\t\t\t"id": "key-cover"\n\t\t\t},\n\t\t\t"values": [\n\t\t\t\t{\n\t\t\t\t\t"blockID": "row-1",\n\t\t\t\t\t"content": "assets/keep.png"\n\t\t\t\t}\n\t\t\t]\n\t\t}\n\t]\n}';
+      const writeSpy = mockAvFile(prettyJson);
+
+      await restoreAttributeViewAssetCells(
+        [{ viewId: 'av-dup-db', keyId: 'key-cover', rowId: 'row-1', originalContent: 'assets/dup.png' }],
+        'keep.png',
+        'dup.png'
+      );
+
+      const writtenText = await blobToText(writeSpy.mock.calls[0][1]);
+      expect(writtenText.startsWith('{\n\t"spec"')).toBe(true);
+      expect(writtenText).not.toContain('assets/keep.png');
+    });
+
+    it('skips cells whose value no longer references the canonical asset and reports it', async () => {
+      const json = buildAvJson([{ id: 'v1', blockID: 'row-1', content: '用户已改成 assets/other.png' }]);
+      const writeSpy = mockAvFile(json);
+
+      const stats = await restoreAttributeViewAssetCells(
+        [{ viewId: 'av-dup-db', keyId: 'key-cover', rowId: 'row-1', originalContent: 'assets/dup.png' }],
+        'keep.png',
+        'dup.png'
+      );
+
+      expect(stats.restoredCount).toBe(0);
+      expect(stats.skippedCount).toBe(1);
+      expect(writeSpy).not.toHaveBeenCalled();
+    });
+
+    it('counts a vanished cell as skipped instead of failing', async () => {
+      mockAvFile(buildAvJson([{ id: 'v1', blockID: 'row-other', content: 'assets/keep.png' }]));
+
+      const stats = await restoreAttributeViewAssetCells(
+        [{ viewId: 'av-dup-db', keyId: 'key-cover', rowId: 'row-1', originalContent: 'assets/dup.png' }],
+        'keep.png',
+        'dup.png'
+      );
+
+      expect(stats.skippedCount).toBe(1);
+      expect(stats.restoredCount).toBe(0);
+    });
+
+    it('returns empty capture when the file is not valid JSON', async () => {
+      mockAvFile('{ not json');
+
+      const captured = await captureAttributeViewAssetCells(['dup.png']);
+
+      expect(captured.size).toBe(0);
     });
   });
 });

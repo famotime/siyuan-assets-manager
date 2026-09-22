@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countAssetOccurrences,
   extractAssetNamesFromMarkdown,
   removeAssetFromMarkdown,
   replaceAssetInMarkdown,
+  replaceAssetInMarkdownLimited,
 } from '../src/utils/asset-markdown'
 
 describe('asset markdown helpers', () => {
@@ -164,6 +166,42 @@ describe('asset markdown helpers', () => {
     const markdown = '<span data-type="file-annotation-ref" data-id="assets/old_book.pdf/20240101-123456">批注</span>'
     expect(replaceAssetInMarkdown(markdown, 'old_book.pdf', 'new_book.pdf')).toBe(
       '<span data-type="file-annotation-ref" data-id="assets/new_book.pdf/20240101-123456">批注</span>',
+    )
+  })
+
+  it('counts occurrences with the same reference semantics as replacement', () => {
+    const markdown = '![a](assets/keep.png) 文字 ![b](assets/keep.png)'
+    expect(countAssetOccurrences(markdown, 'keep.png')).toBe(2)
+    // 前缀相同但不同文件不计入
+    expect(countAssetOccurrences('![c](assets/keep.png.bak)', 'keep.png')).toBe(0)
+    expect(countAssetOccurrences('', 'keep.png')).toBe(0)
+  })
+
+  it('counts URI encoded occurrences for non-ascii asset names', () => {
+    const name = '图片 一.png'
+    const markdown = `![a](assets/${encodeURIComponent(name)}) ![b](assets/${name})`
+    expect(countAssetOccurrences(markdown, name)).toBe(2)
+  })
+
+  it('replaces at most the requested number of occurrences', () => {
+    const markdown = '![a](assets/keep.png) ![b](assets/keep.png) ![c](assets/keep.png)'
+    expect(replaceAssetInMarkdownLimited(markdown, 'keep.png', 'dup.png', 2)).toBe(
+      '![a](assets/dup.png) ![b](assets/dup.png) ![c](assets/keep.png)',
+    )
+    // limit 为 0 或负数时不改动
+    expect(replaceAssetInMarkdownLimited(markdown, 'keep.png', 'dup.png', 0)).toBe(markdown)
+    // limit 超过实际出现次数时全部替换
+    expect(replaceAssetInMarkdownLimited(markdown, 'keep.png', 'dup.png', 99)).toBe(
+      '![a](assets/dup.png) ![b](assets/dup.png) ![c](assets/dup.png)',
+    )
+  })
+
+  it('limits replacement across both raw and URI encoded forms', () => {
+    const name = '图片 一.png'
+    const markdown = `![a](assets/${encodeURIComponent(name)}) ![b](assets/${name})`
+    // 与正向替换一致：先处理 URI 编码形态，再处理原始名形态，总量受 limit 约束
+    expect(replaceAssetInMarkdownLimited(markdown, name, 'dup.png', 1)).toBe(
+      `![a](assets/dup.png) ![b](assets/${name})`,
     )
   })
 })

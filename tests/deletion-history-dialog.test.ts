@@ -277,6 +277,163 @@ describe('DeletionHistoryDialog component visibility and reload behavior', () =>
     expect(reportText).toContain('原相邻块已变化，已按近似位置还原');
   });
 
+  it('blocks rollback for permanently deleted files and warns when files are not restored yet', async () => {
+    const rollbackEngine = await import('../src/utils/rollback-engine');
+    const presenceSpy = vi
+      .spyOn(rollbackEngine, 'checkRollbackFilePresence')
+      .mockResolvedValue([{ fileName: 'gone.png', present: false }]);
+
+    const makeBatch = (destination: 'os-trash' | 'permanent'): deletionLogger.IDeletionBatch => ({
+      id: `batch_${destination}`,
+      timestamp: Date.now(),
+      actionType: 'single-delete',
+      destination,
+      items: [
+        { fileName: 'gone.png', originalRelativePath: 'data/assets/gone.png', size: 1024 },
+      ],
+      freedBytes: 1024,
+      canRollback: true,
+      isRolledBack: false,
+    });
+
+    vi.spyOn(deletionLogger, 'getDeletionHistory').mockResolvedValue([makeBatch('permanent')]);
+    vi.spyOn(deletionLogger, 'getDeletionHistoryLimit').mockResolvedValue(10);
+
+    const isVisible = ref(true);
+    const Wrapper = {
+      components: { DeletionHistoryDialog },
+      setup() {
+        return { isVisible };
+      },
+      template: `<DeletionHistoryDialog :visible="isVisible" />`,
+    };
+
+    app = createApp(Wrapper);
+    app.mount(mountContainer);
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await nextTick();
+
+    mountContainer.querySelector<HTMLButtonElement>('.btn-compact.am-btn--primary')?.click();
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(presenceSpy).toHaveBeenCalled();
+    // 永久删除 + 文件缺失 ⇒ 明确禁用并说明原因
+    const blocked = mountContainer.querySelector('.presence-warning.is-blocked');
+    expect(blocked).not.toBeNull();
+    expect(blocked?.textContent).toContain('已无法找回');
+    const confirmBtn = mountContainer.querySelector<HTMLButtonElement>(
+      '.rollback-confirm-dialog .am-btn--primary'
+    );
+    expect(confirmBtn?.disabled).toBe(true);
+    expect(confirmBtn?.textContent).toContain('不可回退');
+  });
+
+  it('still allows rollback when files are missing but the recycle bin can restore them', async () => {
+    const rollbackEngine = await import('../src/utils/rollback-engine');
+    vi.spyOn(rollbackEngine, 'checkRollbackFilePresence').mockResolvedValue([
+      { fileName: 'gone.png', present: false },
+    ]);
+
+    vi.spyOn(deletionLogger, 'getDeletionHistory').mockResolvedValue([
+      {
+        id: 'batch_trash',
+        timestamp: Date.now(),
+        actionType: 'single-delete',
+        destination: 'os-trash',
+        items: [{ fileName: 'gone.png', originalRelativePath: 'data/assets/gone.png', size: 1024 }],
+        freedBytes: 1024,
+        canRollback: true,
+        isRolledBack: false,
+      },
+    ]);
+    vi.spyOn(deletionLogger, 'getDeletionHistoryLimit').mockResolvedValue(10);
+
+    const isVisible = ref(true);
+    const Wrapper = {
+      components: { DeletionHistoryDialog },
+      setup() {
+        return { isVisible };
+      },
+      template: `<DeletionHistoryDialog :visible="isVisible" />`,
+    };
+
+    app = createApp(Wrapper);
+    app.mount(mountContainer);
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await nextTick();
+
+    mountContainer.querySelector<HTMLButtonElement>('.btn-compact.am-btn--primary')?.click();
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // 可从回收站找回 ⇒ 只提示不阻断，并把未还原文件单独标记
+    expect(mountContainer.querySelector('.presence-warning.is-blocked')).toBeNull();
+    expect(mountContainer.querySelector('.presence-warning')?.textContent).toContain('建议先从回收站还原文件');
+    expect(mountContainer.querySelector('.badge-status.is-missing-file')?.textContent).toContain('未还原');
+    const confirmBtn = mountContainer.querySelector<HTMLButtonElement>(
+      '.rollback-confirm-dialog .am-btn--primary'
+    );
+    expect(confirmBtn?.disabled).toBe(false);
+  });
+
+  it('renders the dedup rollback breakdown (exact / approximate / IAL / database cells)', async () => {
+    vi.spyOn(deletionLogger, 'getDeletionHistory').mockResolvedValue([
+      {
+        id: 'batch_dedup_report',
+        timestamp: Date.now(),
+        actionType: 'deduplicate',
+        destination: 'os-trash',
+        items: [{ fileName: 'dup.png', originalRelativePath: 'data/assets/dup.png', size: 1024, canonicalName: 'keep.png' }],
+        freedBytes: 1024,
+        canRollback: true,
+        isRolledBack: true,
+        rolledBackAt: Date.now(),
+        rollbackReport: {
+          restoredBlocksCount: 4,
+          skippedBlocksCount: 1,
+          failedBlocksCount: 0,
+          exactRestoredCount: 2,
+          approximateRestoredCount: 3,
+          restoredIalCount: 1,
+          restoredViewCellsCount: 2,
+          skippedViewCellsCount: 1,
+        },
+      },
+    ]);
+    vi.spyOn(deletionLogger, 'getDeletionHistoryLimit').mockResolvedValue(10);
+
+    const isVisible = ref(true);
+    const Wrapper = {
+      components: { DeletionHistoryDialog },
+      setup() {
+        return { isVisible };
+      },
+      template: `<DeletionHistoryDialog :visible="isVisible" />`,
+    };
+
+    app = createApp(Wrapper);
+    app.mount(mountContainer);
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await nextTick();
+
+    mountContainer.querySelector<HTMLDivElement>('.history-card .card-header')?.click();
+    await nextTick();
+
+    const reportText = (mountContainer.querySelector('.rollback-report-box')?.textContent || '').replace(
+      /\s+/g,
+      ' '
+    );
+    expect(reportText).toMatch(/精确还原 2 块/);
+    expect(reportText).toMatch(/近似还原 3 处/);
+    expect(reportText).toMatch(/块属性引用（题头图等）1 处/);
+    expect(reportText).toMatch(/数据库单元格 2 处/);
+    expect(reportText).toMatch(/跳过 1 处已改动\/已删除的单元格/);
+  });
+
   it('verifies that DeletionHistoryDialog SFC style contains flex-shrink: 0 and min-height: 0 to prevent card crushing', async () => {
     const fs = await import('fs');
     const path = await import('path');

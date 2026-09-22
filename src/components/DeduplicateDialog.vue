@@ -804,7 +804,13 @@ function selectNextPendingGroup() {
 async function handleMergeSingleGroup(group: IDuplicateGroup) {
   try {
     const stats = await normalizeDuplicateGroup(group);
-    pushMsg(`已完成合并！修改了 ${stats.affectedBlocksCount} 处文档引用，释放 ${formatAssetSize(stats.freedBytes)} 空间。`);
+    if (stats.failedItemsCount > 0) {
+      pushMsg(
+        `合并部分完成：${stats.deletedFilesCount} 个冗余文件已归一化，${stats.failedItemsCount} 个未能完成（详见控制台日志）。已改写部分已记录回退日志，可在删除历史中回退。`
+      );
+    } else {
+      pushMsg(`已完成合并！修改了 ${stats.affectedBlocksCount} 处文档引用，释放 ${formatAssetSize(stats.freedBytes)} 空间。`);
+    }
     await persistCurrentCache();
     emit('completed');
     selectNextPendingGroup();
@@ -869,7 +875,13 @@ async function handleBatchMerge() {
     });
 
     await persistCurrentCache();
-    pushMsg(`批量去重归一化完成！更新了 ${stats.affectedDocsCount} 篇文档中的 ${stats.affectedBlocksCount} 处引用，删除 ${stats.deletedFilesCount} 个冗余文件，成功释放 ${formatAssetSize(stats.freedBytes)} 存储空间。`);
+    if (stats.failedItemsCount > 0) {
+      pushMsg(
+        `批量归一化部分完成：删除 ${stats.deletedFilesCount} 个冗余文件，${stats.failedItemsCount} 个未能完成（详见控制台日志）。已改写部分已记录回退日志，可在删除历史中回退。`
+      );
+    } else {
+      pushMsg(`批量去重归一化完成！更新了 ${stats.affectedDocsCount} 篇文档中的 ${stats.affectedBlocksCount} 处引用，删除 ${stats.deletedFilesCount} 个冗余文件，成功释放 ${formatAssetSize(stats.freedBytes)} 存储空间。`);
+    }
     emit('completed');
   } catch (err) {
     error('[DeduplicateDialog] 批量归一化失败:', err);

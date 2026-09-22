@@ -27,5 +27,6 @@
   "dedupDecodeConcurrencyTitle": "去重扫描：解码并发度",
   "dedupDecodeConcurrencyDesc": "图片感知哈希阶段的并行解码数（范围 1~8，默认 3）。每张图解码后占用完整位图内存，图片较大或内存紧张时请调低",
   "rollbackDegradedPosition": "位置降级",
-  "rollbackDegradedPositionHint": "原相邻块已变化，已按近似位置还原"
+  "rollbackDegradedPositionHint": "原相邻块已变化，已按近似位置还原",
+  "rollbackApproximate": "近似还原"
 }
