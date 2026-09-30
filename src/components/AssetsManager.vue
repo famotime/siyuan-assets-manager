@@ -130,6 +130,7 @@
             <option value="reeditable">可二次编辑</option>
             <option value="original">原始底图</option>
             <option value="unreferenced">未引用 (孤儿/孤立)</option>
+            <option value="missing">丢失资源{{ missingAssetsCount > 0 ? ` (${missingAssetsCount})` : '' }}</option>
             <option value="large">大文件 (>1MB)</option>
           </select>
         </div>
@@ -377,6 +378,7 @@ const deduplicateVisible = ref(false);
 const historyDialogVisible = ref(false);
 const searchQuery = ref('');
 const filterType = ref<AssetFilterType>('all');
+const missingAssetsCount = computed(() => assets.value.filter(a => a.isMissing).length);
 const activeCategory = ref<AssetCategory>('all');
 
 function handleOpenDeduplicate() {
@@ -502,7 +504,7 @@ async function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo,
   const isVid = isPlayableVideoAsset(asset.name);
   const isAud = isPlayableAudioAsset(asset.name);
 
-  if (!isImg && !isVid && !isAud) return;
+  if (asset.isMissing || (!isImg && !isVid && !isAud)) return;
 
   // 取消任何待处理的隐藏与老定时器
   cancelHidePreview();

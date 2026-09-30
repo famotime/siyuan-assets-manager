@@ -23,11 +23,13 @@ export interface IBatchDeleteSummary {
   totalCount: number;
   regularCount: number;
   originalCount: number;
+  missingCount?: number;
   sizeText: string;
   referencedCount: number;
   referencedOriginalsCount: number;
   regularAssets: AssetInfo[];
   originalAssets: AssetInfo[];
+  missingAssets?: AssetInfo[];
 }
 
 export interface ICleanupSummary {
@@ -51,6 +53,7 @@ export interface IBatchDeleteResult {
   success: boolean;
   deletedRegularCount: number;
   deletedOriginalCount: number;
+  deletedMissingCount?: number;
   freedBytes: number;
   error?: unknown;
 }
@@ -64,9 +67,23 @@ export interface IUnifiedCleanupResult {
 }
 
 /**
- * 构造单个资源（普通文件或原始底图）删除前的确认弹窗配置
+ * 构造单个资源（普通文件、原始底图或丢失资源）删除前的确认弹窗配置
  */
 export function buildSingleDeleteConfirmMessage(asset: AssetInfo): IConfirmDialogOptions {
+  if (asset.isMissing) {
+    let confirmMsg = `资源文件 ${asset.name} 在磁盘中已不存在（丢失资源）。\n确定要清理所有引用该文件的文档块引用（共 ${asset.references?.length || asset.refCount || 0} 处引用）吗？\n\n（操作将记录到日志中，支持随时回退撤销）`;
+    if (asset.docCount > 1) {
+      confirmMsg = `【多文档引用警告】此丢失资源正被 ${asset.docCount} 篇不同的文档共同引用！\n\n` + confirmMsg;
+    }
+
+    return {
+      title: '确认清理丢失资源引用',
+      message: confirmMsg,
+      confirmText: '清理引用',
+      danger: true,
+    };
+  }
+
   if (asset.isOriginal) {
     let confirmMsg = `确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（文件将移入操作系统回收站）' : '【高危警告】当前运行环境不支持系统回收站，此操作将永久彻底删除底图物理文件！'}`;
     if (asset.docCount > 0) {
@@ -107,8 +124,13 @@ export function buildBatchDeleteConfirmMessage(summary: IBatchDeleteSummary): IC
     '清单概要：',
     `• 普通资源文件：${summary.regularCount} 个`,
     `• 隔离原始底图：${summary.originalCount} 个`,
-    `• 预计释放总空间：${summary.sizeText}`,
   ];
+
+  if (summary.missingCount && summary.missingCount > 0) {
+    messageLines.push(`• 丢失资源引用：${summary.missingCount} 项（物理文件已缺失，将清理文档引用链接）`);
+  }
+
+  messageLines.push(`• 预计释放总空间：${summary.sizeText}`);
 
   if (summary.referencedCount > 0) {
     messageLines.push('');
@@ -247,13 +269,15 @@ export async function executeSingleAssetDeletion(
 
     const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, createChildBlocksCache());
 
-    await deleteAssetFile(asset.name);
+    if (!asset.isMissing) {
+      await deleteAssetFile(asset.name);
+    }
 
     if (asset.references && asset.references.length > 0) {
       await removeAssetFromBlocks(asset.references, asset.name);
     }
 
-    notify(`资源 ${asset.name} 及其文档引用已删除`);
+    notify(asset.isMissing ? `丢失资源 ${asset.name} 的文档引用已清理` : `资源 ${asset.name} 及其文档引用已删除`);
 
     const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
     const hasRefs = Boolean(asset.references && asset.references.length > 0);
@@ -294,6 +318,7 @@ export async function executeBatchAssetsDeletion(
   const notify = options?.showMessage || pushMsg;
   let deletedRegularCount = 0;
   let deletedOriginalCount = 0;
+  let deletedMissingCount = 0;
   let freedBytes = 0;
   const deletedRecords: IDeletedItemRecord[] = [];
 
@@ -301,11 +326,12 @@ export async function executeBatchAssetsDeletion(
   const anchorCache = createChildBlocksCache();
 
   try {
-    // 1. 删除普通资源及其文档引用
-    for (const asset of summary.regularAssets) {
+    // 1. 删除普通资源与丢失资源及其文档引用
+    const assetsToProcess = Array.from(new Set([...summary.regularAssets, ...(summary.missingAssets || [])]));
+    for (const asset of assetsToProcess) {
       try {
         let thumbnail: string | undefined;
-        if (isImageAsset(asset.name)) {
+        if (!asset.isMissing && isImageAsset(asset.name)) {
           try {
             thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`);
           } catch {}
@@ -341,12 +367,18 @@ export async function executeBatchAssetsDeletion(
 
         const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, anchorCache);
 
-        await deleteAssetFile(asset.name);
+        if (!asset.isMissing) {
+          await deleteAssetFile(asset.name);
+        }
         if (asset.references && asset.references.length > 0) {
           await removeAssetFromBlocks(asset.references, asset.name);
         }
-        deletedRegularCount++;
-        freedBytes += asset.size || 0;
+        if (asset.isMissing) {
+          deletedMissingCount++;
+        } else {
+          deletedRegularCount++;
+          freedBytes += asset.size || 0;
+        }
         deletedRecords.push({
           fileName: asset.name,
           originalRelativePath: `data/assets/${asset.name}`,
@@ -402,11 +434,17 @@ export async function executeBatchAssetsDeletion(
       }
     }
 
-    notify(`批量删除完成！已成功删除 ${deletedRegularCount} 个资源与 ${deletedOriginalCount} 个底图，释放 ${summary.sizeText} 空间。`);
+    const parts: string[] = [];
+    if (deletedRegularCount > 0) parts.push(`${deletedRegularCount} 个资源`);
+    if (deletedOriginalCount > 0) parts.push(`${deletedOriginalCount} 个底图`);
+    if (deletedMissingCount > 0) parts.push(`${deletedMissingCount} 项丢失资源引用`);
+    const countText = parts.length > 0 ? parts.join('、') : '0 个项';
+    notify(`批量删除完成！已成功处理 ${countText}，释放 ${summary.sizeText} 空间。`);
     return {
       success: true,
       deletedRegularCount,
       deletedOriginalCount,
+      deletedMissingCount,
       freedBytes,
     };
   } catch (e) {

@@ -53,6 +53,7 @@
                     <span class="doc-title-text">{{ row.data.group.title || row.data.group.readablePath || row.data.group.id }}</span>
                     <span v-if="row.data.group.isUnreferenced" class="doc-unref-badge">孤立/未引用</span>
                     <span v-else-if="row.data.group.matchedByDocName && searchQuery" class="doc-match-badge">文档匹配</span>
+                    <span v-if="row.data.group.hasMissingAssets" class="doc-missing-badge" title="该文档中存在引用但找不到物理文件的资源">包含丢失 ({{ row.data.group.missingAssetCount }})</span>
                   </div>
                   <div class="doc-path-row" :title="row.data.group.readablePath || row.data.group.title || row.data.group.id">
                     {{ row.data.group.readablePath || row.data.group.title || row.data.group.id }}
@@ -135,11 +136,18 @@
             <div class="col-preview">
               <div
                 class="asset-preview"
-                @mouseenter="$emit('show-preview', { event: $event, asset: row.data.asset, previewSrc: getThumbnailSrc(row.data.asset) })"
-                @mousemove="$emit('update-preview', { event: $event })"
-                @mouseleave="$emit('hide-preview')"
+                :title="row.data.asset.isMissing ? `[丢失资源] 物理文件已不存在，引用处数: ${row.data.asset.references?.length || row.data.asset.refCount || 0}` : undefined"
+                @mouseenter="!row.data.asset.isMissing && $emit('show-preview', { event: $event, asset: row.data.asset, previewSrc: getThumbnailSrc(row.data.asset) })"
+                @mousemove="!row.data.asset.isMissing && $emit('update-preview', { event: $event })"
+                @mouseleave="!row.data.asset.isMissing && $emit('hide-preview')"
               >
-                <template v-if="isImage(row.data.asset.name) || row.data.asset.isOriginal">
+                <template v-if="row.data.asset.isMissing">
+                  <div class="file-icon file-icon--missing" title="物理文件已丢失">
+                    <ImageOff :size="16" style="color: var(--b3-theme-error); fill: none !important;" />
+                  </div>
+                  <span class="preview-badge preview-badge--missing" title="物理文件在磁盘中不存在">丢失</span>
+                </template>
+                <template v-else-if="isImage(row.data.asset.name) || row.data.asset.isOriginal">
                   <img
                     v-if="getThumbnailSrc(row.data.asset)"
                     :src="getThumbnailSrc(row.data.asset)"
@@ -164,14 +172,23 @@
 
             <div
               class="col-name asset-name"
-              @mouseenter="$emit('show-preview', { event: $event, asset: row.data.asset, previewSrc: getThumbnailSrc(row.data.asset) })"
-              @mousemove="$emit('update-preview', { event: $event })"
-              @mouseleave="$emit('hide-preview')"
+              :title="row.data.asset.isMissing ? `[丢失资源] 物理文件已不存在，引用处数: ${row.data.asset.references?.length || row.data.asset.refCount || 0}` : undefined"
+              @mouseenter="!row.data.asset.isMissing && $emit('show-preview', { event: $event, asset: row.data.asset, previewSrc: getThumbnailSrc(row.data.asset) })"
+              @mousemove="!row.data.asset.isMissing && $emit('update-preview', { event: $event })"
+              @mouseleave="!row.data.asset.isMissing && $emit('hide-preview')"
             >
-              <span class="asset-title-text">{{ splitFileName(row.data.asset.name).name }}</span>
+              <span class="asset-title-text" :class="{ 'asset-title-text--missing': row.data.asset.isMissing }">{{ splitFileName(row.data.asset.name).name }}</span>
 
               <span
-                v-if="row.data.asset.docCount > 1"
+                v-if="row.data.asset.isMissing"
+                class="asset-badge-icon-wrapper"
+                title="在 /data/assets 中未找到物理文件"
+              >
+                <AlertTriangle :size="14" class="asset-badge-icon asset-badge-icon--missing" style="fill: none !important;" />
+              </span>
+
+              <span
+                v-else-if="row.data.asset.docCount > 1"
                 class="multi-ref-badge"
                 :title="`该资源被 ${row.data.asset.docCount} 篇不同的文档共同引用`"
               >
@@ -198,12 +215,12 @@
               {{ splitFileName(row.data.asset.name).ext }}
             </div>
 
-            <div class="col-size asset-size">
-              {{ formatSize(row.data.asset.size) }}
+            <div class="col-size asset-size" :class="{ 'asset-size--missing': row.data.asset.isMissing }">
+              {{ row.data.asset.isMissing ? '文件丢失' : formatSize(row.data.asset.size) }}
             </div>
 
             <div class="col-updated asset-updated">
-              {{ formatTime(row.data.asset.updated) }}
+              {{ row.data.asset.isMissing ? '-' : formatTime(row.data.asset.updated) }}
             </div>
 
             <div class="col-actions asset-actions" @click.stop>
@@ -216,7 +233,7 @@
                 <ExternalLink :size="15" style="fill: none !important;" />
               </button>
               <button
-                v-if="isImage(row.data.asset.name) || row.data.asset.isOriginal"
+                v-if="!row.data.asset.isMissing && (isImage(row.data.asset.name) || row.data.asset.isOriginal)"
                 class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('edit', row.data.asset)"
                 aria-label="二次编辑与矢量标注"
@@ -224,7 +241,7 @@
                 <Pencil :size="15" style="fill: none !important;" />
               </button>
               <button
-                v-if="!row.data.asset.isOriginal"
+                v-if="!row.data.asset.isOriginal && !row.data.asset.isMissing"
                 class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('rename', row.data.asset)"
                 aria-label="重命名此资源并自动更新引用"
@@ -234,7 +251,7 @@
               <button
                 class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('delete', row.data.asset)"
-                :aria-label="row.data.asset.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
+                :aria-label="row.data.asset.isMissing ? '清理此丢失资源的文档引用' : row.data.asset.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
               >
                 <Trash2 :size="15" style="fill: none !important;" />
               </button>
@@ -268,6 +285,8 @@ import {
   Palette,
   ArrowUp,
   ArrowDown,
+  ImageOff,
+  AlertTriangle,
 } from 'lucide-vue-next';
 import type { AssetInfo } from '../utils/siyuan-db';
 import {
@@ -654,6 +673,17 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.doc-missing-badge {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 17px;
+  color: var(--b3-theme-error, #d23f31);
+  background-color: rgba(var(--b3-theme-error-rgb, 210, 63, 49), 0.15);
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
 .doc-path-row {
   font-size: 12px;
   line-height: 17px;
@@ -910,12 +940,27 @@ onUnmounted(() => {
     color: var(--am-badge-original-color, #d97706);
     border: 1px solid var(--am-badge-original-color, #d97706);
   }
+
+  &--missing {
+    color: var(--b3-theme-error, #d23f31);
+    border: 1px solid var(--b3-theme-error, #d23f31);
+  }
 }
 
 .file-icon {
   font-size: 10px;
   font-weight: 700;
   color: var(--b3-theme-on-surface-light);
+
+  &--missing {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(var(--b3-theme-error-rgb, 210, 63, 49), 0.35);
+    background: rgba(var(--b3-theme-error-rgb, 210, 63, 49), 0.08);
+    padding: 2px 4px;
+    border-radius: 3px;
+  }
 }
 
 .asset-name {
@@ -934,6 +979,11 @@ onUnmounted(() => {
   font-weight: 600;
   min-width: 0;
   transition: color 0.15s ease;
+
+  &--missing {
+    color: var(--b3-theme-error, #d23f31);
+    opacity: 0.85;
+  }
 }
 
 .multi-ref-badge {
@@ -960,6 +1010,15 @@ onUnmounted(() => {
 
 .asset-badge-icon--original {
   color: var(--am-badge-original-color, #d97706);
+}
+
+.asset-badge-icon--missing {
+  color: var(--b3-theme-error, #d23f31);
+}
+
+.asset-size--missing {
+  color: var(--b3-theme-error, #d23f31);
+  font-weight: 500;
 }
 
 .asset-ext,

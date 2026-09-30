@@ -216,8 +216,10 @@ export async function removeAssetFromBlocks(
   for (const ref of references) {
     const blocks = await sql(`SELECT markdown FROM blocks WHERE id = '${ref.id}'`);
     if (blocks && blocks.length > 0) {
-      const currentMarkdown = blocks[0].markdown;
-      if (currentMarkdown.includes(`assets/${assetName}`)) {
+      const currentMarkdown = blocks[0].markdown || "";
+      const encodedName = encodeURIComponent(assetName);
+      const hasAsset = currentMarkdown.includes(`assets/${assetName}`) || (encodedName !== assetName && currentMarkdown.includes(`assets/${encodedName}`));
+      if (hasAsset) {
         const newMarkdown = removeAssetFromMarkdown(currentMarkdown, assetName);
         
         // 若该块上绑定了此二次编辑图片的元数据，同步清除块属性

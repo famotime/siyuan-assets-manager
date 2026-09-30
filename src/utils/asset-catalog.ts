@@ -339,8 +339,8 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
     agentAssets
   );
 
-  // 批量通过 storage stat 补全缺失的 size 与 updated
-  const assetsToStat = inventory.allAssets.filter((a) => !a.isOriginal && (a.size === 0 || !a.updated));
+  // 批量通过 storage stat 补全缺失的 size 与 updated（丢失资源物理文件不存在，跳过 stat）
+  const assetsToStat = inventory.allAssets.filter((a) => !a.isOriginal && !a.isMissing && (a.size === 0 || !a.updated));
   if (assetsToStat.length > 0) {
     const limit = 50;
     for (let i = 0; i < assetsToStat.length; i += limit) {

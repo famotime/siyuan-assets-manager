@@ -1,6 +1,6 @@
 import type { AssetInfo, BlockRef, OrphanOriginalInfo } from './siyuan-db'
 
-export type AssetAttributeFilter = 'all' | 'reeditable' | 'original' | 'unreferenced' | 'large'
+export type AssetAttributeFilter = 'all' | 'reeditable' | 'original' | 'unreferenced' | 'large' | 'missing'
 export type AssetFilterType = AssetAttributeFilter | 'image'
 export type AssetCategory = 'all' | 'image' | 'document' | 'audio' | 'video' | 'archive'
 
@@ -72,8 +72,10 @@ export interface BatchDeleteSummary {
   totalCount: number
   regularAssets: AssetInfo[]
   originalAssets: AssetInfo[]
+  missingAssets: AssetInfo[]
   regularCount: number
   originalCount: number
+  missingCount: number
   totalSize: number
   sizeText: string
   referencedCount: number
@@ -264,10 +266,13 @@ export function filterAssets(assets: AssetInfo[], options: AssetFilterOptions): 
     if (filterType === 'reeditable' && !asset.isReEditable) {
       return false
     }
-    if (filterType === 'unreferenced' && (asset.docCount > 0 || asset.isSystemProtected)) {
+    if (filterType === 'missing' && !asset.isMissing) {
       return false
     }
-    if (filterType === 'large' && asset.size < 1024 * 1024) {
+    if (filterType === 'unreferenced' && (asset.docCount > 0 || asset.isSystemProtected || asset.isMissing)) {
+      return false
+    }
+    if (filterType === 'large' && (asset.isMissing || asset.size < 1024 * 1024)) {
       return false
     }
 
@@ -339,11 +344,12 @@ export function calculateTotalCleanup(assets: AssetInfo[]): TotalCleanupSummary 
  */
 export function calculateBatchDeleteSummary(assets: AssetInfo[], selectedNames: Set<string>): BatchDeleteSummary {
   const selectedAssets = assets.filter((asset) => selectedNames.has(asset.name))
-  const regularAssets = selectedAssets.filter((asset) => !asset.isOriginal)
+  const regularAssets = selectedAssets.filter((asset) => !asset.isOriginal && !asset.isMissing)
   const originalAssets = selectedAssets.filter((asset) => asset.isOriginal)
+  const missingAssets = selectedAssets.filter((asset) => asset.isMissing)
 
   const totalSize = selectedAssets.reduce((sum, asset) => sum + asset.size, 0)
-  const referencedCount = regularAssets.filter((asset) => asset.docCount > 0).length
+  const referencedCount = regularAssets.filter((asset) => asset.docCount > 0).length + missingAssets.length
   const referencedOriginalsCount = originalAssets.filter((asset) => asset.docCount > 0).length
 
   return {
@@ -351,13 +357,22 @@ export function calculateBatchDeleteSummary(assets: AssetInfo[], selectedNames: 
     totalCount: selectedAssets.length,
     regularAssets,
     originalAssets,
+    missingAssets,
     regularCount: regularAssets.length,
     originalCount: originalAssets.length,
+    missingCount: missingAssets.length,
     totalSize,
     sizeText: formatAssetSize(totalSize),
     referencedCount,
     referencedOriginalsCount,
   }
+}
+
+/**
+ * 统计列表中丢失资源的数量
+ */
+export function countMissingAssets(assets: AssetInfo[]): number {
+  return assets.filter((a) => a.isMissing).length
 }
 
 function getSortValue(asset: AssetInfo, sortField: AssetSortField): string | number {
@@ -386,6 +401,8 @@ export interface DocAssetGroup {
   isUnreferenced?: boolean
   firstBlockId?: string
   matchedByDocName?: boolean
+  hasMissingAssets?: boolean
+  missingAssetCount?: number
 }
 
 export interface GroupAssetsByDocumentOptions {
@@ -505,6 +522,7 @@ export function groupAssetsByDocument(
     if (matchedAssets.length > 0) {
       const sortedInnerAssets = sortAssets(matchedAssets, assetSortField, assetSortOrder)
       const totalSize = sortedInnerAssets.reduce((sum, a) => sum + (a.size || 0), 0)
+      const missingAssetCount = sortedInnerAssets.filter((a) => a.isMissing).length
       normalDocGroups.push({
         id: group.id,
         title: group.title,
@@ -517,6 +535,8 @@ export function groupAssetsByDocument(
         assetCount: sortedInnerAssets.length,
         isUnreferenced: false,
         matchedByDocName,
+        hasMissingAssets: missingAssetCount > 0,
+        missingAssetCount,
       })
     }
   }

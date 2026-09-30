@@ -60,11 +60,18 @@
 
           <div
             class="asset-preview"
+            :title="item.data.isMissing ? `[丢失资源] 物理文件已不存在，引用处数: ${item.data.references?.length || item.data.refCount || 0}` : undefined"
             @mouseenter="$emit('show-preview', { event: $event, asset: item.data, previewSrc: getThumbnailSrc(item.data) })"
             @mousemove="$emit('update-preview', { event: $event })"
             @mouseleave="$emit('hide-preview')"
           >
-            <template v-if="isImage(item.data.name) || item.data.isOriginal">
+            <template v-if="item.data.isMissing">
+              <div class="file-icon file-icon--missing" title="物理文件已丢失">
+                <ImageOff :size="16" style="color: var(--b3-theme-error); fill: none !important;" />
+              </div>
+              <span class="preview-badge preview-badge--missing" title="物理文件在磁盘中不存在">丢失</span>
+            </template>
+            <template v-else-if="isImage(item.data.name) || item.data.isOriginal">
               <img v-if="getThumbnailSrc(item.data)" :src="getThumbnailSrc(item.data)" />
               <div v-else class="preview-loading">...</div>
               <span
@@ -83,13 +90,25 @@
           
           <div
             class="asset-name"
-            @mouseenter="$emit('show-preview', { event: $event, asset: item.data, previewSrc: getThumbnailSrc(item.data) })"
-            @mousemove="$emit('update-preview', { event: $event })"
-            @mouseleave="$emit('hide-preview')"
+            :title="item.data.isMissing ? `[丢失资源] 物理文件已不存在，引用处数: ${item.data.references?.length || item.data.refCount || 0}` : undefined"
+            @mouseenter="!item.data.isMissing && $emit('show-preview', { event: $event, asset: item.data, previewSrc: getThumbnailSrc(item.data) })"
+            @mousemove="!item.data.isMissing && $emit('update-preview', { event: $event })"
+            @mouseleave="!item.data.isMissing && $emit('hide-preview')"
           >
-            <span class="asset-title-text">{{ splitFileName(item.data.name).name }}</span>
+            <span class="asset-title-text" :class="{ 'asset-title-text--missing': item.data.isMissing }">{{ splitFileName(item.data.name).name }}</span>
             <span
-              v-if="item.data.isReEditable"
+              v-if="item.data.isMissing"
+              class="asset-badge-icon-wrapper"
+              title="在 /data/assets 中未找到物理文件"
+            >
+              <AlertTriangle
+                :size="14"
+                class="asset-badge-icon asset-badge-icon--missing"
+                style="fill: none !important;"
+              />
+            </span>
+            <span
+              v-else-if="item.data.isReEditable"
               class="asset-badge-icon-wrapper"
               title="该图片包含可二次编辑的矢量图层，点击右侧编辑按钮可无损修改"
               aria-label="该图片包含可二次编辑的矢量图层，点击右侧编辑按钮可无损修改"
@@ -118,12 +137,12 @@
             {{ splitFileName(item.data.name).ext }}
           </div>
 
-          <div class="col-size asset-size">
-            {{ formatSize(item.data.size) }}
+          <div class="col-size asset-size" :class="{ 'asset-size--missing': item.data.isMissing }">
+            {{ item.data.isMissing ? '文件丢失' : formatSize(item.data.size) }}
           </div>
 
           <div class="col-updated asset-updated">
-            {{ formatTime(item.data.updated) }}
+            {{ item.data.isMissing ? '-' : formatTime(item.data.updated) }}
           </div>
 
           <div class="col-refs asset-refs">
@@ -140,7 +159,7 @@
               <ExternalLink :size="15" style="fill: none !important;" />
             </button>
             <button
-              v-if="isImage(item.data.name) || item.data.isOriginal"
+              v-if="!item.data.isMissing && (isImage(item.data.name) || item.data.isOriginal)"
               class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('edit', item.data)"
               aria-label="二次编辑与矢量标注"
@@ -148,7 +167,7 @@
               <Pencil :size="15" style="fill: none !important;" />
             </button>
             <button
-              v-if="!item.data.isOriginal"
+              v-if="!item.data.isOriginal && !item.data.isMissing"
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('rename', item.data)"
               aria-label="重命名此资源并自动更新引用"
@@ -158,7 +177,7 @@
             <button
               class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('delete', item.data)"
-              :aria-label="item.data.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
+              :aria-label="item.data.isMissing ? '清理此丢失资源的文档引用' : item.data.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
             >
               <Trash2 :size="15" style="fill: none !important;" />
             </button>
@@ -172,7 +191,7 @@
 
 <script setup lang="ts">
 import { useVirtualList } from '@vueuse/core';
-import { ExternalLink, Pencil, TextCursorInput, Trash2, Layers, Palette, ArrowUp, ArrowDown } from 'lucide-vue-next';
+import { ExternalLink, Pencil, TextCursorInput, Trash2, Layers, Palette, ArrowUp, ArrowDown, ImageOff, AlertTriangle } from 'lucide-vue-next';
 import { ref, toRefs, computed, onUnmounted } from 'vue';
 import type { AssetInfo } from '../utils/siyuan-db';
 import { formatAssetSize, formatAssetTime, getAssetBadgeText, isImageAsset, splitFileName, type AssetSortField, type AssetSortOrder } from '../utils/asset-list';
@@ -503,6 +522,12 @@ onUnmounted(() => {
     border: 1px solid var(--am-badge-original-color, #d97706);
     text-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
   }
+
+  &--missing {
+    color: var(--b3-theme-error, #d23f31);
+    border: 1px solid var(--b3-theme-error, #d23f31);
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+  }
 }
 
 .file-icon {
@@ -513,6 +538,14 @@ onUnmounted(() => {
   padding: 2px 4px;
   border-radius: 3px;
   background: var(--b3-theme-background);
+
+  &--missing {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-color: rgba(var(--b3-theme-error-rgb, 210, 63, 49), 0.35);
+    background: rgba(var(--b3-theme-error-rgb, 210, 63, 49), 0.08);
+  }
 }
 
 .asset-name {
@@ -532,6 +565,11 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: color 0.15s ease;
+
+  &--missing {
+    color: var(--b3-theme-error, #d23f31);
+    opacity: 0.85;
+  }
 }
 
 /* 图标容器，保证 tooltip 触发稳定 */
@@ -569,6 +607,16 @@ onUnmounted(() => {
     color: var(--am-badge-original-color, #d97706);
     stroke: var(--am-badge-original-color, #d97706) !important;
   }
+
+  &--missing {
+    color: var(--b3-theme-error, #d23f31);
+    stroke: var(--b3-theme-error, #d23f31) !important;
+  }
+}
+
+.asset-size--missing {
+  color: var(--b3-theme-error, #d23f31);
+  font-weight: 500;
 }
 
 .asset-ext, .asset-size, .asset-refs, .asset-updated {

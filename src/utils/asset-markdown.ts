@@ -205,7 +205,7 @@ export function replaceAssetInMarkdownLimited(
   return replaceUpTo(res, oldAssetName)
 }
 
-export function removeAssetFromMarkdown(markdown: string, assetName: string): string {
+function removeAssetFromMarkdownSingle(markdown: string, assetName: string): string {
   const escapedName = escapeRegExp(assetName)
 
   // 思源把视频/音频/HTML 块导出为 <video src="assets/x.mp4"></video> 这类标签，
@@ -230,4 +230,13 @@ export function removeAssetFromMarkdown(markdown: string, assetName: string): st
     .replace(imgRegex, '')
     .replace(linkRegex, '')
     .replace(pathRegex, '')
+}
+
+export function removeAssetFromMarkdown(markdown: string, assetName: string): string {
+  let res = removeAssetFromMarkdownSingle(markdown, assetName)
+  const encoded = safeEncodeURIComponent(assetName)
+  if (encoded !== assetName) {
+    res = removeAssetFromMarkdownSingle(res, encoded)
+  }
+  return res
 }

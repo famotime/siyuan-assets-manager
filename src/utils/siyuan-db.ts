@@ -51,6 +51,18 @@ export interface AssetInfo {
   isOriginal?: boolean; // 是否为隔离存储的原始底图
   isSystemProtected?: boolean; // 是否为思源系统保留受保护文件 (如 ocr-texts.json)
   isCompanion?: boolean; // 是否为伴生文件 (如 xxx.pdf.sya)
+  isMissing?: boolean; // 是否为丢失资源 (有文档/数据库引用但在 /data/assets 中找不到物理文件)
+}
+
+/**
+ * 判定是否为操作系统生成的临时/隐藏垃圾文件（如 .DS_Store, Thumbs.db 等）
+ */
+export function isIgnoredSystemAsset(fileName: string): boolean {
+  if (!fileName) return true;
+  const baseName = fileName.split('/').pop() || fileName;
+  if (baseName.startsWith('.')) return true;
+  const lower = baseName.toLowerCase();
+  return lower === 'thumbs.db' || lower === 'desktop.ini' || lower === '$recycle.bin';
 }
 
 export function createAssetInfoMap(files: any[]): Map<string, AssetInfo> {
@@ -90,7 +102,8 @@ export function formatReadableDocPath(boxName: string, hpath?: string, fallbackP
 export function attachBlockReferences(
   assetsMap: Map<string, AssetInfo>,
   blocks: any[] = [],
-  notebookMap: Map<string, string> = new Map()
+  notebookMap: Map<string, string> = new Map(),
+  options: { includeMissing?: boolean } = { includeMissing: true }
 ): void {
   for (const block of blocks) {
     const mdAssets = extractAssetNamesFromMarkdown(block.markdown || "");
@@ -99,11 +112,36 @@ export function attachBlockReferences(
     const boxName = notebookMap.get(block.box) || "";
     const readablePath = formatReadableDocPath(boxName, block.hpath, block.path);
 
-    for (const assetName of referencedAssets) {
-      if (assetsMap.has(assetName)) {
-        const asset = assetsMap.get(assetName)!;
-        if (!asset.references.some((r) => r.id === block.id)) {
-          asset.references.push({
+    for (const rawName of referencedAssets) {
+      if (!rawName || isIgnoredSystemAsset(rawName)) continue;
+
+      let canonicalName = rawName;
+      try {
+        const decoded = decodeURIComponent(rawName);
+        if (decoded) canonicalName = decoded;
+      } catch {}
+
+      let targetAsset = assetsMap.get(canonicalName) || assetsMap.get(rawName);
+
+      if (!targetAsset && options.includeMissing !== false) {
+        targetAsset = {
+          name: canonicalName,
+          size: 0,
+          updated: 0,
+          isDir: false,
+          references: [],
+          refCount: 0,
+          docCount: 0,
+          isReEditable: false,
+          isOriginal: false,
+          isMissing: true,
+        };
+        assetsMap.set(canonicalName, targetAsset);
+      }
+
+      if (targetAsset) {
+        if (!targetAsset.references.some((r) => r.id === block.id)) {
+          targetAsset.references.push({
             id: block.id,
             root_id: block.root_id,
             box: block.box,
@@ -114,7 +152,7 @@ export function attachBlockReferences(
             boxName,
             readablePath,
           });
-          asset.refCount++;
+          targetAsset.refCount++;
         }
       }
     }
@@ -126,17 +164,44 @@ export function attachBlockReferences(
  */
 export function attachAttributeViewReferences(
   assetsMap: Map<string, AssetInfo>,
-  avReferencesMap: Map<string, BlockRef[]> = new Map()
+  avReferencesMap: Map<string, BlockRef[]> = new Map(),
+  options: { includeMissing?: boolean } = { includeMissing: true }
 ): void {
   if (!avReferencesMap || avReferencesMap.size === 0) return;
 
   for (const [assetName, avRefs] of avReferencesMap.entries()) {
-    if (assetsMap.has(assetName) && Array.isArray(avRefs)) {
-      const asset = assetsMap.get(assetName)!;
+    if (!assetName || isIgnoredSystemAsset(assetName)) continue;
+    if (!Array.isArray(avRefs) || avRefs.length === 0) continue;
+
+    let canonicalName = assetName;
+    try {
+      const decoded = decodeURIComponent(assetName);
+      if (decoded) canonicalName = decoded;
+    } catch {}
+
+    let targetAsset = assetsMap.get(canonicalName) || assetsMap.get(assetName);
+
+    if (!targetAsset && options.includeMissing !== false) {
+      targetAsset = {
+        name: canonicalName,
+        size: 0,
+        updated: 0,
+        isDir: false,
+        references: [],
+        refCount: 0,
+        docCount: 0,
+        isReEditable: false,
+        isOriginal: false,
+        isMissing: true,
+      };
+      assetsMap.set(canonicalName, targetAsset);
+    }
+
+    if (targetAsset) {
       for (const ref of avRefs) {
-        if (!asset.references.some((r) => r.id === ref.id)) {
-          asset.references.push(ref);
-          asset.refCount++;
+        if (!targetAsset.references.some((r) => r.id === ref.id)) {
+          targetAsset.references.push(ref);
+          targetAsset.refCount++;
         }
       }
     }
