@@ -59,11 +59,11 @@ export default defineConfig(({
             dest: "./",
           },
           {
-            src: "./icon.webp",
+            src: "./icon.*",
             dest: "./",
           },
           {
-            src: "./preview.webp",
+            src: "./preview.*",
             dest: "./",
           },
           {

@@ -70,4 +70,7 @@
 2. **测试优先**：修改或新增 `src/utils/` 逻辑时必须补充对应 `tests/*.test.ts` 单元测试，确保 `npm test` 全通。
 3. **打包约束**：产物为 CommonJS 格式（`lib: { formats: ["cjs"] }`），`siyuan` 与 `process` 模块 external 不打包。
 4. **国际化**：用户可见文案需维护在 `src/i18n/*.json`（en_US 与 zh_CN 同步）。
-5. **提交规范**：遵循 Conventional Commits（如 `feat(editor): ...`, `fix: ...`, `refactor: ...`）。
+5. **提交规范**：遵循 Conventional Commits 规范，必须使用固定前缀标明类别，使用简体中文清晰描述改动，并在正文中说明修改要点：
+   - **格式**：`<type>(<scope>): <简体中文简短描述>`，如 `feat(editor): 支持图片旋转与导出`、`fix(history): 修复删除历史回退时节点错位`。
+   - **常用前缀**：`feat`（新功能）、`fix`（修Bug）、`refactor`（重构）、`perf`（性能优化）、`docs`（文档）、`style`（格式）、`test`（测试）、`build`（构建依赖）、`ci`（CI配置）、`chore`（杂项工程）。
+   - **要点说明**：对于非琐碎修改，提交信息正文需分点说明核心修改要点（修改原因、关键变动点与潜在影响）。
