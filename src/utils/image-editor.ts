@@ -33,8 +33,8 @@ export function calculateAnnotationTextTop(
   return shapeAdjustedY + fontSize * 0.08
 }
 
-import { warn } from './logger'
-import { extractVectorDataFromTui } from './tui-image-editor-bridge'
+import { log, warn } from './logger'
+import { extractVectorDataFromTui, getFabricCanvasFromTui } from './tui-image-editor-bridge'
 
 export interface ImageSize {
   width: number
@@ -384,21 +384,15 @@ export async function trimAndScaleDataUrl(
         let targetW: number
         let targetH: number
 
-        // 检查长宽比是否与原图一致（允许微小误差）
-        if (Math.abs(contentAspect - origAspect) < 0.02) {
-          // 未改变长宽比（未裁剪且未超出）：直接还原为 100% 原始分辨率
+        // 检查长宽比是否与原图一致且尺寸接近原图（允许微小误差）
+        if (Math.abs(contentAspect - origAspect) < 0.02 && Math.abs(contentBox.width - origW) < 10) {
+          // 未改变长宽比且尺寸接近原图（未裁剪且未大幅超出）：直接还原为 100% 原始物理分辨率
           targetW = origW
           targetH = origH
         } else {
-          // 发生了裁剪或线条向外延伸：计算在原图刻度下的放缩倍率
-          const scale = contentBox.width / origW
-          if (scale > 0) {
-            targetW = Math.max(1, Math.round(contentBox.width / scale))
-            targetH = Math.max(1, Math.round(contentBox.height / scale))
-          } else {
-            targetW = contentBox.width
-            targetH = contentBox.height
-          }
+          // 发生了裁剪或标注线条向外延伸：输出实际内容包围盒的真实物理像素尺寸
+          targetW = contentBox.width
+          targetH = contentBox.height
         }
 
         // 创建最终精细裁剪并重采样放缩的离屏 Canvas
@@ -528,11 +522,36 @@ export async function prepareCanvasExport(
     throw new Error('editorInstance is null')
   }
 
+  // 1. 如果有未完成的活动编辑对象（如文本输入状态），先强制退出编辑状态固化文本图层
+  try {
+    const canvas = getFabricCanvasFromTui(editorInstance)
+    const activeObj = canvas?.getActiveObject ? canvas.getActiveObject() : null
+    if (activeObj && activeObj.isEditing && typeof activeObj.exitEditing === 'function') {
+      activeObj.exitEditing()
+      canvas.renderAll()
+    }
+  } catch (e) {
+    warn('[prepareCanvasExport] exitEditing failed:', e)
+  }
+
+  // 2. 如果处于裁剪模式，且存在有效的裁剪框（用户拉了裁剪框但未点 Apply），自动应用裁剪
+  try {
+    if (typeof editorInstance.getCropzoneRect === 'function' && typeof editorInstance.crop === 'function') {
+      const cropRect = editorInstance.getCropzoneRect()
+      if (cropRect && cropRect.width > 0 && cropRect.height > 0) {
+        log('[prepareCanvasExport] 检测到未应用的裁剪区域，自动执行 crop:', cropRect)
+        await editorInstance.crop(cropRect)
+      }
+    }
+  } catch (cropErr) {
+    warn('[prepareCanvasExport] 自动应用裁剪失败:', cropErr)
+  }
+
   if (typeof editorInstance.stopDrawingMode === 'function') {
     editorInstance.stopDrawingMode()
   }
 
-  // 1. 抽取纯矢量标注图层
+  // 3. 抽取纯矢量标注图层
   const vectorData = extractVectorDataFromTui(editorInstance)
 
   // 2. 导出位图

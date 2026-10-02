@@ -102,9 +102,20 @@ export async function executeSaveEditedAssetWorkflow(
   await saveAssetFile(blob, newName)
 
   // 2. 异步获取旧图片的 AssetInfo 并联动更新引用
+  // 融合数据库扫描到的引用与当前操作的目标 blockId（规避内核 SQLite 异步索引延迟导致漏更新当前编辑块）
   const assetRecord = await getAssetInfoByName(oldName)
-  if (assetRecord?.references && assetRecord.references.length > 0) {
-    await replaceAssetInBlocks(assetRecord.references, oldName, newName)
+  const targetReferences: BlockRef[] = assetRecord?.references ? [...assetRecord.references] : []
+  // 保底：若数据库未检索出任何引用（如内核 SQLite 异步索引落库延迟），但明确传入了当前编辑块 blockId，则补充此块为目标引用
+  if (targetReferences.length === 0 && blockId) {
+    targetReferences.push({
+      id: blockId,
+      root_id: '',
+      content: '',
+      markdown: '',
+    })
+  }
+  if (targetReferences.length > 0) {
+    await replaceAssetInBlocks(targetReferences, oldName, newName)
   }
 
   // 3. 收集所有目标 Block ID
@@ -112,11 +123,9 @@ export async function executeSaveEditedAssetWorkflow(
   if (blockId) {
     targetBlockIds.add(blockId)
   }
-  if (assetRecord?.references) {
-    for (const ref of assetRecord.references) {
-      if (ref.id) {
-        targetBlockIds.add(ref.id)
-      }
+  for (const ref of targetReferences) {
+    if (ref.id) {
+      targetBlockIds.add(ref.id)
     }
   }
 
@@ -169,7 +178,7 @@ export async function executeSaveEditedAssetWorkflow(
     } catch (e) {}
   }
 
-  const updatedReferences: BlockRef[] = assetRecord?.references ? [...assetRecord.references] : []
+  const updatedReferences: BlockRef[] = targetReferences.map((r) => ({ ...r }))
   const firstBlockId = targetBlockIds.size > 0 ? Array.from(targetBlockIds)[0] : undefined
 
   return {

@@ -206,4 +206,42 @@ describe('asset workflow', () => {
     )
     expect(deleteAssetMetadata).toHaveBeenCalledWith('old.png')
   })
+
+  it('falls back to blockId when getAssetInfoByName returns empty references', async () => {
+    const saveAssetFile = vi.fn().mockResolvedValue(undefined)
+    const getAssetInfoByName = vi.fn().mockResolvedValue({
+      name: 'bar.png',
+      references: [],
+    })
+    const replaceAssetInBlocks = vi.fn().mockResolvedValue(undefined)
+    const readAssetFile = vi.fn().mockResolvedValue(new Blob(['bytes']))
+    const saveOriginalImage = vi.fn().mockResolvedValue('storage/orig/bar.png')
+    const deleteAssetFile = vi.fn().mockResolvedValue(undefined)
+    const saveAssetMetadata = vi.fn().mockResolvedValue(undefined)
+
+    const result = await executeSaveEditedAssetWorkflow(
+      {
+        oldName: 'bar.png',
+        dataUrl: 'data:image/png;base64,AAAA',
+        blockId: 'block-current',
+      },
+      {
+        saveAssetFile,
+        getAssetInfoByName,
+        replaceAssetInBlocks,
+        readAssetFile,
+        saveOriginalImage,
+        deleteAssetFile,
+        saveAssetMetadata,
+      },
+    )
+
+    expect(result.success).toBe(true)
+    expect(replaceAssetInBlocks).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 'block-current' })],
+      'bar.png',
+      result.newName,
+    )
+    expect(result.references).toEqual([expect.objectContaining({ id: 'block-current' })])
+  })
 })

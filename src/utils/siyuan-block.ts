@@ -97,10 +97,29 @@ export async function replaceAssetInBlocks(
     }
     // 重新获取最新的 markdown 与 ial，防止并发修改导致丢失
     const blocks = await sql(`SELECT id, markdown, ial FROM blocks WHERE id = '${ref.id}'`);
-    if (blocks && blocks.length > 0) {
-      const currentMarkdown = blocks[0].markdown || "";
-      const currentIal = blocks[0].ial || "";
+    let currentMarkdown = blocks && blocks.length > 0 ? (blocks[0].markdown || "") : "";
+    let currentIal = blocks && blocks.length > 0 ? (blocks[0].ial || "") : "";
 
+    // 关键保底机制：若 SQLite blocks 表中未查到该块，或 markdown 中未包含旧资源名（可能是内核异步索引时延），
+    // 穿透调用内核实时内存 AST 接口 getBlockKramdown 获取真实的最新内容
+    const hasMdOldInSql = currentMarkdown.includes(`assets/${oldAssetName}`) ||
+                         (encodedOld !== oldAssetName && currentMarkdown.includes(`assets/${encodedOld}`));
+    if (!hasMdOldInSql) {
+      try {
+        const kramdownRes = await getBlockKramdown(ref.id);
+        if (kramdownRes?.kramdown) {
+          const hasInKramdown = kramdownRes.kramdown.includes(`assets/${oldAssetName}`) ||
+                                (encodedOld !== oldAssetName && kramdownRes.kramdown.includes(`assets/${encodedOld}`));
+          if (hasInKramdown) {
+            currentMarkdown = kramdownRes.kramdown;
+          }
+        }
+      } catch (kramErr) {
+        warn(`[siyuan-block] 获取块 ${ref.id} 实时 kramdown 失败:`, kramErr);
+      }
+    }
+
+    if (currentMarkdown || currentIal || !blocks || blocks.length === 0) {
       // 0. 采集替换前的原始快照：逆向回退要区分"合并确实改过的引用"与"本来就在的同名引用"，
       //    没有快照就只能按名全局反替换，会误伤后者
       if (options?.captureSnapshots?.markdown && ref.id && currentMarkdown) {
@@ -116,12 +135,13 @@ export async function replaceAssetInBlocks(
         if (updateRes === null) {
           throw new Error(`[siyuan-block] 替换正文资源失败: updateBlock 返回异常 (块ID: ${ref.id})`);
         }
+        log(`[siyuan-block] 成功更新块 ${ref.id} 正文中的资源引用: ${oldAssetName} -> ${newAssetName}`);
       }
 
       // 2. 检查并替换块属性 IAL 中的引用（如文档题头图 title-img、custom-data-assets 等）
       const hasIalOld = currentIal.includes(`assets/${oldAssetName}`) ||
                         (encodedOld !== oldAssetName && currentIal.includes(`assets/${encodedOld}`));
-      if (hasIalOld) {
+      if (hasIalOld || (!hasMdOld && !currentMarkdown)) {
         try {
           const attrs = await getBlockAttrs(ref.id);
           if (attrs && typeof attrs === 'object') {

@@ -1,5 +1,5 @@
 import { type IStorageAdapter, type FileStat, type StorageEntry, blobToArrayBuffer } from './types';
-import { log, error } from '../logger';
+import { log, warn, error } from '../logger';
 export function getElectron(): any {
   try {
     const req =
@@ -234,15 +234,19 @@ export class ElectronStorageAdapter implements IStorageAdapter {
           log(`[ElectronStorageAdapter] shell.trashItem succeeded for ${targetPath}`);
           return true;
         } catch (trashErr) {
-          error(`[ElectronStorageAdapter] shell.trashItem failed for ${targetPath}:`, trashErr);
-          // 若在 Windows 抛出 FileOperation 异常，尝试 Windows 原生 DeleteFile 降级
+          // 若在 Windows 抛出 FileOperation 等异常，优先尝试 Windows 原生 PowerShell 回收站降级
           if (isWin) {
-            const ok = await this.deleteViaWindowsRecycleBin(targetPath);
-            if (ok) {
-              log(`[ElectronStorageAdapter] Windows PowerShell DeleteFile fallback succeeded for ${targetPath}`);
-              return true;
+            try {
+              const ok = await this.deleteViaWindowsRecycleBin(targetPath);
+              if (ok) {
+                warn(`[ElectronStorageAdapter] shell.trashItem 失败 (${(trashErr as Error)?.message || trashErr})，已自动通过 Windows PowerShell 回收站降级成功: ${targetPath}`);
+                return true;
+              }
+            } catch (fallbackErr) {
+              warn(`[ElectronStorageAdapter] Windows PowerShell DeleteFile fallback 失败:`, fallbackErr);
             }
           }
+          error(`[ElectronStorageAdapter] shell.trashItem failed for ${targetPath}:`, trashErr);
           throw trashErr;
         }
       }

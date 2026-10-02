@@ -229,6 +229,32 @@ async function handleGlobalSaveEdited(payload: {
 
     if (result.success) {
       pushMsg("编辑已成功保存并同步到所有引用文档！");
+
+      // 实时主动刷新当前视口中对应块的图片 DOM，破除 Chromium 内存位图缓存与视觉滞后
+      try {
+        const targetIds = new Set<string>();
+        if (payload.blockId) targetIds.add(payload.blockId);
+        if (result.references) {
+          for (const r of result.references) {
+            if (r.id) targetIds.add(r.id);
+          }
+        }
+        for (const bid of targetIds) {
+          const blockEls = document.querySelectorAll(`[data-node-id="${bid}"]`);
+          blockEls.forEach((blockEl) => {
+            const imgs = blockEl.querySelectorAll('img');
+            imgs.forEach((img) => {
+              const src = img.getAttribute('src') || '';
+              if (src.includes(payload.oldName) || src.includes(result.newName)) {
+                img.src = `/assets/${result.newName}?t=${Date.now()}`;
+              }
+            });
+          });
+        }
+      } catch (domErr) {
+        warn('[App] 刷新页面图片 DOM 缓存失败:', domErr);
+      }
+
       window.dispatchEvent(new CustomEvent('assets-manager-refresh', {
         detail: {
           action: 'edit',
