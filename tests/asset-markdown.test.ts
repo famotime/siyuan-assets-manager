@@ -204,4 +204,89 @@ describe('asset markdown helpers', () => {
       `![a](assets/dup.png) ![b](assets/${name})`,
     )
   })
+
+  it('normalizes asset link dests matching SiYuan official normalizeAssetScanLinkDest rules', async () => {
+    const { normalizeAssetScanLinkDest } = await import('../src/utils/asset-markdown')
+    const cases = [
+      { input: '/assets/a.png?x=1#part', want: 'assets/a.png?x=1#part' },
+      { input: '../assets/sub/../a.png', want: 'assets/a.png' },
+      { input: '%2e%2e/assets/a.png', want: 'assets/a.png' },
+      { input: 'assets/%2e%2e/a.png', want: '' },
+      { input: 'assets/../a.png', want: '' },
+      { input: '//assets/a.png', want: '' },
+      { input: 'https://example.com/assets/a.png', want: '' },
+      { input: 'data:assets/a.png', want: '' },
+      { input: '..\\assets/a.png', want: '' },
+      { input: './assets/folder/', want: 'assets/folder/' },
+      { input: './assets/a%23b.png#part', want: 'assets/a%23b.png#part' },
+      { input: '../assets/100%.png', want: 'assets/100%.png' },
+    ]
+    for (const { input, want } of cases) {
+      expect(normalizeAssetScanLinkDest(input)).toBe(want)
+    }
+  })
+
+  it('splits file annotation refs matching SiYuan official SplitFileAnnotationRef rules', async () => {
+    const { splitFileAnnotationRef } = await import('../src/utils/asset-markdown')
+    const id = '20260912000000-abcdefg'
+    const validAssets = [
+      'assets/a.pdf',
+      'assets/文档.PDF',
+      'assets/folder/a%20b.pdf',
+      'assets/a-20260912000001-abcdefg.pdf',
+      '/assets/document.pdf',
+    ]
+    const suffixes = [
+      '',
+      '?box=20260912000001-hijklmn&dataPath=/docs/a.sy',
+      '?dataPath=%2Fa%20b.sy#view',
+    ]
+
+    for (const asset of validAssets) {
+      for (const suffix of suffixes) {
+        const ref = `${asset}/${id}${suffix}`
+        const result = splitFileAnnotationRef(ref)
+        expect(result).not.toBeNull()
+        expect(result?.assetLink).toBe(asset + suffix)
+        expect(result?.annotationId).toBe(id)
+      }
+    }
+
+    const invalidRefs = [
+      '',
+      'assets/a.pdf',
+      `assets/a.txt/${id}`,
+      'assets/a.pdf/not-an-id',
+      `assets/a.pdf/${id}/extra`,
+    ]
+    for (const ref of invalidRefs) {
+      expect(splitFileAnnotationRef(ref)).toBeNull()
+    }
+  })
+
+  it('extracts asset names with varied relative and root path prefixes', () => {
+    const markdown = [
+      '![root](/assets/root_image.png)',
+      '![rel](./assets/rel_image.png)',
+      '![parent](../assets/parent_image.png)',
+      '![grandparent](../../assets/grand_image.png)',
+      '![encoded](%2e%2e/assets/encoded_dot.png)',
+      '<img src="../assets/html_parent.png" />',
+      '<video poster="./assets/poster.jpg" src="/assets/movie.mp4"></video>',
+      '<<../assets/manual.pdf/20260912000000-abcdefg?box=2021 "annotation">>',
+      'title-img="background-image: url(&quot;../assets/cover.png&quot;)"',
+    ].join('\n')
+
+    const extracted = extractAssetNamesFromMarkdown(markdown)
+    expect(extracted).toContain('root_image.png')
+    expect(extracted).toContain('rel_image.png')
+    expect(extracted).toContain('parent_image.png')
+    expect(extracted).toContain('grand_image.png')
+    expect(extracted).toContain('encoded_dot.png')
+    expect(extracted).toContain('html_parent.png')
+    expect(extracted).toContain('poster.jpg')
+    expect(extracted).toContain('movie.mp4')
+    expect(extracted).toContain('manual.pdf')
+    expect(extracted).toContain('cover.png')
+  })
 })

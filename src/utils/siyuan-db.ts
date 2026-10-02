@@ -121,6 +121,37 @@ export function attachBlockReferences(
         if (decoded) canonicalName = decoded;
       } catch {}
 
+      // 目录型链接保护：对齐思源官方 UnusedAssets linkDestFolderPaths 逻辑
+      // 若引用是以 / 结尾的目录路径 (如 custom-data-assets="assets/widget/")，
+      // 自动保护该目录下的所有子文件资产，标记为被该块引用
+      const isDirRef = canonicalName.endsWith('/') || rawName.endsWith('/');
+      if (isDirRef) {
+        const dirPrefix = canonicalName.endsWith('/') ? canonicalName : rawName;
+        let matchedAny = false;
+        for (const [assetName, asset] of assetsMap.entries()) {
+          if (assetName.startsWith(dirPrefix) && assetName !== dirPrefix) {
+            matchedAny = true;
+            if (!asset.references.some((r) => r.id === block.id)) {
+              asset.references.push({
+                id: block.id,
+                root_id: block.root_id,
+                box: block.box,
+                content: block.content,
+                markdown: block.markdown,
+                path: block.path,
+                hpath: block.hpath,
+                boxName,
+                readablePath,
+              });
+              asset.refCount++;
+            }
+          }
+        }
+        if (matchedAny) {
+          continue;
+        }
+      }
+
       let targetAsset = assetsMap.get(canonicalName) || assetsMap.get(rawName);
 
       if (!targetAsset && options.includeMissing !== false) {

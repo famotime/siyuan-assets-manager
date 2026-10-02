@@ -285,4 +285,39 @@ describe('AssetCatalog Resolution Pipeline', () => {
     expect(aiAsset?.docCount).toBe(1);
     expect(aiAsset?.references[0].content).toContain('AI Agent');
   });
+
+  it('protects unreferenced assets when their paths are contained in attribute view raw JSON data', () => {
+    const files = [
+      { name: 'av_embedded_pic.png', size: 1000, updated: 100, isDir: false },
+      { name: 'pure_orphan.png', size: 2000, updated: 100, isDir: false },
+    ];
+
+    // 模拟属性视图原始 JSON 字符串（即使没有被标准列解析，但底层 JSON 包含此资源路径）
+    const avRawContents = [
+      JSON.stringify({
+        id: '20260918000001-av01',
+        name: '自定义视图',
+        customConfig: { background: 'assets/av_embedded_pic.png' },
+      }),
+    ];
+
+    const result = resolveCatalogPipeline(
+      files,
+      [],
+      [],
+      [],
+      new Map(),
+      [],
+      new Map(),
+      new Set(),
+      avRawContents
+    );
+
+    const protectedAsset = result.assetsMap.get('av_embedded_pic.png');
+    expect(protectedAsset?.docCount).toBe(1);
+    expect(protectedAsset?.references[0].readablePath).toContain('属性视图（保底保护）');
+
+    const pureOrphan = result.assetsMap.get('pure_orphan.png');
+    expect(pureOrphan?.docCount).toBe(0);
+  });
 });

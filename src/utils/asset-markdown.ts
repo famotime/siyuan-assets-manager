@@ -12,11 +12,112 @@ function unescapeHtmlEntities(str: string): string {
     .replace(/&amp;/g, '&')
 }
 
+/**
+ * 规范化资源扫描链接目标，对齐思源官方 Go `normalizeAssetScanLinkDest`:
+ * 按编辑器的根路径解析本地引用，保留 URL 后缀和文件名编码，安全排除逃逸与外部链接。
+ */
+export function normalizeAssetScanLinkDest(dest: string): string {
+  dest = (dest || '').trim()
+  if (!dest || dest.startsWith('//') || dest.includes('\\')) {
+    return ''
+  }
+
+  // 排除外部协议 (http:, https:, data:, ftp:, etc.)
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest)) {
+    return ''
+  }
+
+  // 保留历史数据中按字面量存储的百分号文件名，解析仅用于排除外部主机。
+  try {
+    const testUrl = new URL(dest.replace(/%/g, '%25'), 'http://virtual-local-origin')
+    if (testUrl.origin !== 'http://virtual-local-origin' || (testUrl.host && testUrl.host !== 'virtual-local-origin')) {
+      return ''
+    }
+  } catch {
+    return ''
+  }
+
+  let suffix = ''
+  const queryHashIdx = dest.search(/[?#]/)
+  if (queryHashIdx >= 0) {
+    suffix = dest.slice(queryHashIdx)
+    dest = dest.slice(0, queryHashIdx)
+  }
+
+  // 浏览器将编码的点路径段视为导航，其他编码留给资源查找处理。
+  const parts = dest.split('/')
+  for (let i = 0; i < parts.length; i++) {
+    try {
+      const decoded = decodeURIComponent(parts[i])
+      if (decoded === '.' || decoded === '..') {
+        parts[i] = decoded
+      }
+    } catch {}
+  }
+  dest = parts.join('/')
+  const isDirectory = dest.endsWith('/') || dest.endsWith('/.') || dest.endsWith('/..')
+
+  // 对齐 Go 的 path.Clean("/" + dest)，以 "/" 为虚拟根目录进行规范化
+  const cleanSegments: string[] = []
+  const rawSegments = ('/' + dest).split('/')
+  for (const seg of rawSegments) {
+    if (!seg || seg === '.') continue
+    if (seg === '..') {
+      if (cleanSegments.length > 0) {
+        cleanSegments.pop()
+      }
+    } else {
+      cleanSegments.push(seg)
+    }
+  }
+  dest = cleanSegments.join('/')
+  if (isDirectory) {
+    dest += '/'
+  }
+
+  if (!dest.startsWith('assets/')) {
+    return ''
+  }
+  return dest + suffix
+}
+
+/**
+ * 分离 PDF 标注引用的母体 PDF 地址与标注 ID，对齐思源官方 Go `util.SplitFileAnnotationRef`:
+ * 保留母体资源地址的查询参数及片段，不改变已有引用的编码。
+ */
+export function splitFileAnnotationRef(reference: string): { assetLink: string; annotationId: string } | null {
+  reference = (reference || '').trim()
+  const pathEnd = reference.search(/[?#]/)
+  const end = pathEnd < 0 ? reference.length : pathEnd
+  const path = reference.slice(0, end)
+  const separator = path.lastIndexOf('/')
+  if (separator < 0) return null
+
+  const parentPath = path.slice(0, separator)
+  const annotationId = path.slice(separator + 1)
+
+  if (!parentPath.toLowerCase().endsWith('.pdf')) {
+    return null
+  }
+  // 思源节点 ID 规范 (ast.IsNodeIDPattern): 14位数字时间戳-7位字母数字 (如 20260912000000-abcdefg)
+  if (!/^\d{14}-[a-z0-9]{7}$/i.test(annotationId)) {
+    return null
+  }
+
+  return {
+    assetLink: parentPath + reference.slice(end),
+    annotationId,
+  }
+}
+
+/** 匹配本地 assets 链接的前缀（支持根路径、当前相对路径、上级相对路径、URL 编码点路径） */
+const ASSET_PREFIX_REGEX_STR = '(?:(?:\\.\\.\\/|\\.\\/|\\/|%2e%2e\\/|%2E%2E\\/)+)?'
+
 export function extractAssetNamesFromMarkdown(markdown: string): string[] {
   if (!markdown) return []
   const assets: string[] = []
 
-  // 1. 常规 Markdown 括号链接：](assets/...)
+  // 1. 常规 Markdown 括号链接：](...)，支持相对前缀、点路径导航与参数
   for (const raw of extractMarkdownLinkAssets(markdown)) {
     assets.push(...cleanAndDecodeAssetName(raw))
   }
@@ -24,25 +125,37 @@ export function extractAssetNamesFromMarkdown(markdown: string): string[] {
   // 解码 HTML 实体（针对 IAL 属性中的 title-img、inline-memo 等）
   const normalized = unescapeHtmlEntities(markdown)
 
-  // 2. 引号包裹的路径（HTML 属性形式，如 src="assets/x.png" 或 data-id="assets/x.pdf/..."）
-  const quotedPathRegex = /(["'])assets\/(.*?)\1/g
+  // 2. 引号包裹的路径（HTML 属性形式，如 src="...assets/x.png", poster="...", data-assets="..."）
+  // 允许文件名包含另一种引号（如双引号包裹中含单引号 "assets/it's.png"）
+  const quotedPathRegex = new RegExp(`(["'])(${ASSET_PREFIX_REGEX_STR}assets\\/(?:(?!\\1)[^\\r\\n])+?)\\1`, 'gi')
   let quotedMatch: RegExpExecArray | null
   while ((quotedMatch = quotedPathRegex.exec(normalized)) !== null) {
     assets.push(...cleanAndDecodeAssetName(quotedMatch[2]))
   }
 
-  // 3. CSS url(...) 形式（如 background-image: url("assets/x.png") 或 url(assets/x.png)）
-  const cssUrlRegex = /url\(\s*(?:['"]?)(?:(?:\/data\/)?assets\/)([^'")]+)(?:['"]?)\s*\)/gi
+  // 3. CSS url(...) 形式（如 background-image: url("...assets/x.png") 或 url(/data/assets/x.png)）
+  const cssUrlRegex = new RegExp(`url\\(\\s*(?:['"]?)((?:${ASSET_PREFIX_REGEX_STR}|(?:\\/data\\/))assets\\/[^'")]+?)(?:['"]?)\\s*\\)`, 'gi')
   let urlMatch: RegExpExecArray | null
   while ((urlMatch = cssUrlRegex.exec(normalized)) !== null) {
     assets.push(...cleanAndDecodeAssetName(urlMatch[1]))
   }
 
-  // 4. 裸路径只认行首/空白/思源标注 << 分隔的情形；引号包裹与 url() 的已分别由上面处理
-  const barePathRegex = /(?:^|[\s<])assets\/([^\s"'\]\?#>]+)/g
+  // 4. 思源标注形如 <<...assets/doc.pdf/... "anchor">>
+  const annotSyntaxRegex = new RegExp(`<<\\s*(${ASSET_PREFIX_REGEX_STR}assets\\/[^\\s"]+?)(?:\\s+"[^"]*")?\\s*>>`, 'gi')
+  let annotMatch: RegExpExecArray | null
+  while ((annotMatch = annotSyntaxRegex.exec(normalized)) !== null) {
+    assets.push(...cleanAndDecodeAssetName(annotMatch[1]))
+  }
+
+  // 5. 裸路径：认行首/空白/思源标注分隔的情形
+  const barePathRegex = new RegExp(`(?:^|[\\s<])(${ASSET_PREFIX_REGEX_STR}assets\\/[^\\s"'\\]\\?#>]+)`, 'gi')
   let bareMatch: RegExpExecArray | null
   while ((bareMatch = barePathRegex.exec(normalized)) !== null) {
-    assets.push(...cleanAndDecodeAssetName(bareMatch[1]))
+    let rawVal = bareMatch[1]
+    if (rawVal.startsWith('<')) {
+      rawVal = rawVal.replace(/^<+/, '')
+    }
+    assets.push(...cleanAndDecodeAssetName(rawVal))
   }
 
   return [...new Set(assets.filter(Boolean))]
@@ -50,20 +163,43 @@ export function extractAssetNamesFromMarkdown(markdown: string): string[] {
 
 function cleanAndDecodeAssetName(rawPath: string): string[] {
   if (!rawPath) return []
-  // 截断空格及后续可能的 title（例如 "image.png" 或 'title'）
-  let clean = rawPath.trim().split(/\s+/)[0] || ''
-  // 剥离 query 与 hash 参数
-  clean = clean.split('?')[0].split('#')[0]
-  // 剥离两端可能包裹的引号及尾部标点
-  clean = clean.replace(/^['"]+|['"]+$/g, '').replace(/[),.;:]+$/, '')
-  if (!clean) return []
+  let clean = rawPath.trim()
 
-  // 对齐思源官方 util.SplitFileAnnotationRef:
-  // 识别形如 `xxx.pdf/20240101000000-abcdefg` 的 PDF 标注锚点引用，提取出真实的母体 PDF 文件名
-  const pdfAnnotationMatch = clean.match(/^(.+?\.pdf)\/(\d{14}-[a-z0-9]{7}|[a-zA-Z0-9_-]+)$/i)
-  if (pdfAnnotationMatch) {
-    clean = pdfAnnotationMatch[1]
+  // 剥离两端可能包裹的引号
+  clean = clean.replace(/^['"]+|['"]+$/g, '')
+
+  // 截断空格及后续可能的 title（例如 "image.png" 或 'title'）
+  clean = clean.split(/\s+/)[0] || ''
+
+  // 先通过官方归一化处理（若包含相对前缀，归一化为以 assets/ 开头）
+  const norm = normalizeAssetScanLinkDest(clean)
+  if (norm) {
+    clean = norm
   }
+
+  // 检查是否为 PDF 标注锚点引用，提取出真实的母体 PDF 文件名
+  const annotRef = splitFileAnnotationRef(clean)
+  if (annotRef) {
+    clean = annotRef.assetLink
+  } else {
+    const pdfAnnotationMatch = clean.match(/^(.+?\.pdf)\/(\d{14}-[a-z0-9]{7}|[a-zA-Z0-9_-]+)(?:[?#].*)?$/i)
+    if (pdfAnnotationMatch) {
+      clean = pdfAnnotationMatch[1]
+    }
+  }
+
+  // 剥离 query 与 hash 参数
+  const isDirectory = clean.endsWith('/')
+  clean = clean.split('?')[0].split('#')[0]
+
+  // 剥离开头的 assets/ 或 /data/assets/ 或相对前缀
+  clean = clean.replace(/^(?:(?:\.\.\/|\.\/|\/|%2e%2e\/|%2E%2E\/)+|(?:\/data\/))?assets\//i, '')
+
+  // 剥离尾部标点（保留目录的尾斜杠）
+  if (!isDirectory) {
+    clean = clean.replace(/[),.;:]+$/, '')
+  }
+  if (!clean) return []
 
   const names = [clean]
   try {
@@ -78,17 +214,22 @@ function cleanAndDecodeAssetName(rawPath: string): string[] {
 
 function extractMarkdownLinkAssets(markdown: string): string[] {
   const assets: string[] = []
-  const prefix = '](assets/'
   let searchFrom = 0
 
   while (searchFrom < markdown.length) {
-    const start = markdown.indexOf(prefix, searchFrom)
+    const start = markdown.indexOf('](', searchFrom)
     if (start === -1) break
 
-    const assetStart = start + prefix.length
+    const assetStart = start + 2
     const end = findMarkdownLinkTargetEnd(markdown, assetStart)
     if (end !== -1) {
-      assets.push(markdown.slice(assetStart, end))
+      const rawTarget = markdown.slice(assetStart, end).trim()
+      const norm = normalizeAssetScanLinkDest(rawTarget)
+      if (norm) {
+        assets.push(norm)
+      } else if (rawTarget.includes('assets/')) {
+        assets.push(rawTarget)
+      }
       searchFrom = end + 1
     } else {
       searchFrom = assetStart

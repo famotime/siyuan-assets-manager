@@ -115,6 +115,22 @@ export function extractAssetsFromAttributeViewJson(jsonContent: string): {
                 });
               }
             }
+
+            // 1.3 处理 URL 列中的 assets 引用（对齐思源官方 getAttributeViewValueAssetsLinkDests 中的 value.URL）
+            if (val?.url && typeof val.url.content === 'string') {
+              const names = extractAssetNamesFromMarkdown(val.url.content);
+              for (const name of names) {
+                assetSet.add(name);
+                detailedRefs.push({
+                  assetName: name,
+                  avId: avId || '',
+                  avName,
+                  keyId,
+                  keyName,
+                  blockId: rowBlockId,
+                });
+              }
+            }
           }
         }
       }

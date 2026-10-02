@@ -42,6 +42,42 @@ export function isIgnoredSystemAsset(fileName: string): boolean {
 export const AGENT_SESSIONS_STORAGE_DIR = '/data/storage/ai/agent/sessions';
 
 /**
+ * 递归扫描 /data/assets 目录下的所有资源文件（含嵌套子目录），
+ * 对齐思源官方 UnusedAssets / allAssetAbsPaths 递归发现所有嵌套资源。
+ */
+export async function listDataAssetsRecursively(
+  baseDir: string = '/data/assets',
+  relativePrefix: string = ''
+): Promise<Array<{ name: string; size: number; updated: number; isDir: boolean }>> {
+  const result: Array<{ name: string; size: number; updated: number; isDir: boolean }> = [];
+  try {
+    const raw = await readDir(baseDir).catch(() => null);
+    if (!raw || !Array.isArray(raw)) return result;
+
+    for (const entry of raw) {
+      if (!entry || !entry.name || isIgnoredSystemAsset(entry.name)) {
+        continue;
+      }
+      const relPath = relativePrefix ? `${relativePrefix}${entry.name}` : entry.name;
+      if (entry.isDir) {
+        const subEntries = await listDataAssetsRecursively(`${baseDir}/${entry.name}`, `${relPath}/`);
+        result.push(...subEntries);
+      } else {
+        result.push({
+          name: relPath,
+          size: entry.size || 0,
+          updated: entry.updated || 0,
+          isDir: false,
+        });
+      }
+    }
+  } catch (err) {
+    warn(`[asset-catalog] 递归扫描资产目录 [${baseDir}] 失败:`, err);
+  }
+  return result;
+}
+
+/**
  * 扫描思源内置 AI Agent 的会话存储目录，提取对话上下文中引用的图片资产
  * 对齐思源官方 UnusedAssets 中的 agentSessionImageAssetDests
  */
@@ -91,7 +127,8 @@ export function resolveCatalogPipeline(
   notebookMap: Map<string, string>,
   sidecarMetadataList: Array<{ assetName: string; metadata: IAssetReEditMetadata }> = [],
   avReferencesMap: Map<string, BlockRef[]> = new Map(),
-  agentAssets: Set<string> = new Set()
+  agentAssets: Set<string> = new Set(),
+  avRawContents: string[] = []
 ): CatalogInventory {
   // 1. 构建常规资产 Map 并挂载文档块引用
   const assetsMap = createAssetInfoMap(files);
@@ -102,6 +139,33 @@ export function resolveCatalogPipeline(
   // 1.0 挂载数据库属性视图引用 (Attribute View)
   if (avReferencesMap && avReferencesMap.size > 0) {
     attachAttributeViewReferences(assetsMap, avReferencesMap);
+  }
+
+  // 1.0.1 属性视图全局文本包含保底防御（严格对齐思源官方 UnusedAssets 逻辑）
+  // 对齐 kernel/model/assets.go:2082-2110: bytes.Contains(avData, []byte(asset))
+  if (avRawContents && avRawContents.length > 0) {
+    for (const asset of assetsMap.values()) {
+      if (asset.docCount === 0 && !asset.isSystemProtected) {
+        const targetSearch = `assets/${asset.name}`;
+        const bareSearch = asset.name;
+        const isContained = avRawContents.some(
+          (raw) => raw.includes(targetSearch) || raw.includes(bareSearch)
+        );
+        if (isContained) {
+          asset.docCount = 1;
+          asset.refCount = (asset.refCount || 0) + 1;
+          asset.references.push({
+            id: 'av-fallback-containment',
+            root_id: 'av-fallback-containment',
+            box: '',
+            content: '属性视图底层数据包含保底引用',
+            markdown: '',
+            path: '',
+            readablePath: '属性视图（保底保护）',
+          });
+        }
+      }
+    }
   }
 
   updateAssetDocCounts(assetsMap.values());
@@ -288,27 +352,38 @@ export function resolveCatalogPipeline(
  * 异步获取全量目录库存与装配模型
  */
 export async function fetchCatalogInventory(): Promise<CatalogInventory> {
-  const rawFiles = await readDir('/data/assets').catch(() => null);
-  if (!rawFiles || !Array.isArray(rawFiles)) {
-    return {
-      allAssets: [],
-      assetsMap: new Map(),
-      originalAssets: [],
-      orphanOriginals: [],
-      totalOrphanSize: 0,
-    };
+  const rawFiles = await listDataAssetsRecursively('/data/assets').catch(() => null);
+  if (!rawFiles || !Array.isArray(rawFiles) || rawFiles.length === 0) {
+    const fallbackFiles = await readDir('/data/assets').catch(() => null);
+    if (!fallbackFiles || !Array.isArray(fallbackFiles)) {
+      return {
+        allAssets: [],
+        assetsMap: new Map(),
+        originalAssets: [],
+        orphanOriginals: [],
+        totalOrphanSize: 0,
+      };
+    }
   }
 
-  const files = (rawFiles || []).filter((f) => !isIgnoredSystemAsset(f.name));
+  const files = (rawFiles && rawFiles.length > 0 ? rawFiles : await readDir('/data/assets').catch(() => []))
+    .filter((f: any) => !isIgnoredSystemAsset(f.name) && !f.isDir);
   const notebookMap = await getNotebookMap().catch(() => new Map<string, string>());
-  const [blocks, reEditBlocks, originalFiles, sidecarMetadataList, avReferencesMap, agentAssets] = await Promise.all([
+  const [blocks, annotationRefBlocks, reEditBlocks, originalFiles, sidecarMetadataList, avReferencesMap, agentAssets] = await Promise.all([
     sql(`SELECT id, root_id, box, content, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`).catch(() => []),
+    sql(`SELECT block_id as id, file_path as markdown FROM file_annotation_refs LIMIT 100000`).catch(() => []),
     queryAllReEditableBlocks().catch(() => []),
     listOriginalImages().catch(() => []),
     listAllAssetMetadataFiles().catch(() => []),
     resolveAttributeViewReferences(notebookMap).catch(() => new Map<string, BlockRef[]>()),
     scanAgentSessionAssets().catch(() => new Set<string>()),
   ]);
+
+  // 合并 PDF 标注专门索引表的引用数据
+  let mergedBlocks = Array.isArray(blocks) ? [...blocks] : [];
+  if (Array.isArray(annotationRefBlocks) && annotationRefBlocks.length > 0) {
+    mergedBlocks = [...mergedBlocks, ...annotationRefBlocks];
+  }
 
   // 自动平滑向后迁移：将存在于块 IAL 但尚未落盘 Sidecar 的元数据自动持久化到 Sidecar
   if (reEditBlocks && reEditBlocks.length > 0) {
@@ -330,7 +405,7 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
 
   const inventory = resolveCatalogPipeline(
     files,
-    blocks,
+    mergedBlocks,
     reEditBlocks,
     originalFiles,
     notebookMap,

@@ -707,5 +707,71 @@ describe('siyuan asset database helpers', () => {
 
     await expect(deleteAssetFile('failed-asset.png')).rejects.toThrow('失败')
   })
+
+  it('protects and links all directory subtree assets when a block references a directory link dest', async () => {
+    const { createAssetInfoMap, attachBlockReferences } = await import('../src/utils/siyuan-db')
+
+    const files = [
+      { name: 'widget/index.html', size: 100, updated: 1, isDir: false },
+      { name: 'widget/style.css', size: 200, updated: 1, isDir: false },
+      { name: 'standalone.png', size: 300, updated: 1, isDir: false },
+    ]
+    const assetsMap = createAssetInfoMap(files)
+
+    const blocks = [
+      {
+        id: 'widget-block-1',
+        root_id: 'doc-1',
+        box: 'box-1',
+        content: '',
+        markdown: '<iframe src="assets/widget/"></iframe>',
+        ial: '{: custom-data-assets="assets/widget/"}',
+        path: '/doc1.sy',
+      },
+    ]
+
+    attachBlockReferences(assetsMap, blocks)
+
+    const htmlAsset = assetsMap.get('widget/index.html')
+    const cssAsset = assetsMap.get('widget/style.css')
+    const standaloneAsset = assetsMap.get('standalone.png')
+
+    expect(htmlAsset?.refCount).toBe(1)
+    expect(htmlAsset?.references[0].id).toBe('widget-block-1')
+
+    expect(cssAsset?.refCount).toBe(1)
+    expect(cssAsset?.references[0].id).toBe('widget-block-1')
+
+    expect(standaloneAsset?.refCount).toBe(0)
+  })
+
+  it('correctly associates prefixed and parent relative path references in attachBlockReferences', async () => {
+    const { createAssetInfoMap, attachBlockReferences } = await import('../src/utils/siyuan-db')
+
+    const files = [
+      { name: 'deep_chart.png', size: 100, updated: 1, isDir: false },
+      { name: 'root_banner.png', size: 200, updated: 1, isDir: false },
+    ]
+    const assetsMap = createAssetInfoMap(files)
+
+    const blocks = [
+      {
+        id: 'block-rel',
+        root_id: 'doc-1',
+        box: 'box-1',
+        content: '',
+        markdown: '![pic](../assets/deep_chart.png) <img src="/assets/root_banner.png" />',
+        path: '/doc1.sy',
+      },
+    ]
+
+    attachBlockReferences(assetsMap, blocks)
+
+    expect(assetsMap.get('deep_chart.png')?.refCount).toBe(1)
+    expect(assetsMap.get('deep_chart.png')?.references[0].id).toBe('block-rel')
+
+    expect(assetsMap.get('root_banner.png')?.refCount).toBe(1)
+    expect(assetsMap.get('root_banner.png')?.references[0].id).toBe('block-rel')
+  })
 })
 
