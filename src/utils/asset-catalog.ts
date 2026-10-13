@@ -1,45 +1,59 @@
-import { sql, readDir } from '../api';
-import { queryAllReEditableBlocks } from './siyuan-block';
+import type { IAssetReEditMetadata } from '../types/reedit'
+import type {
+  AssetInfo,
+  BlockRef,
+  OrphanOriginalInfo,
+} from './siyuan-db'
 import {
-  listOriginalImages,
-  deleteOriginalImage,
-  normalizeOriginalStoragePath,
+  readDir,
+  sql,
+} from '../api'
+import { extractAssetNamesFromMarkdown } from './asset-markdown'
+import { resolveAttributeViewReferences } from './attribute-view'
+import { resolveCanvasAssetTimestamp, scanCanvasAssetsInventory } from './canvas-asset'
+import {
   listAllAssetMetadataFiles,
+  listOriginalImages,
+  normalizeOriginalStoragePath,
   saveAssetMetadataFile,
-} from './file-system';
-import { defaultStorage, blobToText } from './storage';
-import type { IAssetReEditMetadata } from '../types/reedit';
-import { log, warn, error } from './logger';
+} from './file-system'
 import {
-  type BlockRef,
-  type AssetInfo,
-  type OrphanOriginalInfo,
-  SYSTEM_PROTECTED_ASSETS,
-  createAssetInfoMap,
-  attachBlockReferences,
-  attachAttributeViewReferences,
-  updateAssetDocCounts,
-  attachReEditMetadata,
-  getNotebookMap,
-} from './siyuan-db';
-import { resolveAttributeViewReferences } from './attribute-view';
-import { extractAssetNamesFromMarkdown } from './asset-markdown';
+  log,
+  warn,
+} from './logger'
+import { queryAllReEditableBlocks } from './siyuan-block'
+import {
 
-export { SYSTEM_PROTECTED_ASSETS };
+  attachAttributeViewReferences,
+  attachBlockReferences,
+  attachReEditMetadata,
+
+  createAssetInfoMap,
+  getNotebookMap,
+
+  SYSTEM_PROTECTED_ASSETS,
+  updateAssetDocCounts,
+} from './siyuan-db'
+import {
+  blobToText,
+  defaultStorage,
+} from './storage'
+
+export { SYSTEM_PROTECTED_ASSETS }
 
 /**
  * 判定是否为操作系统生成的临时/隐藏垃圾文件（如 .DS_Store, Thumbs.db 等）
  */
 export function isIgnoredSystemAsset(fileName: string): boolean {
-  if (!fileName) return true;
-  const baseName = fileName.split('/').pop() || fileName;
-  if (baseName.startsWith('.')) return true;
-  const lower = baseName.toLowerCase();
-  return lower === 'thumbs.db' || lower === 'desktop.ini' || lower === '$recycle.bin';
+  if (!fileName) return true
+  const baseName = fileName.split('/').pop() || fileName
+  if (baseName.startsWith('.')) return true
+  const lower = baseName.toLowerCase()
+  return lower === 'thumbs.db' || lower === 'desktop.ini' || lower === '$recycle.bin'
 }
 
 /** 思源 AI Agent 会话历史存储目录 */
-export const AGENT_SESSIONS_STORAGE_DIR = '/data/storage/ai/agent/sessions';
+export const AGENT_SESSIONS_STORAGE_DIR = '/data/storage/ai/agent/sessions'
 
 /**
  * 递归扫描 /data/assets 目录下的所有资源文件（含嵌套子目录），
@@ -47,34 +61,34 @@ export const AGENT_SESSIONS_STORAGE_DIR = '/data/storage/ai/agent/sessions';
  */
 export async function listDataAssetsRecursively(
   baseDir: string = '/data/assets',
-  relativePrefix: string = ''
-): Promise<Array<{ name: string; size: number; updated: number; isDir: boolean }>> {
-  const result: Array<{ name: string; size: number; updated: number; isDir: boolean }> = [];
+  relativePrefix: string = '',
+): Promise<Array<{ name: string, size: number, updated: number, isDir: boolean }>> {
+  const result: Array<{ name: string, size: number, updated: number, isDir: boolean }> = []
   try {
-    const raw = await readDir(baseDir).catch(() => null);
-    if (!raw || !Array.isArray(raw)) return result;
+    const raw = await readDir(baseDir).catch(() => null)
+    if (!raw || !Array.isArray(raw)) return result
 
     for (const entry of raw) {
       if (!entry || !entry.name || isIgnoredSystemAsset(entry.name)) {
-        continue;
+        continue
       }
-      const relPath = relativePrefix ? `${relativePrefix}${entry.name}` : entry.name;
+      const relPath = relativePrefix ? `${relativePrefix}${entry.name}` : entry.name
       if (entry.isDir) {
-        const subEntries = await listDataAssetsRecursively(`${baseDir}/${entry.name}`, `${relPath}/`);
-        result.push(...subEntries);
+        const subEntries = await listDataAssetsRecursively(`${baseDir}/${entry.name}`, `${relPath}/`)
+        result.push(...subEntries)
       } else {
         result.push({
           name: relPath,
           size: entry.size || 0,
           updated: entry.updated || 0,
           isDir: false,
-        });
+        })
       }
     }
   } catch (err) {
-    warn(`[asset-catalog] 递归扫描资产目录 [${baseDir}] 失败:`, err);
+    warn(`[asset-catalog] 递归扫描资产目录 [${baseDir}] 失败:`, err)
   }
-  return result;
+  return result
 }
 
 /**
@@ -82,21 +96,21 @@ export async function listDataAssetsRecursively(
  * 对齐思源官方 UnusedAssets 中的 agentSessionImageAssetDests
  */
 export async function scanAgentSessionAssets(): Promise<Set<string>> {
-  const agentAssets = new Set<string>();
+  const agentAssets = new Set<string>()
   try {
-    const entries = await defaultStorage.list(AGENT_SESSIONS_STORAGE_DIR).catch(() => []);
-    const sessionDirs = entries.filter((e) => e.isDir);
+    const entries = await defaultStorage.list(AGENT_SESSIONS_STORAGE_DIR).catch(() => [])
+    const sessionDirs = entries.filter((e) => e.isDir)
     for (const sDir of sessionDirs) {
       for (const jsonName of ['session.json', 'runtime.json']) {
         try {
-          const filePath = `${AGENT_SESSIONS_STORAGE_DIR}/${sDir.name}/${jsonName}`;
-          const blob = await defaultStorage.read(filePath);
+          const filePath = `${AGENT_SESSIONS_STORAGE_DIR}/${sDir.name}/${jsonName}`
+          const blob = await defaultStorage.read(filePath)
           if (blob) {
-            const text = await blobToText(blob);
+            const text = await blobToText(blob)
             if (text) {
-              const names = extractAssetNamesFromMarkdown(text);
+              const names = extractAssetNamesFromMarkdown(text)
               for (const name of names) {
-                agentAssets.add(name);
+                agentAssets.add(name)
               }
             }
           }
@@ -104,15 +118,15 @@ export async function scanAgentSessionAssets(): Promise<Set<string>> {
       }
     }
   } catch (e) {}
-  return agentAssets;
+  return agentAssets
 }
 
 export interface CatalogInventory {
-  allAssets: AssetInfo[];
-  assetsMap: Map<string, AssetInfo>;
-  originalAssets: AssetInfo[];
-  orphanOriginals: OrphanOriginalInfo[];
-  totalOrphanSize: number;
+  allAssets: AssetInfo[]
+  assetsMap: Map<string, AssetInfo>
+  originalAssets: AssetInfo[]
+  orphanOriginals: OrphanOriginalInfo[]
+  totalOrphanSize: number
 }
 
 /**
@@ -122,23 +136,25 @@ export interface CatalogInventory {
 export function resolveCatalogPipeline(
   files: any[],
   blocks: any[],
-  reEditBlocks: Array<{ blockId: string; rootId: string; metadata: IAssetReEditMetadata }>,
-  originalFiles: Array<{ name: string; path: string; size: number; updated: number }>,
+  reEditBlocks: Array<{ blockId: string, rootId: string, metadata: IAssetReEditMetadata }>,
+  originalFiles: Array<{ name: string, path: string, size: number, updated: number }>,
   notebookMap: Map<string, string>,
-  sidecarMetadataList: Array<{ assetName: string; metadata: IAssetReEditMetadata }> = [],
+  sidecarMetadataList: Array<{ assetName: string, metadata: IAssetReEditMetadata }> = [],
   avReferencesMap: Map<string, BlockRef[]> = new Map(),
   agentAssets: Set<string> = new Set(),
-  avRawContents: string[] = []
+  avRawContents: string[] = [],
+  canvasGlobalRefs: Map<string, BlockRef[]> = new Map(),
+  canvasAssets: AssetInfo[] = [],
 ): CatalogInventory {
   // 1. 构建常规资产 Map 并挂载文档块引用
-  const assetsMap = createAssetInfoMap(files);
+  const assetsMap = createAssetInfoMap(files)
   if (blocks && blocks.length > 0) {
-    attachBlockReferences(assetsMap, blocks, notebookMap);
+    attachBlockReferences(assetsMap, blocks, notebookMap)
   }
 
   // 1.0 挂载数据库属性视图引用 (Attribute View)
   if (avReferencesMap && avReferencesMap.size > 0) {
-    attachAttributeViewReferences(assetsMap, avReferencesMap);
+    attachAttributeViewReferences(assetsMap, avReferencesMap)
   }
 
   // 1.0.1 属性视图全局文本包含保底防御（严格对齐思源官方 UnusedAssets 逻辑）
@@ -146,14 +162,14 @@ export function resolveCatalogPipeline(
   if (avRawContents && avRawContents.length > 0) {
     for (const asset of assetsMap.values()) {
       if (asset.docCount === 0 && !asset.isSystemProtected) {
-        const targetSearch = `assets/${asset.name}`;
-        const bareSearch = asset.name;
+        const targetSearch = `assets/${asset.name}`
+        const bareSearch = asset.name
         const isContained = avRawContents.some(
-          (raw) => raw.includes(targetSearch) || raw.includes(bareSearch)
-        );
+          (raw) => raw.includes(targetSearch) || raw.includes(bareSearch),
+        )
         if (isContained) {
-          asset.docCount = 1;
-          asset.refCount = (asset.refCount || 0) + 1;
+          asset.docCount = 1
+          asset.refCount = (asset.refCount || 0) + 1
           asset.references.push({
             id: 'av-fallback-containment',
             root_id: 'av-fallback-containment',
@@ -162,18 +178,18 @@ export function resolveCatalogPipeline(
             markdown: '',
             path: '',
             readablePath: '属性视图（保底保护）',
-          });
+          })
         }
       }
     }
   }
 
-  updateAssetDocCounts(assetsMap.values());
+  updateAssetDocCounts(assetsMap.values())
 
   // 1.1 标记思源系统关键保护文件（如 ocr-texts.json），免于孤儿判定与误清理
   for (const asset of assetsMap.values()) {
     if (SYSTEM_PROTECTED_ASSETS.has(asset.name)) {
-      asset.isSystemProtected = true;
+      asset.isSystemProtected = true
     }
   }
 
@@ -181,13 +197,13 @@ export function resolveCatalogPipeline(
   // 对齐思源官方 UnusedAssets: 只要母体 xxx.pdf 存在有效文档引用，其标注伴生文件 xxx.pdf.sya 自动保活，绝不能被当作孤儿误删
   for (const [name, asset] of assetsMap.entries()) {
     if (name.toLowerCase().endsWith('.pdf.sya')) {
-      asset.isCompanion = true;
-      const parentPdfName = name.slice(0, -4);
-      const parentAsset = assetsMap.get(parentPdfName);
+      asset.isCompanion = true
+      const parentPdfName = name.slice(0, -4)
+      const parentAsset = assetsMap.get(parentPdfName)
       if (parentAsset && parentAsset.docCount > 0) {
-        asset.references = [...parentAsset.references];
-        asset.refCount = parentAsset.refCount;
-        asset.docCount = parentAsset.docCount;
+        asset.references = [...parentAsset.references]
+        asset.refCount = parentAsset.refCount
+        asset.docCount = parentAsset.docCount
       }
     }
   }
@@ -195,10 +211,10 @@ export function resolveCatalogPipeline(
   // 1.3 AI Agent 会话上下文中的资源保活
   if (agentAssets && agentAssets.size > 0) {
     for (const agentAssetName of agentAssets) {
-      const asset = assetsMap.get(agentAssetName);
+      const asset = assetsMap.get(agentAssetName)
       if (asset && asset.docCount === 0) {
-        asset.docCount = 1;
-        asset.refCount = (asset.refCount || 0) + 1;
+        asset.docCount = 1
+        asset.refCount = (asset.refCount || 0) + 1
         asset.references.push({
           id: 'ai-agent-session',
           root_id: 'ai-agent-session',
@@ -207,21 +223,45 @@ export function resolveCatalogPipeline(
           markdown: '',
           path: '',
           readablePath: '思源 AI 对话',
-        });
+        })
       }
+    }
+  }
+
+  // 1.3.1 挂载来自无界画布对全局资源的引用保活（防止画布引用的全局资产被误删为未引用）
+  if (canvasGlobalRefs && canvasGlobalRefs.size > 0) {
+    for (const [assetName, refs] of canvasGlobalRefs.entries()) {
+      const asset = assetsMap.get(assetName)
+      if (asset) {
+        for (const ref of refs) {
+          if (!asset.references.some((r) => r.id === ref.id)) {
+            asset.references.push(ref)
+          }
+        }
+        asset.refCount = asset.references.length
+        const docIds = new Set(asset.references.map((r) => r.root_id))
+        asset.docCount = docIds.size
+      }
+    }
+  }
+
+  // 1.3.2 挂载画布专属资源到资产库中（支持展示、筛选与独立/综合孤儿清理）
+  if (canvasAssets && canvasAssets.length > 0) {
+    for (const ca of canvasAssets) {
+      assetsMap.set(ca.name, ca)
     }
   }
 
   // 1.4 挂载 Sidecar 元数据（优先全局真理源）
   if (sidecarMetadataList && sidecarMetadataList.length > 0) {
     for (const item of sidecarMetadataList) {
-      const renderedName = item.metadata.renderedAssetName || item.assetName;
+      const renderedName = item.metadata.renderedAssetName || item.assetName
       if (renderedName && assetsMap.has(renderedName)) {
-        const asset = assetsMap.get(renderedName)!;
-        asset.isReEditable = true;
-        asset.originalStoragePath = item.metadata.originalStoragePath;
+        const asset = assetsMap.get(renderedName)!
+        asset.isReEditable = true
+        asset.originalStoragePath = item.metadata.originalStoragePath
         if (!asset.reEditBlockId && asset.references && asset.references.length > 0) {
-          asset.reEditBlockId = asset.references[0].id;
+          asset.reEditBlockId = asset.references[0].id
         }
       }
     }
@@ -229,34 +269,34 @@ export function resolveCatalogPipeline(
 
   // 1.5 补充挂载块级元数据（向前兼容历史数据）
   if (reEditBlocks && reEditBlocks.length > 0) {
-    attachReEditMetadata(assetsMap, reEditBlocks);
+    attachReEditMetadata(assetsMap, reEditBlocks)
   }
 
   // 2. 建立底图与有效文档引用的双向拓扑映射
-  const originalToRefsMap = new Map<string, BlockRef[]>();
+  const originalToRefsMap = new Map<string, BlockRef[]>()
 
   // 2.1 从 Sidecar 关联底图与有效引用
   if (sidecarMetadataList && sidecarMetadataList.length > 0) {
     for (const item of sidecarMetadataList) {
-      const normPath = normalizeOriginalStoragePath(item.metadata.originalStoragePath);
-      if (!normPath) continue;
+      const normPath = normalizeOriginalStoragePath(item.metadata.originalStoragePath)
+      if (!normPath) continue
 
-      const renderedName = item.metadata.renderedAssetName || item.assetName;
-      const renderedAsset = renderedName ? assetsMap.get(renderedName) : undefined;
+      const renderedName = item.metadata.renderedAssetName || item.assetName
+      const renderedAsset = renderedName ? assetsMap.get(renderedName) : undefined
       // 渲染图片必须在 assetsMap 中真实存在且仍有文档引用
       if (!renderedAsset || !renderedAsset.references || renderedAsset.references.length === 0) {
-        continue;
+        continue
       }
 
-      let refs = originalToRefsMap.get(normPath);
+      let refs = originalToRefsMap.get(normPath)
       if (!refs) {
-        refs = [];
-        originalToRefsMap.set(normPath, refs);
+        refs = []
+        originalToRefsMap.set(normPath, refs)
       }
 
       for (const ref of renderedAsset.references) {
         if (!refs.some((r) => r.id === ref.id)) {
-          refs.push(ref);
+          refs.push(ref)
         }
       }
     }
@@ -264,25 +304,25 @@ export function resolveCatalogPipeline(
 
   // 2.2 从块级元数据关联底图与有效引用（向前兼容）
   for (const item of reEditBlocks) {
-    const normPath = normalizeOriginalStoragePath(item.metadata.originalStoragePath);
-    if (!normPath) continue;
+    const normPath = normalizeOriginalStoragePath(item.metadata.originalStoragePath)
+    if (!normPath) continue
 
-    const renderedName = item.metadata.renderedAssetName;
-    const renderedAsset = renderedName ? assetsMap.get(renderedName) : undefined;
+    const renderedName = item.metadata.renderedAssetName
+    const renderedAsset = renderedName ? assetsMap.get(renderedName) : undefined
     // 渲染图片必须在 assetsMap 中真实存在且仍有文档引用
     if (!renderedAsset || !renderedAsset.references || renderedAsset.references.length === 0) {
-      continue;
+      continue
     }
 
-    let refs = originalToRefsMap.get(normPath);
+    let refs = originalToRefsMap.get(normPath)
     if (!refs) {
-      refs = [];
-      originalToRefsMap.set(normPath, refs);
+      refs = []
+      originalToRefsMap.set(normPath, refs)
     }
 
     for (const ref of renderedAsset.references) {
       if (!refs.some((r) => r.id === ref.id)) {
-        refs.push(ref);
+        refs.push(ref)
       }
     }
   }
@@ -290,33 +330,33 @@ export function resolveCatalogPipeline(
   // 2.3 补充遍历 assetsMap 中具备 originalStoragePath 的资产（双向保障）
   for (const asset of assetsMap.values()) {
     if (!asset.originalStoragePath || !asset.references || asset.references.length === 0) {
-      continue;
+      continue
     }
-    const normPath = normalizeOriginalStoragePath(asset.originalStoragePath);
-    if (!normPath) continue;
+    const normPath = normalizeOriginalStoragePath(asset.originalStoragePath)
+    if (!normPath) continue
 
-    let refs = originalToRefsMap.get(normPath);
+    let refs = originalToRefsMap.get(normPath)
     if (!refs) {
-      refs = [];
-      originalToRefsMap.set(normPath, refs);
+      refs = []
+      originalToRefsMap.set(normPath, refs)
     }
 
     for (const ref of asset.references) {
       if (!refs.some((r) => r.id === ref.id)) {
-        refs.push(ref);
+        refs.push(ref)
       }
     }
   }
 
   // 3. 构建原始底图模型并判定孤立状态
-  const originalAssets: AssetInfo[] = [];
-  const orphanOriginals: OrphanOriginalInfo[] = [];
-  let totalOrphanSize = 0;
+  const originalAssets: AssetInfo[] = []
+  const orphanOriginals: OrphanOriginalInfo[] = []
+  let totalOrphanSize = 0
 
   for (const orig of originalFiles) {
-    const normOrigPath = normalizeOriginalStoragePath(orig.path);
-    const refs = originalToRefsMap.get(normOrigPath) || [];
-    const docIds = new Set(refs.map((r) => r.root_id));
+    const normOrigPath = normalizeOriginalStoragePath(orig.path)
+    const refs = originalToRefsMap.get(normOrigPath) || []
+    const docIds = new Set(refs.map((r) => r.root_id))
 
     originalAssets.push({
       name: orig.name,
@@ -329,15 +369,15 @@ export function resolveCatalogPipeline(
       isReEditable: false,
       isOriginal: true,
       originalStoragePath: orig.path,
-    });
+    })
 
     if (refs.length === 0) {
-      orphanOriginals.push(orig);
-      totalOrphanSize += orig.size;
+      orphanOriginals.push(orig)
+      totalOrphanSize += orig.size
     }
   }
 
-  const allAssets = [...Array.from(assetsMap.values()), ...originalAssets];
+  const allAssets = [...Array.from(assetsMap.values()), ...originalAssets]
 
   return {
     allAssets,
@@ -345,16 +385,16 @@ export function resolveCatalogPipeline(
     originalAssets,
     orphanOriginals,
     totalOrphanSize,
-  };
+  }
 }
 
 /**
  * 异步获取全量目录库存与装配模型
  */
 export async function fetchCatalogInventory(): Promise<CatalogInventory> {
-  const rawFiles = await listDataAssetsRecursively('/data/assets').catch(() => null);
+  const rawFiles = await listDataAssetsRecursively('/data/assets').catch(() => null)
   if (!rawFiles || !Array.isArray(rawFiles) || rawFiles.length === 0) {
-    const fallbackFiles = await readDir('/data/assets').catch(() => null);
+    const fallbackFiles = await readDir('/data/assets').catch(() => null)
     if (!fallbackFiles || !Array.isArray(fallbackFiles)) {
       return {
         allAssets: [],
@@ -362,14 +402,14 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
         originalAssets: [],
         orphanOriginals: [],
         totalOrphanSize: 0,
-      };
+      }
     }
   }
 
   const files = (rawFiles && rawFiles.length > 0 ? rawFiles : await readDir('/data/assets').catch(() => []))
-    .filter((f: any) => !isIgnoredSystemAsset(f.name) && !f.isDir);
-  const notebookMap = await getNotebookMap().catch(() => new Map<string, string>());
-  const [blocks, annotationRefBlocks, reEditBlocks, originalFiles, sidecarMetadataList, avReferencesMap, agentAssets] = await Promise.all([
+    .filter((f: any) => !isIgnoredSystemAsset(f.name) && !f.isDir)
+  const notebookMap = await getNotebookMap().catch(() => new Map<string, string>())
+  const [blocks, annotationRefBlocks, reEditBlocks, originalFiles, sidecarMetadataList, avReferencesMap, agentAssets, canvasInventory] = await Promise.all([
     sql(`SELECT id, root_id, box, content, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`).catch(() => []),
     sql(`SELECT block_id as id, file_path as markdown FROM file_annotation_refs LIMIT 100000`).catch(() => []),
     queryAllReEditableBlocks().catch(() => []),
@@ -377,27 +417,35 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
     listAllAssetMetadataFiles().catch(() => []),
     resolveAttributeViewReferences(notebookMap).catch(() => new Map<string, BlockRef[]>()),
     scanAgentSessionAssets().catch(() => new Set<string>()),
-  ]);
+    scanCanvasAssetsInventory().catch(() => ({
+      canvasAssets: [],
+      globalAssetRefs: new Map(),
+      orphanAssetDirs: [],
+    })),
+  ])
 
   // 合并 PDF 标注专门索引表的引用数据
-  let mergedBlocks = Array.isArray(blocks) ? [...blocks] : [];
+  let mergedBlocks = Array.isArray(blocks) ? [...blocks] : []
   if (Array.isArray(annotationRefBlocks) && annotationRefBlocks.length > 0) {
-    mergedBlocks = [...mergedBlocks, ...annotationRefBlocks];
+    mergedBlocks = [...mergedBlocks, ...annotationRefBlocks]
   }
 
   // 自动平滑向后迁移：将存在于块 IAL 但尚未落盘 Sidecar 的元数据自动持久化到 Sidecar
   if (reEditBlocks && reEditBlocks.length > 0) {
-    const existingSidecarNames = new Set(sidecarMetadataList.map((s) => s.assetName));
+    const existingSidecarNames = new Set(sidecarMetadataList.map((s) => s.assetName))
     for (const item of reEditBlocks) {
-      const assetName = item.metadata.renderedAssetName;
+      const assetName = item.metadata.renderedAssetName
       if (assetName && !existingSidecarNames.has(assetName)) {
         try {
-          await saveAssetMetadataFile(assetName, item.metadata);
-          existingSidecarNames.add(assetName);
-          sidecarMetadataList.push({ assetName, metadata: item.metadata });
-          log(`[asset-catalog] 成功将块 ${item.blockId} 中的历史二次编辑元数据迁移至 Sidecar: ${assetName}.json`);
+          await saveAssetMetadataFile(assetName, item.metadata)
+          existingSidecarNames.add(assetName)
+          sidecarMetadataList.push({
+            assetName,
+            metadata: item.metadata,
+          })
+          log(`[asset-catalog] 成功将块 ${item.blockId} 中的历史二次编辑元数据迁移至 Sidecar: ${assetName}.json`)
         } catch (migErr) {
-          warn(`[asset-catalog] 迁移块 ${item.blockId} 元数据至 Sidecar 失败:`, migErr);
+          warn(`[asset-catalog] 迁移块 ${item.blockId} 元数据至 Sidecar 失败:`, migErr)
         }
       }
     }
@@ -411,28 +459,37 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
     notebookMap,
     sidecarMetadataList,
     avReferencesMap,
-    agentAssets
-  );
+    agentAssets,
+    [],
+    canvasInventory?.globalAssetRefs,
+    canvasInventory?.canvasAssets,
+  )
 
   // 批量通过 storage stat 补全缺失的 size 与 updated（丢失资源物理文件不存在，跳过 stat）
-  const assetsToStat = inventory.allAssets.filter((a) => !a.isOriginal && !a.isMissing && (a.size === 0 || !a.updated));
+  const assetsToStat = inventory.allAssets.filter((a) => !a.isOriginal && !a.isMissing && (a.size === 0 || !a.updated))
   if (assetsToStat.length > 0) {
-    const limit = 50;
+    const limit = 50
     for (let i = 0; i < assetsToStat.length; i += limit) {
-      const batch = assetsToStat.slice(i, i + limit);
+      const batch = assetsToStat.slice(i, i + limit)
       await Promise.all(
         batch.map(async (asset) => {
           try {
-            const st = await defaultStorage.statAsset(asset.name);
+            const st = asset.isCanvasAsset && asset.canvasAssetStoragePath
+              ? await defaultStorage.stat(asset.canvasAssetStoragePath)
+              : await defaultStorage.statAsset(asset.name)
             if (st) {
-              if (asset.size === 0) asset.size = st.size;
-              if (!asset.updated) asset.updated = st.updated;
+              if (asset.size === 0) asset.size = st.size
+              if (!asset.updated) {
+                asset.updated = asset.isCanvasAsset
+                  ? resolveCanvasAssetTimestamp(asset.name, st.updated)
+                  : st.updated
+              }
             }
           } catch (e) {}
-        })
-      );
+        }),
+      )
     }
   }
 
-  return inventory;
+  return inventory
 }

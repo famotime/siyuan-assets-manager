@@ -131,6 +131,18 @@
                 style="fill: none !important;"
               />
             </span>
+            <span
+              v-else-if="item.data.isCanvasAsset"
+              class="asset-badge-icon-wrapper"
+              title="无界插件专属画布资源"
+              aria-label="无界插件专属画布资源"
+            >
+              <Layout
+                :size="15"
+                class="asset-badge-icon asset-badge-icon--canvas"
+                style="fill: none !important;"
+              />
+            </span>
           </div>
 
           <div class="col-ext asset-ext">
@@ -167,7 +179,7 @@
               <Pencil :size="15" style="fill: none !important;" />
             </button>
             <button
-              v-if="!item.data.isOriginal && !item.data.isMissing"
+              v-if="!item.data.isOriginal && !item.data.isMissing && !item.data.isCanvasAsset"
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('rename', item.data)"
               aria-label="重命名此资源并自动更新引用"
@@ -191,11 +203,12 @@
 
 <script setup lang="ts">
 import { useVirtualList } from '@vueuse/core';
-import { ExternalLink, Pencil, TextCursorInput, Trash2, Layers, Palette, ArrowUp, ArrowDown, ImageOff, AlertTriangle } from 'lucide-vue-next';
+import { ExternalLink, Pencil, TextCursorInput, Trash2, Layers, Palette, ArrowUp, ArrowDown, ImageOff, AlertTriangle, Layout } from 'lucide-vue-next';
 import { ref, toRefs, computed, onUnmounted } from 'vue';
 import type { AssetInfo } from '../utils/siyuan-db';
 import { formatAssetSize, formatAssetTime, getAssetBadgeText, isImageAsset, splitFileName, type AssetSortField, type AssetSortOrder } from '../utils/asset-list';
 import { readOriginalImage } from '../utils/file-system';
+import { defaultStorage } from '../utils/storage';
 
 const props = defineProps<{
   assets: AssetInfo[];
@@ -323,16 +336,39 @@ async function loadOriginalBlobUrl(asset: AssetInfo) {
   }
 }
 
+async function loadCanvasAssetBlobUrl(asset: AssetInfo) {
+  if (!asset.isCanvasAsset || originalBlobUrlMap.value[asset.name] || loadingOriginals.has(asset.name)) {
+    return;
+  }
+  loadingOriginals.add(asset.name);
+  try {
+    const blob = await defaultStorage.read(asset.canvasAssetStoragePath || asset.name);
+    if (blob) {
+      originalBlobUrlMap.value[asset.name] = URL.createObjectURL(blob);
+    }
+  } catch (e) {
+  } finally {
+    loadingOriginals.delete(asset.name);
+  }
+}
+
 function getThumbnailSrc(asset: AssetInfo): string {
-  if (!asset.isOriginal) {
-    const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
-    return `/assets/${asset.name}${versionQuery}`;
+  if (asset.isOriginal) {
+    if (originalBlobUrlMap.value[asset.name]) {
+      return originalBlobUrlMap.value[asset.name];
+    }
+    loadOriginalBlobUrl(asset);
+    return '';
   }
-  if (originalBlobUrlMap.value[asset.name]) {
-    return originalBlobUrlMap.value[asset.name];
+  if (asset.isCanvasAsset) {
+    if (originalBlobUrlMap.value[asset.name]) {
+      return originalBlobUrlMap.value[asset.name];
+    }
+    loadCanvasAssetBlobUrl(asset);
+    return '';
   }
-  loadOriginalBlobUrl(asset);
-  return '';
+  const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
+  return `/assets/${asset.name}${versionQuery}`;
 }
 
 function invalidateAssetThumbnail(assetName: string) {
@@ -611,6 +647,11 @@ onUnmounted(() => {
   &--missing {
     color: var(--b3-theme-error, #d23f31);
     stroke: var(--b3-theme-error, #d23f31) !important;
+  }
+
+  &--canvas {
+    color: var(--b3-theme-primary);
+    stroke: var(--b3-theme-primary) !important;
   }
 }
 

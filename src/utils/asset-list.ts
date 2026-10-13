@@ -1,6 +1,10 @@
-import type { AssetInfo, BlockRef, OrphanOriginalInfo } from './siyuan-db'
+import type {
+  AssetInfo,
+  BlockRef,
+  OrphanOriginalInfo,
+} from './siyuan-db'
 
-export type AssetAttributeFilter = 'all' | 'reeditable' | 'original' | 'unreferenced' | 'large' | 'missing'
+export type AssetAttributeFilter = 'all' | 'reeditable' | 'original' | 'unreferenced' | 'large' | 'missing' | 'canvas'
 export type AssetFilterType = AssetAttributeFilter | 'image'
 export type AssetCategory = 'all' | 'image' | 'document' | 'audio' | 'video' | 'archive'
 
@@ -41,7 +45,11 @@ export function groupReferencesByDoc(references: BlockRef[] = []): DocReferenceG
     if (existing) {
       existing.refs.push(ref)
     } else {
-      groups.set(ref.root_id, { rootId: ref.root_id, first: ref, refs: [ref] })
+      groups.set(ref.root_id, {
+        rootId: ref.root_id,
+        first: ref,
+        refs: [ref],
+      })
     }
   }
 
@@ -175,10 +183,13 @@ export function formatAssetSize(bytes: number): string {
  */
 export function formatAssetTime(timestamp: number): string {
   if (!timestamp || timestamp <= 0) return '-'
-  
-  const ms = timestamp < 1e11 ? timestamp * 1000 : timestamp
+
+  let ms = timestamp < 1e11 ? timestamp * 1000 : timestamp
+  if (ms < 946684800000 && ms * 1000 > 946684800000 && ms * 1000 < 4102444800000) {
+    ms = ms * 1000
+  }
   const date = new Date(ms)
-  if (isNaN(date.getTime())) return '-'
+  if (Number.isNaN(date.getTime())) return '-'
 
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -269,6 +280,9 @@ export function filterAssets(assets: AssetInfo[], options: AssetFilterOptions): 
     if (filterType === 'missing' && !asset.isMissing) {
       return false
     }
+    if (filterType === 'canvas' && !asset.isCanvasAsset) {
+      return false
+    }
     if (filterType === 'unreferenced' && (asset.docCount > 0 || asset.isSystemProtected || asset.isMissing)) {
       return false
     }
@@ -308,7 +322,7 @@ export function calculateUnreferencedCleanup(assets: AssetInfo[]): AssetCleanupS
   }
 }
 
-export function calculateOrphanCleanup(orphans: OrphanOriginalInfo[]): { count: number; totalSize: number; sizeText: string } {
+export function calculateOrphanCleanup(orphans: OrphanOriginalInfo[]): { count: number, totalSize: number, sizeText: string } {
   const totalSize = orphans.reduce((sum, item) => sum + item.size, 0)
   return {
     count: orphans.length,
@@ -434,7 +448,7 @@ export function extractDocTitle(ref: BlockRef): string {
  */
 export function groupAssetsByDocument(
   assets: AssetInfo[],
-  options: GroupAssetsByDocumentOptions = {}
+  options: GroupAssetsByDocumentOptions = {},
 ): DocAssetGroup[] {
   const {
     searchQuery = '',
@@ -505,9 +519,9 @@ export function groupAssetsByDocument(
       matchedAssets = allGroupAssets
     } else {
       const docMatch =
-        group.title.toLowerCase().includes(cleanQuery) ||
-        group.readablePath.toLowerCase().includes(cleanQuery) ||
-        (group.boxName ? group.boxName.toLowerCase().includes(cleanQuery) : false)
+        group.title.toLowerCase().includes(cleanQuery)
+        || group.readablePath.toLowerCase().includes(cleanQuery)
+        || (group.boxName ? group.boxName.toLowerCase().includes(cleanQuery) : false)
 
       if (docMatch) {
         // 文档名/路径命中：保留该文档下的所有资产
@@ -567,11 +581,11 @@ export function groupAssetsByDocument(
       matchedUnrefAssets = allUnrefAssets
     } else {
       const unrefNameMatch =
-        '未被任何文档引用'.includes(cleanQuery) ||
-        '未引用'.includes(cleanQuery) ||
-        '孤立'.includes(cleanQuery) ||
-        'unreferenced'.includes(cleanQuery) ||
-        'orphan'.includes(cleanQuery)
+        '未被任何文档引用'.includes(cleanQuery)
+        || '未引用'.includes(cleanQuery)
+        || '孤立'.includes(cleanQuery)
+        || 'unreferenced'.includes(cleanQuery)
+        || 'orphan'.includes(cleanQuery)
 
       if (unrefNameMatch) {
         unrefMatchedByDoc = true
@@ -613,7 +627,7 @@ export function groupAssetsByDocument(
  */
 export function applyPinnedDocOrder(
   groups: DocAssetGroup[],
-  pinnedOrder?: string[]
+  pinnedOrder?: string[],
 ): DocAssetGroup[] {
   if (!pinnedOrder || pinnedOrder.length === 0) {
     return groups

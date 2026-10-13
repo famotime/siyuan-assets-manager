@@ -53,7 +53,7 @@ export class HttpStorageAdapter implements IStorageAdapter {
     const form = new FormData();
     form.append('path', absolutePath);
     form.append('isDir', 'false');
-    form.append('modTime', Math.floor(Date.now() / 1000).toString());
+    form.append('modTime', Date.now().toString());
     form.append('file', file);
 
     try {

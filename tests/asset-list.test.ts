@@ -179,6 +179,8 @@ describe('asset list helpers', () => {
     expect(timeFormatted).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
     // 秒级时间戳自动转换测试 (1700000000 秒 -> 毫秒转换结果相同)
     expect(formatAssetTime(1700000000)).toBe(timeFormatted)
+    // 恢复因内核秒误当毫秒导致的 1970 年时间戳
+    expect(formatAssetTime(1781831)).toMatch(/^2026-/)
   })
 
   it('extracts asset badge texts for file preview icons without truncation bugs', () => {

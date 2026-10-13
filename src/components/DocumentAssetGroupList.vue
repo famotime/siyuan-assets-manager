@@ -68,7 +68,7 @@
                 </div>
 
                 <button
-                  v-if="!row.data.group.isUnreferenced"
+                  v-if="!row.data.group.isUnreferenced && !row.data.group.id.startsWith('canvas:')"
                   class="am-btn am-btn--icon doc-open-btn"
                   @click.stop="$emit('open-doc-id', row.data.group.id, row.data.group.firstBlockId)"
                   title="在思源中打开此文档"

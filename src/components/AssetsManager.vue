@@ -131,6 +131,7 @@
             <option value="original">原始底图</option>
             <option value="unreferenced">未引用 (孤儿/孤立)</option>
             <option value="missing">丢失资源{{ missingAssetsCount > 0 ? ` (${missingAssetsCount})` : '' }}</option>
+            <option value="canvas">画布专属资源</option>
             <option value="large">大文件 (>1MB)</option>
           </select>
         </div>
@@ -313,6 +314,7 @@ import {
 } from 'lucide-vue-next';
 import { getAllAssetsInfo, countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
 import { normalizeOriginalStoragePath, readOriginalImage } from '../utils/file-system';
+import { defaultStorage } from '../utils/storage';
 import {
   buildSingleDeleteConfirmMessage,
   buildBatchDeleteConfirmMessage,
@@ -537,6 +539,19 @@ async function handleShowPreview(payload: { event: MouseEvent, asset: AssetInfo,
         } else {
           try {
             const blob = await readOriginalImage(asset.originalStoragePath || asset.name);
+            if (blob) {
+              previewBlobUrl = URL.createObjectURL(blob);
+              previewUrl.value = previewBlobUrl;
+            }
+          } catch (e) {}
+        }
+      } else if (asset.isCanvasAsset) {
+        if (previewSrc) {
+          previewUrl.value = previewSrc;
+        } else {
+          try {
+            const targetPath = asset.canvasAssetStoragePath || asset.name;
+            const blob = await defaultStorage.read(targetPath);
             if (blob) {
               previewBlobUrl = URL.createObjectURL(blob);
               previewUrl.value = previewBlobUrl;
@@ -970,9 +985,18 @@ async function handleOpenDocs(asset: AssetInfo) {
     return;
   }
 
+  const normalDocGroups = groups.filter((g) => !g.first.id.startsWith('canvas:'));
+  const canvasGroups = groups.filter((g) => g.first.id.startsWith('canvas:'));
+
+  if (canvasGroups.length > 0 && normalDocGroups.length === 0) {
+    const canvasNames = canvasGroups.map((g) => g.first.readablePath || g.first.hpath || g.first.root_id).join('、');
+    pushMsg(`此资源仅被画布引用 [${canvasNames}]`);
+    return;
+  }
+
   const plugin = usePlugin();
   try {
-    for (const group of groups) {
+    for (const group of normalDocGroups) {
       await openTab({
         app: plugin.app,
         doc: {
@@ -982,7 +1006,8 @@ async function handleOpenDocs(asset: AssetInfo) {
         keepCursor: true
       });
     }
-    pushMsg(`已在后台为 ${groups.length} 篇引用文档各打开一个页签`);
+    const canvasTip = canvasGroups.length > 0 ? `（另有 ${canvasGroups.length} 个画布引用）` : '';
+    pushMsg(`已在后台为 ${normalDocGroups.length} 篇引用文档各打开一个页签${canvasTip}`);
   } catch (e) {
     error("Failed to open documents", e);
     pushMsg("打开文档失败");

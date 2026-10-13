@@ -1,69 +1,88 @@
-import { sql, pushMsg } from '../api';
-import { isTrashSupported, deleteOriginalImage, readOriginalImage } from './file-system';
-import { deleteAssetFile, type AssetInfo } from './siyuan-db';
-import { removeAssetFromBlocks } from './siyuan-block';
-import { captureAssetThumbnail } from './image-editor';
-import { isImageAsset } from './asset-list';
+import type {
+  DeleteDestination,
+  IDeletedItemRecord,
+} from './deletion-logger'
+import type { AssetInfo } from './siyuan-db'
 import {
+  pushMsg,
+  sql,
+} from '../api'
+import { isImageAsset } from './asset-list'
+import { deleteCanvasAssetFile } from './canvas-asset'
+import {
+
+
   recordDeletionBatch,
-  type IDeletedItemRecord,
-  type DeleteDestination,
-} from './deletion-logger';
-import { captureBlockAnchors, createChildBlocksCache } from './rollback-anchor';
-import { error } from './logger';
+} from './deletion-logger'
+import {
+  deleteOriginalImage,
+  isTrashSupported,
+  readOriginalImage,
+} from './file-system'
+import { captureAssetThumbnail } from './image-editor'
+import { error } from './logger'
+import {
+  captureBlockAnchors,
+  createChildBlocksCache,
+} from './rollback-anchor'
+import { removeAssetFromBlocks } from './siyuan-block'
+import {
+
+  deleteAssetFile,
+} from './siyuan-db'
 
 export interface IConfirmDialogOptions {
-  title: string;
-  message: string;
-  confirmText: string;
-  danger: boolean;
+  title: string
+  message: string
+  confirmText: string
+  danger: boolean
 }
 
 export interface IBatchDeleteSummary {
-  totalCount: number;
-  regularCount: number;
-  originalCount: number;
-  missingCount?: number;
-  sizeText: string;
-  referencedCount: number;
-  referencedOriginalsCount: number;
-  regularAssets: AssetInfo[];
-  originalAssets: AssetInfo[];
-  missingAssets?: AssetInfo[];
+  totalCount: number
+  regularCount: number
+  originalCount: number
+  missingCount?: number
+  sizeText: string
+  referencedCount: number
+  referencedOriginalsCount: number
+  regularAssets: AssetInfo[]
+  originalAssets: AssetInfo[]
+  missingAssets?: AssetInfo[]
 }
 
 export interface ICleanupSummary {
-  totalCount: number;
-  unreferencedCount: number;
-  unreferencedSizeText: string;
-  orphanOriginalsCount: number;
-  orphanOriginalsSizeText: string;
-  sizeText: string;
-  unreferencedAssets: AssetInfo[];
-  orphanOriginals: AssetInfo[];
+  totalCount: number
+  unreferencedCount: number
+  unreferencedSizeText: string
+  orphanOriginalsCount: number
+  orphanOriginalsSizeText: string
+  sizeText: string
+  unreferencedAssets: AssetInfo[]
+  orphanOriginals: AssetInfo[]
 }
 
 export interface ISingleDeleteResult {
-  success: boolean;
-  freedBytes: number;
-  error?: unknown;
+  success: boolean
+  freedBytes: number
+  error?: unknown
 }
 
 export interface IBatchDeleteResult {
-  success: boolean;
-  deletedRegularCount: number;
-  deletedOriginalCount: number;
-  deletedMissingCount?: number;
-  freedBytes: number;
-  error?: unknown;
+  success: boolean
+  deletedRegularCount: number
+  deletedOriginalCount: number
+  deletedMissingCount?: number
+  freedBytes: number
+  error?: unknown
 }
 
 export interface IUnifiedCleanupResult {
-  success: boolean;
-  deletedAssetsCount: number;
-  deletedOriginalsCount: number;
-  freedBytes: number;
-  error?: unknown;
+  success: boolean
+  deletedAssetsCount: number
+  deletedOriginalsCount: number
+  freedBytes: number
+  error?: unknown
 }
 
 /**
@@ -71,9 +90,9 @@ export interface IUnifiedCleanupResult {
  */
 export function buildSingleDeleteConfirmMessage(asset: AssetInfo): IConfirmDialogOptions {
   if (asset.isMissing) {
-    let confirmMsg = `资源文件 ${asset.name} 在磁盘中已不存在（丢失资源）。\n确定要清理所有引用该文件的文档块引用（共 ${asset.references?.length || asset.refCount || 0} 处引用）吗？\n\n（操作将记录到日志中，支持随时回退撤销）`;
+    let confirmMsg = `资源文件 ${asset.name} 在磁盘中已不存在（丢失资源）。\n确定要清理所有引用该文件的文档块引用（共 ${asset.references?.length || asset.refCount || 0} 处引用）吗？\n\n（操作将记录到日志中，支持随时回退撤销）`
     if (asset.docCount > 1) {
-      confirmMsg = `【多文档引用警告】此丢失资源正被 ${asset.docCount} 篇不同的文档共同引用！\n\n` + confirmMsg;
+      confirmMsg = `【多文档引用警告】此丢失资源正被 ${asset.docCount} 篇不同的文档共同引用！\n\n${confirmMsg}`
     }
 
     return {
@@ -81,13 +100,13 @@ export function buildSingleDeleteConfirmMessage(asset: AssetInfo): IConfirmDialo
       message: confirmMsg,
       confirmText: '清理引用',
       danger: true,
-    };
+    }
   }
 
   if (asset.isOriginal) {
-    let confirmMsg = `确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（文件将移入操作系统回收站）' : '【高危警告】当前运行环境不支持系统回收站，此操作将永久彻底删除底图物理文件！'}`;
+    let confirmMsg = `确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（文件将移入操作系统回收站）' : '【高危警告】当前运行环境不支持系统回收站，此操作将永久彻底删除底图物理文件！'}`
     if (asset.docCount > 0) {
-      confirmMsg = `【高风险警告】此原始底图正被 ${asset.docCount} 个文档中的二次编辑图片关联！\n删除此底图后，未来将无法对这些图片进行图层还原与二次编辑。\n\n确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（将移入操作系统回收站）' : '（Web/Docker 环境：将永久硬删除）'}`;
+      confirmMsg = `【高风险警告】此原始底图正被 ${asset.docCount} 个文档中的二次编辑图片关联！\n删除此底图后，未来将无法对这些图片进行图层还原与二次编辑。\n\n确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（将移入操作系统回收站）' : '（Web/Docker 环境：将永久硬删除）'}`
     }
 
     return {
@@ -95,15 +114,30 @@ export function buildSingleDeleteConfirmMessage(asset: AssetInfo): IConfirmDialo
       message: confirmMsg,
       confirmText: '删除底图',
       danger: true,
-    };
+    }
+  }
+
+  if (asset.isCanvasAsset) {
+    let confirmMsg = `确定要删除画布专属资源 ${asset.name} 吗？\n${isTrashSupported() ? '（文件将移入操作系统回收站）' : '【高危警告】当前运行环境不支持系统回收站，此操作将永久彻底删除物理文件！'}`
+    if (asset.docCount > 0) {
+      const canvasTitle = asset.canvasPath ? asset.canvasPath.split('/').pop() : '无界画布'
+      confirmMsg = `【画布引用警告】此资源正被画布 [${canvasTitle}] 引用！\n删除后画布中对应的节点图片可能会失效显示。\n\n${confirmMsg}`
+    }
+
+    return {
+      title: '确认删除画布资源',
+      message: confirmMsg,
+      confirmText: '删除文件',
+      danger: true,
+    }
   }
 
   let confirmMsg = isTrashSupported()
     ? `确定要删除 ${asset.name} 吗？\n注意：文件将移入操作系统回收站，且文档中的对应引用块也将被清理。`
-    : `【高危警告】当前运行环境不支持系统回收站，确定要永久删除 ${asset.name} 吗？\n注意：物理文件将被直接抹除且不可撤销，文档中的对应引用块也将被清理。`;
+    : `【高危警告】当前运行环境不支持系统回收站，确定要永久删除 ${asset.name} 吗？\n注意：物理文件将被直接抹除且不可撤销，文档中的对应引用块也将被清理。`
 
   if (asset.docCount > 1) {
-    confirmMsg = `【多文档共享警告】此资源正被 ${asset.docCount} 篇不同的文档共同引用！\n删除后将同步清理所有 ${asset.docCount} 篇文档中的引用块。\n\n` + confirmMsg;
+    confirmMsg = `【多文档共享警告】此资源正被 ${asset.docCount} 篇不同的文档共同引用！\n删除后将同步清理所有 ${asset.docCount} 篇文档中的引用块。\n\n${confirmMsg}`
   }
 
   return {
@@ -111,7 +145,7 @@ export function buildSingleDeleteConfirmMessage(asset: AssetInfo): IConfirmDialo
     message: confirmMsg,
     confirmText: '删除',
     danger: true,
-  };
+  }
 }
 
 /**
@@ -124,29 +158,29 @@ export function buildBatchDeleteConfirmMessage(summary: IBatchDeleteSummary): IC
     '清单概要：',
     `• 普通资源文件：${summary.regularCount} 个`,
     `• 隔离原始底图：${summary.originalCount} 个`,
-  ];
+  ]
 
   if (summary.missingCount && summary.missingCount > 0) {
-    messageLines.push(`• 丢失资源引用：${summary.missingCount} 项（物理文件已缺失，将清理文档引用链接）`);
+    messageLines.push(`• 丢失资源引用：${summary.missingCount} 项（物理文件已缺失，将清理文档引用链接）`)
   }
 
-  messageLines.push(`• 预计释放总空间：${summary.sizeText}`);
+  messageLines.push(`• 预计释放总空间：${summary.sizeText}`)
 
   if (summary.referencedCount > 0) {
-    messageLines.push('');
-    messageLines.push(`【重要提示】所选资源中有 ${summary.referencedCount} 个已被文档引用，删除将自动清理文档中对应的引用块。`);
+    messageLines.push('')
+    messageLines.push(`【重要提示】所选资源中有 ${summary.referencedCount} 个已被文档引用，删除将自动清理文档中对应的引用块。`)
   }
 
   if (summary.referencedOriginalsCount > 0) {
-    messageLines.push('');
-    messageLines.push(`【高风险警告】所选底图中有 ${summary.referencedOriginalsCount} 个正被文档中的二次编辑图片关联，删除后将无法再次进行图层无损还原！`);
+    messageLines.push('')
+    messageLines.push(`【高风险警告】所选底图中有 ${summary.referencedOriginalsCount} 个正被文档中的二次编辑图片关联，删除后将无法再次进行图层无损还原！`)
   }
 
-  messageLines.push('');
+  messageLines.push('')
   if (isTrashSupported()) {
-    messageLines.push('文件将移入操作系统回收站，若误删可从回收站手工找回。确定要执行批量删除吗？');
+    messageLines.push('文件将移入操作系统回收站，若误删可从回收站手工找回。确定要执行批量删除吗？')
   } else {
-    messageLines.push('【高危警告】当前运行环境（Web / Docker）不支持系统回收站，此操作将永久彻底抹除物理文件，无法撤销！确定要执行批量删除吗？');
+    messageLines.push('【高危警告】当前运行环境（Web / Docker）不支持系统回收站，此操作将永久彻底抹除物理文件，无法撤销！确定要执行批量删除吗？')
   }
 
   return {
@@ -154,7 +188,7 @@ export function buildBatchDeleteConfirmMessage(summary: IBatchDeleteSummary): IC
     message: messageLines.join('\n'),
     confirmText: '执行批量删除',
     danger: true,
-  };
+  }
 }
 
 /**
@@ -174,14 +208,14 @@ export function buildUnifiedCleanupConfirmMessage(summary: ICleanupSummary): ICo
     isTrashSupported()
       ? '确定要执行清理并将这些文件移入系统回收站吗？'
       : '此操作将直接彻底删除物理文件，确定要继续吗？',
-  ];
+  ]
 
   return {
     title: '清理未引用资源与孤立底图',
     message: messageLines.join('\n'),
     confirmText: '执行清理',
     danger: true,
-  };
+  }
 }
 
 /**
@@ -189,24 +223,24 @@ export function buildUnifiedCleanupConfirmMessage(summary: ICleanupSummary): ICo
  */
 export async function executeSingleAssetDeletion(
   asset: AssetInfo,
-  options?: { showMessage?: (msg: string) => void }
+  options?: { showMessage?: (msg: string) => void },
 ): Promise<ISingleDeleteResult> {
-  const notify = options?.showMessage || pushMsg;
+  const notify = options?.showMessage || pushMsg
 
   if (asset.isOriginal) {
     try {
-      let thumbnail: string | undefined;
+      let thumbnail: string | undefined
       try {
-        const blob = await readOriginalImage(asset.originalStoragePath || asset.name);
+        const blob = await readOriginalImage(asset.originalStoragePath || asset.name)
         if (blob) {
-          thumbnail = await captureAssetThumbnail(blob);
+          thumbnail = await captureAssetThumbnail(blob)
         }
       } catch {}
 
-      await deleteOriginalImage(asset.originalStoragePath || asset.name);
-      notify(`原始底图 ${asset.name} 已删除`);
+      await deleteOriginalImage(asset.originalStoragePath || asset.name)
+      notify(`原始底图 ${asset.name} 已删除`)
 
-      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
+      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent'
       try {
         await recordDeletionBatch({
           actionType: 'single-delete',
@@ -219,92 +253,125 @@ export async function executeSingleAssetDeletion(
           }],
           freedBytes: asset.size || 0,
           canRollback: false,
-        });
+        })
       } catch (logErr) {
-        error('[cleanup-workflow] 记录删除原始底图批次失败:', logErr);
+        error('[cleanup-workflow] 记录删除原始底图批次失败:', logErr)
       }
 
-      return { success: true, freedBytes: asset.size || 0 };
+      return {
+        success: true,
+        freedBytes: asset.size || 0,
+      }
     } catch (e) {
-      error('[cleanup-workflow] 删除原始底图失败:', e);
-      notify('删除底图失败');
-      return { success: false, freedBytes: 0, error: e };
+      error('[cleanup-workflow] 删除原始底图失败:', e)
+      notify('删除底图失败')
+      return {
+        success: false,
+        freedBytes: 0,
+        error: e,
+      }
     }
   }
 
   try {
-    let thumbnail: string | undefined;
+    let thumbnail: string | undefined
     if (isImageAsset(asset.name)) {
       try {
-        thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`);
+        thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`)
       } catch {}
     }
 
-    const snippets: Record<string, string> = {};
-    const blocksToCapture: Array<{ id: string; root_id?: string; parent_id?: string }> = [];
+    const snippets: Record<string, string> = {}
+    const blocksToCapture: Array<{ id: string, root_id?: string, parent_id?: string }> = []
 
     if (asset.references && asset.references.length > 0) {
       for (const ref of asset.references) {
-        if (!ref.id) continue;
+        if (!ref.id) continue
         try {
-          const rows = await sql(`SELECT id, parent_id, root_id, markdown FROM blocks WHERE id = '${ref.id}'`);
+          const rows = await sql(`SELECT id, parent_id, root_id, markdown FROM blocks WHERE id = '${ref.id}'`)
           if (rows && rows.length > 0) {
-            const row = rows[0];
+            const row = rows[0]
             if (row.markdown) {
-              snippets[ref.id] = row.markdown;
+              snippets[ref.id] = row.markdown
             }
             blocksToCapture.push({
               id: ref.id,
               root_id: row.root_id || ref.root_id,
               parent_id: row.parent_id,
-            });
+            })
           } else {
-            blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
+            blocksToCapture.push({
+              id: ref.id,
+              root_id: ref.root_id,
+            })
           }
         } catch {
-          blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
+          blocksToCapture.push({
+            id: ref.id,
+            root_id: ref.root_id,
+          })
         }
       }
     }
 
-    const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, createChildBlocksCache());
+    const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, createChildBlocksCache())
 
-    if (!asset.isMissing) {
-      await deleteAssetFile(asset.name);
+    if (asset.isCanvasAsset) {
+      await deleteCanvasAssetFile(asset, isTrashSupported())
+    } else if (!asset.isMissing) {
+      await deleteAssetFile(asset.name)
     }
 
-    if (asset.references && asset.references.length > 0) {
-      await removeAssetFromBlocks(asset.references, asset.name);
+    if (asset.references && asset.references.length > 0 && !asset.isCanvasAsset) {
+      await removeAssetFromBlocks(asset.references, asset.name)
     }
 
-    notify(asset.isMissing ? `丢失资源 ${asset.name} 的文档引用已清理` : `资源 ${asset.name} 及其文档引用已删除`);
+    notify(
+      asset.isMissing
+        ? `丢失资源 ${asset.name} 的文档引用已清理`
+        : asset.isCanvasAsset
+          ? `画布专属资源 ${asset.name} 已删除`
+          : `资源 ${asset.name} 及其文档引用已删除`,
+    )
 
-    const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
-    const hasRefs = Boolean(asset.references && asset.references.length > 0);
+    const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent'
+    const hasRefs = Boolean(asset.references && asset.references.length > 0 && !asset.isCanvasAsset)
     try {
       await recordDeletionBatch({
         actionType: 'single-delete',
         destination,
         items: [{
           fileName: asset.name,
-          originalRelativePath: `data/assets/${asset.name}`,
+          originalRelativePath: asset.isCanvasAsset ? (asset.canvasAssetStoragePath || asset.name) : (asset.isOriginal ? (asset.originalStoragePath || asset.name) : `data/assets/${asset.name}`),
           size: asset.size || 0,
           thumbnail,
-          affectedBlocks: affectedBlockRecords.length > 0 ? affectedBlockRecords : (asset.references || []).map(r => ({ id: r.id, root_id: r.root_id })),
+          affectedBlocks: affectedBlockRecords.length > 0
+            ? affectedBlockRecords
+            : (asset.references || []).map((r) => ({
+                id: r.id,
+                root_id: r.root_id,
+              })),
           originalMarkdownSnippets: Object.keys(snippets).length > 0 ? snippets : undefined,
         }],
         freedBytes: asset.size || 0,
         canRollback: hasRefs,
-      });
+      })
     } catch (logErr) {
-      error('[cleanup-workflow] 记录单文件删除批次失败:', logErr);
+      error('[cleanup-workflow] 记录单文件删除批次失败:', logErr)
     }
 
-    return { success: true, freedBytes: asset.size || 0 };
+    return {
+      success: true,
+      freedBytes: asset.size || 0,
+    }
   } catch (e) {
-    error('[cleanup-workflow] 删除资源失败:', e);
-    notify('删除失败');
-    return { success: false, freedBytes: 0, error: e };
+    error('[cleanup-workflow] 删除资源失败:', e)
+    notify('删除失败')
+    return {
+      success: false,
+      freedBytes: 0,
+      error: e,
+    }
   }
 }
 
@@ -313,114 +380,127 @@ export async function executeSingleAssetDeletion(
  */
 export async function executeBatchAssetsDeletion(
   summary: IBatchDeleteSummary,
-  options?: { showMessage?: (msg: string) => void }
+  options?: { showMessage?: (msg: string) => void },
 ): Promise<IBatchDeleteResult> {
-  const notify = options?.showMessage || pushMsg;
-  let deletedRegularCount = 0;
-  let deletedOriginalCount = 0;
-  let deletedMissingCount = 0;
-  let freedBytes = 0;
-  const deletedRecords: IDeletedItemRecord[] = [];
+  const notify = options?.showMessage || pushMsg
+  let deletedRegularCount = 0
+  let deletedOriginalCount = 0
+  let deletedMissingCount = 0
+  let freedBytes = 0
+  const deletedRecords: IDeletedItemRecord[] = []
 
-  let hasAnyRollbackableRefs = false;
-  const anchorCache = createChildBlocksCache();
+  let hasAnyRollbackableRefs = false
+  const anchorCache = createChildBlocksCache()
 
   try {
     // 1. 删除普通资源与丢失资源及其文档引用
-    const assetsToProcess = Array.from(new Set([...summary.regularAssets, ...(summary.missingAssets || [])]));
+    const assetsToProcess = Array.from(new Set([...summary.regularAssets, ...(summary.missingAssets || [])]))
     for (const asset of assetsToProcess) {
       try {
-        let thumbnail: string | undefined;
+        let thumbnail: string | undefined
         if (!asset.isMissing && isImageAsset(asset.name)) {
           try {
-            thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`);
+            thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`)
           } catch {}
         }
 
-        const snippets: Record<string, string> = {};
-        const blocksToCapture: Array<{ id: string; root_id?: string; parent_id?: string }> = [];
+        const snippets: Record<string, string> = {}
+        const blocksToCapture: Array<{ id: string, root_id?: string, parent_id?: string }> = []
 
         if (asset.references && asset.references.length > 0) {
-          hasAnyRollbackableRefs = true;
+          hasAnyRollbackableRefs = true
           for (const ref of asset.references) {
-            if (!ref.id) continue;
+            if (!ref.id) continue
             try {
-              const rows = await sql(`SELECT id, parent_id, root_id, markdown FROM blocks WHERE id = '${ref.id}'`);
+              const rows = await sql(`SELECT id, parent_id, root_id, markdown FROM blocks WHERE id = '${ref.id}'`)
               if (rows && rows.length > 0) {
-                const row = rows[0];
+                const row = rows[0]
                 if (row.markdown) {
-                  snippets[ref.id] = row.markdown;
+                  snippets[ref.id] = row.markdown
                 }
                 blocksToCapture.push({
                   id: ref.id,
                   root_id: row.root_id || ref.root_id,
                   parent_id: row.parent_id,
-                });
+                })
               } else {
-                blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
+                blocksToCapture.push({
+                  id: ref.id,
+                  root_id: ref.root_id,
+                })
               }
             } catch {
-              blocksToCapture.push({ id: ref.id, root_id: ref.root_id });
+              blocksToCapture.push({
+                id: ref.id,
+                root_id: ref.root_id,
+              })
             }
           }
         }
 
-        const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, anchorCache);
+        const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, anchorCache)
 
-        if (!asset.isMissing) {
-          await deleteAssetFile(asset.name);
+        if (asset.isCanvasAsset) {
+          await deleteCanvasAssetFile(asset, isTrashSupported())
+        } else if (!asset.isMissing) {
+          await deleteAssetFile(asset.name)
         }
-        if (asset.references && asset.references.length > 0) {
-          await removeAssetFromBlocks(asset.references, asset.name);
+        if (asset.references && asset.references.length > 0 && !asset.isCanvasAsset) {
+          await removeAssetFromBlocks(asset.references, asset.name)
         }
         if (asset.isMissing) {
-          deletedMissingCount++;
+          deletedMissingCount++
         } else {
-          deletedRegularCount++;
-          freedBytes += asset.size || 0;
+          deletedRegularCount++
+          freedBytes += asset.size || 0
         }
         deletedRecords.push({
           fileName: asset.name,
-          originalRelativePath: `data/assets/${asset.name}`,
+          originalRelativePath: asset.isCanvasAsset ? (asset.canvasAssetStoragePath || asset.name) : `data/assets/${asset.name}`,
           size: asset.size || 0,
           thumbnail,
-          affectedBlocks: affectedBlockRecords.length > 0 ? affectedBlockRecords : (asset.references || []).map(r => ({ id: r.id, root_id: r.root_id })),
+          affectedBlocks: affectedBlockRecords.length > 0
+            ? affectedBlockRecords
+            : (asset.references || []).map((r) => ({
+                id: r.id,
+                root_id: r.root_id,
+              })),
           originalMarkdownSnippets: Object.keys(snippets).length > 0 ? snippets : undefined,
-        });
+        })
       } catch (err) {
-        error(`[cleanup-workflow] 批量删除普通资源失败: ${asset.name}`, err);
+        error(`[cleanup-workflow] 批量删除普通资源失败: ${asset.name}`, err)
       }
     }
 
     // 2. 删除原始底图
     for (const orig of summary.originalAssets) {
       try {
-        let thumbnail: string | undefined;
+        let thumbnail: string | undefined
         try {
-          const blob = await readOriginalImage(orig.originalStoragePath || orig.name);
+          const blob = await readOriginalImage(orig.originalStoragePath || orig.name)
           if (blob) {
-            thumbnail = await captureAssetThumbnail(blob);
+            thumbnail = await captureAssetThumbnail(blob)
           }
         } catch {}
 
-        const ok = await deleteOriginalImage(orig.originalStoragePath || orig.name);
+        const ok = await deleteOriginalImage(orig.originalStoragePath || orig.name)
         if (ok) {
-          deletedOriginalCount++;
-          freedBytes += orig.size || 0;
+          deletedOriginalCount++
+          freedBytes += orig.size || 0
           deletedRecords.push({
             fileName: orig.name,
             originalRelativePath: orig.originalStoragePath || orig.name,
             size: orig.size || 0,
             thumbnail,
-          });
+          })
         }
       } catch (err) {
-        error(`[cleanup-workflow] 批量删除原始底图失败: ${orig.name}`, err);
+        error(`[cleanup-workflow] 批量删除原始底图失败: ${orig.name}`, err)
       }
     }
 
     if (deletedRecords.length > 0) {
-      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
+      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent'
       try {
         await recordDeletionBatch({
           actionType: 'batch-delete',
@@ -428,35 +508,35 @@ export async function executeBatchAssetsDeletion(
           items: deletedRecords,
           freedBytes,
           canRollback: hasAnyRollbackableRefs,
-        });
+        })
       } catch (logErr) {
-        error('[cleanup-workflow] 记录批量删除批次失败:', logErr);
+        error('[cleanup-workflow] 记录批量删除批次失败:', logErr)
       }
     }
 
-    const parts: string[] = [];
-    if (deletedRegularCount > 0) parts.push(`${deletedRegularCount} 个资源`);
-    if (deletedOriginalCount > 0) parts.push(`${deletedOriginalCount} 个底图`);
-    if (deletedMissingCount > 0) parts.push(`${deletedMissingCount} 项丢失资源引用`);
-    const countText = parts.length > 0 ? parts.join('、') : '0 个项';
-    notify(`批量删除完成！已成功处理 ${countText}，释放 ${summary.sizeText} 空间。`);
+    const parts: string[] = []
+    if (deletedRegularCount > 0) parts.push(`${deletedRegularCount} 个资源`)
+    if (deletedOriginalCount > 0) parts.push(`${deletedOriginalCount} 个底图`)
+    if (deletedMissingCount > 0) parts.push(`${deletedMissingCount} 项丢失资源引用`)
+    const countText = parts.length > 0 ? parts.join('、') : '0 个项'
+    notify(`批量删除完成！已成功处理 ${countText}，释放 ${summary.sizeText} 空间。`)
     return {
       success: true,
       deletedRegularCount,
       deletedOriginalCount,
       deletedMissingCount,
       freedBytes,
-    };
+    }
   } catch (e) {
-    error('[cleanup-workflow] 批量删除异常:', e);
-    notify('批量删除失败');
+    error('[cleanup-workflow] 批量删除异常:', e)
+    notify('批量删除失败')
     return {
       success: false,
       deletedRegularCount,
       deletedOriginalCount,
       freedBytes,
       error: e,
-    };
+    }
   }
 }
 
@@ -465,68 +545,72 @@ export async function executeBatchAssetsDeletion(
  */
 export async function executeUnifiedCleanup(
   summary: ICleanupSummary,
-  options?: { showMessage?: (msg: string) => void }
+  options?: { showMessage?: (msg: string) => void },
 ): Promise<IUnifiedCleanupResult> {
-  const notify = options?.showMessage || pushMsg;
-  let deletedAssetsCount = 0;
-  let deletedOriginalsCount = 0;
-  let freedBytes = 0;
-  const deletedRecords: IDeletedItemRecord[] = [];
+  const notify = options?.showMessage || pushMsg
+  let deletedAssetsCount = 0
+  let deletedOriginalsCount = 0
+  let freedBytes = 0
+  const deletedRecords: IDeletedItemRecord[] = []
 
   try {
     // 1. 清理普通孤儿资源
     for (const asset of summary.unreferencedAssets) {
       try {
-        let thumbnail: string | undefined;
+        let thumbnail: string | undefined
         if (isImageAsset(asset.name)) {
           try {
-            thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`);
+            thumbnail = await captureAssetThumbnail(`/assets/${asset.name}`)
           } catch {}
         }
 
-        await deleteAssetFile(asset.name);
-        deletedAssetsCount++;
-        freedBytes += asset.size || 0;
+        if (asset.isCanvasAsset) {
+          await deleteCanvasAssetFile(asset, isTrashSupported())
+        } else {
+          await deleteAssetFile(asset.name)
+        }
+        deletedAssetsCount++
+        freedBytes += asset.size || 0
         deletedRecords.push({
           fileName: asset.name,
-          originalRelativePath: `data/assets/${asset.name}`,
+          originalRelativePath: asset.isCanvasAsset ? (asset.canvasAssetStoragePath || asset.name) : `data/assets/${asset.name}`,
           size: asset.size || 0,
           thumbnail,
-        });
+        })
       } catch (err) {
-        error(`[cleanup-workflow] 删除孤儿资源失败: ${asset.name}`, err);
+        error(`[cleanup-workflow] 删除孤儿资源失败: ${asset.name}`, err)
       }
     }
 
     // 2. 清理孤立底图
     for (const orig of summary.orphanOriginals) {
       try {
-        let thumbnail: string | undefined;
+        let thumbnail: string | undefined
         try {
-          const blob = await readOriginalImage(orig.originalStoragePath || orig.name);
+          const blob = await readOriginalImage(orig.originalStoragePath || orig.name)
           if (blob) {
-            thumbnail = await captureAssetThumbnail(blob);
+            thumbnail = await captureAssetThumbnail(blob)
           }
         } catch {}
 
-        const ok = await deleteOriginalImage(orig.originalStoragePath || orig.name);
+        const ok = await deleteOriginalImage(orig.originalStoragePath || orig.name)
         if (ok) {
-          deletedOriginalsCount++;
-          freedBytes += orig.size || 0;
+          deletedOriginalsCount++
+          freedBytes += orig.size || 0
           deletedRecords.push({
             fileName: orig.name,
             originalRelativePath: orig.originalStoragePath || orig.name,
             size: orig.size || 0,
             thumbnail,
-          });
+          })
         }
       } catch (err) {
-        error(`[cleanup-workflow] 删除孤立底图失败: ${orig.name}`, err);
+        error(`[cleanup-workflow] 删除孤立底图失败: ${orig.name}`, err)
       }
     }
 
     if (deletedRecords.length > 0) {
-      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent';
+      const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent'
       try {
         await recordDeletionBatch({
           actionType: 'orphan-cleanup',
@@ -534,28 +618,28 @@ export async function executeUnifiedCleanup(
           items: deletedRecords,
           freedBytes,
           canRollback: false,
-        });
+        })
       } catch (logErr) {
-        error('[cleanup-workflow] 记录清理批次失败:', logErr);
+        error('[cleanup-workflow] 记录清理批次失败:', logErr)
       }
     }
 
-    notify(`清理完成！已成功删除 ${deletedAssetsCount} 个孤儿资源与 ${deletedOriginalsCount} 个孤立底图，共释放 ${summary.sizeText} 空间。`);
+    notify(`清理完成！已成功删除 ${deletedAssetsCount} 个孤儿资源与 ${deletedOriginalsCount} 个孤立底图，共释放 ${summary.sizeText} 空间。`)
     return {
       success: true,
       deletedAssetsCount,
       deletedOriginalsCount,
       freedBytes,
-    };
+    }
   } catch (e) {
-    error('[cleanup-workflow] 综合清理异常:', e);
-    notify('清理失败');
+    error('[cleanup-workflow] 综合清理异常:', e)
+    notify('清理失败')
     return {
       success: false,
       deletedAssetsCount,
       deletedOriginalsCount,
       freedBytes,
       error: e,
-    };
+    }
   }
 }
