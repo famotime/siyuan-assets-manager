@@ -1,3 +1,4 @@
+import { openTab } from 'siyuan'
 import type {
   AssetInfo,
   BlockRef,
@@ -546,4 +547,59 @@ export async function cleanupEmptyCanvasAssetDirs(orphanDirs: string[]): Promise
     }
   }
   return cleanedCount
+}
+
+/**
+ * 在思源后台标签页中打开无界画布文件
+ * @param canvasPath 画布工作区路径 (如 /data/storage/petal/siyuan-canvas/demo.canvas)
+ * @param title 画布标题 (可选)
+ * @returns 是否成功调用无界插件打开
+ */
+export async function openCanvasInTab(canvasPath: string, title?: string): Promise<boolean> {
+  if (!canvasPath) return false
+  const normPath = normalizeCanvasWorkspacePath(canvasPath)
+
+  // 检测思源环境中是否已安装并启用 siyuan-canvas 插件
+  const app = (window as any).siyuan?.ws?.app
+  const canvasPlugin = app?.plugins?.find((p: any) => p && p.name === 'siyuan-canvas')
+  if (!canvasPlugin) {
+    return false
+  }
+
+  const canvasTitle = title || getBaseFileName(normPath) || '画布'
+
+  try {
+    // 优先调用无界插件自身提供的 openCanvasTab 实例方法（可兼顾移动端适配与生命周期注册）
+    if (typeof canvasPlugin.openCanvasTab === 'function') {
+      await canvasPlugin.openCanvasTab({
+        path: normPath,
+        title: canvasTitle,
+      })
+      return true
+    }
+
+    // 降级使用思源开放的 openTab API 打开无界自定义标签页
+    await openTab({
+      app,
+      custom: {
+        id: 'siyuan-canvas-canvas-editor',
+        icon: 'iconCanvas',
+        title: canvasTitle,
+        data: { path: normPath },
+      },
+      keepCursor: true,
+      openNewTab: true,
+    })
+
+    // 联动无界插件记录最近打开历史
+    if (typeof canvasPlugin.rememberRecentCanvas === 'function') {
+      try {
+        canvasPlugin.rememberRecentCanvas(normPath, canvasTitle)
+      } catch {}
+    }
+    return true
+  } catch (err) {
+    warn('[canvas-asset] 打开无界画布标签页失败:', err)
+    return false
+  }
 }

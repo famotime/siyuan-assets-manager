@@ -19,6 +19,7 @@ import {
   getCanvasAssetDirectory,
   getCanvasPathFromAssetDir,
   normalizeCanvasWorkspacePath,
+  openCanvasInTab,
   resolveCanvasAssetTimestamp,
   scanCanvasAssetsInventory,
 } from '../src/utils/canvas-asset'
@@ -362,6 +363,74 @@ describe('canvas-asset module', () => {
 
       // 3. 孤立目录判定：因为 untitled.assets 仍包含被引用的资源，绝不能被当作 orphanAssetDirs 误删！
       expect(inventory.orphanAssetDirs).not.toContain('/data/storage/petal/siyuan-canvas/untitled.assets')
+    })
+  })
+
+  describe('openCanvasInTab', () => {
+    it('returns false when siyuan-canvas plugin is not running in workspace', async () => {
+      // 模拟 window.siyuan.ws.app.plugins 中没有 siyuan-canvas
+      const origWindowSiyuan = (globalThis as any).window?.siyuan
+      ;(globalThis as any).window = {
+        siyuan: {
+          ws: {
+            app: {
+              plugins: [],
+            },
+          },
+        },
+      }
+
+      const result = await openCanvasInTab('/data/storage/petal/siyuan-canvas/test.canvas')
+      expect(result).toBe(false)
+
+      ;(globalThis as any).window.siyuan = origWindowSiyuan
+    })
+
+    it('opens canvas editor tab with keepCursor=true when siyuan-canvas plugin is active', async () => {
+      const mockRemember = vi.fn()
+      ;(globalThis as any).window = {
+        siyuan: {
+          ws: {
+            app: {
+              plugins: [
+                {
+                  name: 'siyuan-canvas',
+                  rememberRecentCanvas: mockRemember,
+                },
+              ],
+            },
+          },
+        },
+      }
+
+      const result = await openCanvasInTab('/data/storage/petal/siyuan-canvas/test.canvas', '测试画布')
+      expect(result).toBe(true)
+      expect(mockRemember).toHaveBeenCalledWith('/data/storage/petal/siyuan-canvas/test.canvas', '测试画布')
+    })
+
+    it('calls canvasPlugin.openCanvasTab directly when available', async () => {
+      const mockOpenCanvasTab = vi.fn().mockResolvedValue(undefined)
+      ;(globalThis as any).window = {
+        siyuan: {
+          ws: {
+            app: {
+              plugins: [
+                {
+                  name: 'siyuan-canvas',
+                  openCanvasTab: mockOpenCanvasTab,
+                },
+              ],
+            },
+          },
+        },
+      }
+
+      const result = await openCanvasInTab('/data/storage/petal/siyuan-canvas/test.canvas', '测试画布')
+      expect(result).toBe(true)
+      expect(mockOpenCanvasTab).toHaveBeenCalledWith({
+        path: '/data/storage/petal/siyuan-canvas/test.canvas',
+        title: '测试画布',
+      })
     })
   })
 })

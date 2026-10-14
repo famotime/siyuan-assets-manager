@@ -165,13 +165,13 @@
             <button
               v-if="item.data.docCount > 0"
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
-              @click.stop="$emit('open-docs', item.data)"
+              @click.stop="$emit('open-docs', item.data, $event)"
               aria-label="在后台打开并定位引用此资源的文档"
             >
               <ExternalLink :size="15" style="fill: none !important;" />
             </button>
             <button
-              v-if="!item.data.isMissing && (isImage(item.data.name) || item.data.isOriginal)"
+              v-if="!item.data.isMissing && (isImage(item.data.name) || item.data.isOriginal) && !item.data.isCanvasAsset"
               class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('edit', item.data)"
               aria-label="二次编辑与矢量标注"
@@ -187,6 +187,7 @@
               <TextCursorInput :size="15" style="fill: none !important;" />
             </button>
             <button
+              v-if="!item.data.isCanvasAsset || item.data.docCount === 0"
               class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('delete', item.data)"
               :aria-label="item.data.isMissing ? '清理此丢失资源的文档引用' : item.data.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
@@ -224,7 +225,7 @@ const { list, containerProps, wrapperProps } = useVirtualList(assets, {
 });
 
 const emit = defineEmits<{
-  (e: 'open-docs', asset: AssetInfo): void;
+  (e: 'open-docs', asset: AssetInfo, event?: MouseEvent): void;
   (e: 'edit', asset: AssetInfo): void;
   (e: 'rename', asset: AssetInfo): void;
   (e: 'delete', asset: AssetInfo): void;

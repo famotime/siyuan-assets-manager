@@ -68,10 +68,10 @@
                 </div>
 
                 <button
-                  v-if="!row.data.group.isUnreferenced && !row.data.group.id.startsWith('canvas:')"
+                  v-if="!row.data.group.isUnreferenced"
                   class="am-btn am-btn--icon doc-open-btn"
                   @click.stop="$emit('open-doc-id', row.data.group.id, row.data.group.firstBlockId)"
-                  title="在思源中打开此文档"
+                  :title="row.data.group.id.startsWith('canvas:') || row.data.group.id.endsWith('.canvas') ? '在后台打开此无界画布' : '在思源中打开此文档'"
                 >
                   <ExternalLink :size="15" />
                 </button>
@@ -227,13 +227,13 @@
               <button
                 v-if="row.data.asset.docCount > 0"
                 class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
-                @click.stop="$emit('open-docs', row.data.asset)"
+                @click.stop="$emit('open-docs', row.data.asset, $event)"
                 aria-label="在后台打开并定位引用此资源的文档"
               >
                 <ExternalLink :size="15" style="fill: none !important;" />
               </button>
               <button
-                v-if="!row.data.asset.isMissing && (isImage(row.data.asset.name) || row.data.asset.isOriginal)"
+                v-if="!row.data.asset.isMissing && (isImage(row.data.asset.name) || row.data.asset.isOriginal) && !row.data.asset.isCanvasAsset"
                 class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('edit', row.data.asset)"
                 aria-label="二次编辑与矢量标注"
@@ -241,7 +241,7 @@
                 <Pencil :size="15" style="fill: none !important;" />
               </button>
               <button
-                v-if="!row.data.asset.isOriginal && !row.data.asset.isMissing"
+                v-if="!row.data.asset.isOriginal && !row.data.asset.isMissing && !row.data.asset.isCanvasAsset"
                 class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('rename', row.data.asset)"
                 aria-label="重命名此资源并自动更新引用"
@@ -249,6 +249,7 @@
                 <TextCursorInput :size="15" style="fill: none !important;" />
               </button>
               <button
+                v-if="!row.data.asset.isCanvasAsset || row.data.asset.docCount === 0"
                 class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('delete', row.data.asset)"
                 :aria-label="row.data.asset.isMissing ? '清理此丢失资源的文档引用' : row.data.asset.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
@@ -301,6 +302,7 @@ import {
 } from '../utils/asset-list';
 import { buildDocRows } from '../utils/doc-group-rows';
 import { readOriginalImage } from '../utils/file-system';
+import { defaultStorage } from '../utils/storage';
 
 const props = defineProps<{
   groups: DocAssetGroup[];
@@ -332,7 +334,7 @@ const { list, containerProps, wrapperProps } = useVirtualList(rows, {
 
 
 const emit = defineEmits<{
-  (e: 'open-docs', asset: AssetInfo): void;
+  (e: 'open-docs', asset: AssetInfo, event?: MouseEvent): void;
   (e: 'open-doc-id', rootId: string, firstBlockId?: string): void;
   (e: 'edit', asset: AssetInfo): void;
   (e: 'rename', asset: AssetInfo): void;
@@ -459,16 +461,39 @@ async function loadOriginalBlobUrl(asset: AssetInfo) {
   }
 }
 
+async function loadCanvasAssetBlobUrl(asset: AssetInfo) {
+  if (!asset.isCanvasAsset || originalBlobUrlMap.value[asset.name] || loadingOriginals.has(asset.name)) {
+    return;
+  }
+  loadingOriginals.add(asset.name);
+  try {
+    const blob = await defaultStorage.read(asset.canvasAssetStoragePath || asset.name);
+    if (blob) {
+      originalBlobUrlMap.value[asset.name] = URL.createObjectURL(blob);
+    }
+  } catch (e) {
+  } finally {
+    loadingOriginals.delete(asset.name);
+  }
+}
+
 function getThumbnailSrc(asset: AssetInfo): string {
-  if (!asset.isOriginal) {
-    const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
-    return `/assets/${asset.name}${versionQuery}`;
+  if (asset.isOriginal) {
+    if (originalBlobUrlMap.value[asset.name]) {
+      return originalBlobUrlMap.value[asset.name];
+    }
+    loadOriginalBlobUrl(asset);
+    return '';
   }
-  if (originalBlobUrlMap.value[asset.name]) {
-    return originalBlobUrlMap.value[asset.name];
+  if (asset.isCanvasAsset) {
+    if (originalBlobUrlMap.value[asset.name]) {
+      return originalBlobUrlMap.value[asset.name];
+    }
+    loadCanvasAssetBlobUrl(asset);
+    return '';
   }
-  loadOriginalBlobUrl(asset);
-  return '';
+  const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
+  return `/assets/${asset.name}${versionQuery}`;
 }
 
 function invalidateAssetThumbnail(assetName: string) {

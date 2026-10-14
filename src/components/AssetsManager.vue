@@ -288,7 +288,8 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
-import { openTab } from 'siyuan';
+import { openTab, Menu } from 'siyuan';
+import { openCanvasInTab } from '../utils/canvas-asset';
 import {
   Files,
   Image,
@@ -951,6 +952,22 @@ const docModeStats = computed(() => {
 });
 
 async function handleOpenSingleDoc(rootId: string, firstBlockId?: string) {
+  const isCanvas = rootId.endsWith('.canvas') || (Boolean(firstBlockId) && firstBlockId!.startsWith('canvas:'));
+  if (isCanvas) {
+    let canvasPath = rootId;
+    if (!canvasPath.endsWith('.canvas') && firstBlockId?.startsWith('canvas:')) {
+      const parts = firstBlockId.split(':');
+      if (parts[1]) canvasPath = parts[1];
+    }
+    const ok = await openCanvasInTab(canvasPath);
+    if (ok) {
+      pushMsg("已在后台打开无界画布");
+    } else {
+      pushMsg("未检测到正在运行的无界 (siyuan-canvas) 插件，请先安装或启用该插件");
+    }
+    return;
+  }
+
   const plugin = usePlugin();
   try {
     await openTab({
@@ -977,41 +994,62 @@ function handleSortChange(field: AssetSortField) {
   }
 }
 
-async function handleOpenDocs(asset: AssetInfo) {
-  // 按文档去重：同一篇文档被多个块引用时只打开一个页签，定位到该文档的第一个引用块
+async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
   const groups = groupReferencesByDoc(asset.references);
   if (groups.length === 0) {
     pushMsg("该资源未被任何文档引用");
     return;
   }
 
-  const normalDocGroups = groups.filter((g) => !g.first.id.startsWith('canvas:'));
-  const canvasGroups = groups.filter((g) => g.first.id.startsWith('canvas:'));
-
-  if (canvasGroups.length > 0 && normalDocGroups.length === 0) {
-    const canvasNames = canvasGroups.map((g) => g.first.readablePath || g.first.hpath || g.first.root_id).join('、');
-    pushMsg(`此资源仅被画布引用 [${canvasNames}]`);
+  // 1. 若仅有 1 个引用目标，直接在后台打开
+  if (groups.length === 1) {
+    const group = groups[0];
+    const isCanvas = group.first.id.startsWith('canvas:') || group.first.path.endsWith('.canvas') || group.rootId.endsWith('.canvas');
+    if (isCanvas) {
+      const canvasPath = group.first.path || (group.rootId.endsWith('.canvas') ? group.rootId : (group.first.id.split(':')[1] || ''));
+      const canvasTitle = group.first.readablePath || group.first.hpath || asset.name;
+      const ok = await openCanvasInTab(canvasPath, canvasTitle);
+      if (ok) {
+        pushMsg(`已在后台打开无界画布 [${canvasTitle}]`);
+      } else {
+        pushMsg("未检测到正在运行的无界 (siyuan-canvas) 插件，请先安装或启用该插件");
+      }
+    } else {
+      await handleOpenSingleDoc(group.rootId, group.first.id);
+    }
     return;
   }
 
-  const plugin = usePlugin();
-  try {
-    for (const group of normalDocGroups) {
-      await openTab({
-        app: plugin.app,
-        doc: {
-          id: group.first.id,
-          action: ["cb-get-hl", "cb-get-focus", "cb-get-context"]
-        },
-        keepCursor: true
-      });
-    }
-    const canvasTip = canvasGroups.length > 0 ? `（另有 ${canvasGroups.length} 个画布引用）` : '';
-    pushMsg(`已在后台为 ${normalDocGroups.length} 篇引用文档各打开一个页签${canvasTip}`);
-  } catch (e) {
-    error("Failed to open documents", e);
-    pushMsg("打开文档失败");
+  // 2. 多个引用目标（多个画布，或画布 + 普通文档），弹出轻量选择菜单供用户点击指定目标
+  const menu = new Menu('asset-references-picker');
+  for (const group of groups) {
+    const isCanvas = group.first.id.startsWith('canvas:') || group.first.path.endsWith('.canvas') || group.rootId.endsWith('.canvas');
+    const labelTitle = group.first.readablePath || group.first.hpath || group.rootId || '未命名';
+    const displayLabel = isCanvas ? `[画布] ${labelTitle}` : `[文档] ${labelTitle}`;
+
+    menu.addItem({
+      icon: isCanvas ? 'iconCanvas' : 'iconFile',
+      label: displayLabel,
+      click: async () => {
+        if (isCanvas) {
+          const canvasPath = group.first.path || (group.rootId.endsWith('.canvas') ? group.rootId : (group.first.id.split(':')[1] || ''));
+          const ok = await openCanvasInTab(canvasPath, labelTitle);
+          if (ok) {
+            pushMsg(`已在后台打开无界画布 [${labelTitle}]`);
+          } else {
+            pushMsg("未检测到正在运行的无界 (siyuan-canvas) 插件，请先安装或启用该插件");
+          }
+        } else {
+          await handleOpenSingleDoc(group.rootId, group.first.id);
+        }
+      },
+    });
   }
+
+  // 计算弹出位置（优先使用点击事件坐标，兜底屏幕居中）
+  let x = event?.clientX ?? window.innerWidth / 2;
+  let y = event?.clientY ?? window.innerHeight / 2;
+  menu.open({ x, y });
 }
 
 function handleEdit(asset: AssetInfo) {
