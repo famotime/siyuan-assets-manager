@@ -225,7 +225,7 @@
 
             <div class="col-actions asset-actions" @click.stop>
               <button
-                v-if="row.data.asset.docCount > 0"
+                v-if="!refsPending && row.data.asset.docCount > 0"
                 class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('open-docs', row.data.asset, $event)"
                 aria-label="在后台打开并定位引用此资源的文档"
@@ -233,7 +233,7 @@
                 <ExternalLink :size="15" style="fill: none !important;" />
               </button>
               <button
-                v-if="!row.data.asset.isMissing && (isImage(row.data.asset.name) || row.data.asset.isOriginal) && !row.data.asset.isCanvasAsset"
+                v-if="!refsPending && !row.data.asset.isMissing && (isImage(row.data.asset.name) || row.data.asset.isOriginal) && !row.data.asset.isCanvasAsset"
                 class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('edit', row.data.asset)"
                 aria-label="二次编辑与矢量标注"
@@ -241,7 +241,7 @@
                 <Pencil :size="15" style="fill: none !important;" />
               </button>
               <button
-                v-if="!row.data.asset.isOriginal && !row.data.asset.isMissing && !row.data.asset.isCanvasAsset"
+                v-if="!refsPending && !row.data.asset.isOriginal && !row.data.asset.isMissing && !row.data.asset.isCanvasAsset"
                 class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('rename', row.data.asset)"
                 aria-label="重命名此资源并自动更新引用"
@@ -249,7 +249,7 @@
                 <TextCursorInput :size="15" style="fill: none !important;" />
               </button>
               <button
-                v-if="!row.data.asset.isCanvasAsset || row.data.asset.docCount === 0"
+                v-if="!refsPending && (!row.data.asset.isCanvasAsset || row.data.asset.docCount === 0)"
                 class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('delete', row.data.asset)"
                 :aria-label="row.data.asset.isMissing ? '清理此丢失资源的文档引用' : row.data.asset.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
@@ -311,6 +311,8 @@ const props = defineProps<{
   selectedNames: Set<string>;
   collapsedDocIds: Set<string>;
   searchQuery?: string;
+  /** 文档引用关系仍在分析中：引用相关的行操作全部隐藏（该视图通常仅在引用就绪后启用） */
+  refsPending?: boolean;
 }>();
 
 const { groups, selectedNames } = toRefs(props);

@@ -34,6 +34,38 @@ vi.mock('../src/utils/plugin-context', () => ({
   usePlugin: () => ({ name: 'siyuan-assets-manager' }),
 }));
 
+vi.mock('../src/utils/asset-catalog', () => ({
+  // 两阶段扫描的测试替身：文件清单立即返回，引用阶段挂起由测试手动放行
+  fetchCatalogFiles: vi.fn(async () => ({ files: [], source: 'kernel', dirAvailable: true })),
+  fetchCatalogReferenceData: vi.fn(
+    () =>
+      new Promise((resolve, reject) => {
+        hoisted.pending.push(() => {
+          if (hoisted.failNext) {
+            hoisted.failNext = false;
+            reject(new Error('sqlite unavailable'));
+          } else {
+            resolve({ assets: hoisted.assets });
+          }
+        });
+      })
+  ),
+  emptyReferenceData: vi.fn(() => ({ assets: null })),
+  resolveCatalogInventory: vi.fn((_files: unknown, refData: { assets: AssetInfo[] | null }) => ({
+    allAssets: refData && refData.assets ? refData.assets : hoisted.assets,
+    assetsMap: new Map(),
+    originalAssets: [],
+    orphanOriginals: [],
+    totalOrphanSize: 0,
+  })),
+  getCachedCatalogInventory: vi.fn(() => null),
+  setCachedCatalogInventory: vi.fn(),
+  invalidateCatalogCache: vi.fn(),
+  mergeAssetStatsInto: vi.fn(),
+  fillMissingAssetStats: vi.fn(async () => ({ updated: 0, skipped: false })),
+}));
+
+
 import AssetsManager from '../src/components/AssetsManager.vue';
 
 function makeAsset(name: string, size: number, rootId: string, title: string): AssetInfo {

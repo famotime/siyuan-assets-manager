@@ -17,10 +17,16 @@ import * as siyuanDb from '../src/utils/siyuan-db';
 import * as siyuanBlock from '../src/utils/siyuan-block';
 import * as deletionLogger from '../src/utils/deletion-logger';
 
-vi.mock('../src/api', () => ({
-  sql: vi.fn(async () => []),
-  pushMsg: vi.fn(),
-}));
+vi.mock('../src/api', () => {
+  const sql = vi.fn(async () => []);
+  return {
+    sql,
+    sqlGuarded: sql,
+    readDir: vi.fn(async () => []),
+    readDirGuarded: vi.fn(async () => []),
+    pushMsg: vi.fn(),
+  };
+});
 
 vi.mock('../src/utils/file-system', () => ({
   isTrashSupported: vi.fn(() => true),

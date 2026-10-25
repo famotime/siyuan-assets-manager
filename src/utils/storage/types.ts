@@ -19,6 +19,17 @@ export interface IStorageAdapter {
   list(dirPath: string): Promise<StorageEntry[]>;
   isTrashSupported?(): boolean;
   deleteToTrash?(absolutePath: string): Promise<boolean>;
+  /**
+   * 异步 stat：不阻塞渲染主线程（Electron 下走 fs.promises）。
+   * 大工作空间上有数万资源需要补全 size/updated，同步 statSync 会冻结整个界面。
+   */
+  statAsync?(absolutePath: string): Promise<FileStat | null>;
+  /**
+   * 快速列目录：仅返回 name/isDir（不逐条 stat）。
+   * Electron 下一次 readdir(withFileTypes) 即完成，绕过内核 /api/file/readDir
+   * 的按路径互斥串行；HTTP 适配器不支持时调用方回退内核接口。
+   */
+  listDirEntries?(dirPath: string): Promise<StorageEntry[]>;
 }
 
 export async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {

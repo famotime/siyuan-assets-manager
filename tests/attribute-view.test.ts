@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/api', () => ({
-  sql: vi.fn(),
-}));
+vi.mock('../src/api', () => {
+  const sql = vi.fn();
+  return {
+    sql,
+    sqlGuarded: sql,
+  };
+});
 
 import { sql } from '../src/api';
 import {

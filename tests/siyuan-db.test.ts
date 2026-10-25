@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../src/api', () => ({
-  readDir: vi.fn(),
-  removeFile: vi.fn(),
-  sql: vi.fn(),
-  lsNotebooks: vi.fn(),
-}))
+vi.mock('../src/api', () => {
+  const readDir = vi.fn()
+  const sql = vi.fn()
+  return {
+    readDir,
+    readDirGuarded: readDir,
+    sql,
+    sqlGuarded: sql,
+    removeFile: vi.fn(),
+    lsNotebooks: vi.fn(),
+  }
+})
 
 import {
   readDir,
@@ -24,6 +30,7 @@ import {
   countReferencedDocs,
 } from '../src/utils/siyuan-db'
 import { filterAssets, calculateTotalCleanup } from '../src/utils/asset-list'
+import { invalidateCatalogCache } from '../src/utils/asset-catalog'
 
 const readDirMock = vi.mocked(readDir)
 const removeFileMock = vi.mocked(removeFile)
@@ -33,6 +40,8 @@ const lsNotebooksMock = vi.mocked(lsNotebooks)
 describe('siyuan asset database helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // 库存缓存会让相邻用例读到上一个用例的数据，逐例失效
+    invalidateCatalogCache()
     vi.stubGlobal('window', {})
     vi.stubGlobal('fetch', vi.fn(async () => ({
       headers: {

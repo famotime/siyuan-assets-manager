@@ -4,7 +4,7 @@ import type {
   BlockRef,
 } from './siyuan-db'
 import {
-  readDir,
+  readDirGuarded,
   removeFile,
   sql,
 } from '../api'
@@ -309,7 +309,7 @@ export async function scanCanvasWorkspacesRecursively(
 ): Promise<void> {
   const normBase = normalizeCanvasWorkspacePath(baseDir)
   try {
-    const raw = await readDir(normBase).catch(() => null)
+    const raw = await readDirGuarded(normBase).catch(() => null)
     if (!raw || !Array.isArray(raw)) return
 
     for (const entry of raw) {
@@ -408,7 +408,7 @@ export async function scanCanvasAssetsInventory(): Promise<ICanvasInventoryResul
     const isCanvasExisting = foundCanvasPaths.has(parentCanvasPath)
 
     try {
-      const entries = await readDir(assetDir).catch(() => null)
+      const entries = await readDirGuarded(assetDir).catch(() => null)
       if (!entries || !Array.isArray(entries)) continue
 
       const dirBaseName = getBaseFileName(assetDir)
@@ -517,7 +517,7 @@ export async function deleteCanvasAssetFile(
     const parentDir = filePath.substring(0, filePath.lastIndexOf('/'))
     if (parentDir.endsWith('.assets')) {
       try {
-        const remaining = await readDir(parentDir).catch(() => null)
+        const remaining = await readDirGuarded(parentDir).catch(() => null)
         if (Array.isArray(remaining) && remaining.filter((e) => !isIgnoredSystemAsset(e?.name)).length === 0) {
           await removeFile(parentDir).catch(() => {})
           log(`[canvas-asset] 已自动清理已清空的画布资源目录: ${parentDir}`)
@@ -536,7 +536,7 @@ export async function cleanupEmptyCanvasAssetDirs(orphanDirs: string[]): Promise
   let cleanedCount = 0
   for (const dir of orphanDirs) {
     try {
-      const remaining = await readDir(dir).catch(() => null)
+      const remaining = await readDirGuarded(dir).catch(() => null)
       if (!remaining || remaining.filter((e) => !isIgnoredSystemAsset(e?.name)).length === 0) {
         await removeFile(dir).catch(() => {})
         cleanedCount++

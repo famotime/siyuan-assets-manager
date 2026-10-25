@@ -25,11 +25,17 @@ import {
 } from '../src/utils/canvas-asset'
 import { defaultStorage } from '../src/utils/storage'
 
-vi.mock('../src/api', () => ({
-  readDir: vi.fn(),
-  sql: vi.fn(),
-  removeFile: vi.fn(),
-}))
+vi.mock('../src/api', () => {
+  const readDir = vi.fn()
+  const sql = vi.fn()
+  return {
+    readDir,
+    readDirGuarded: readDir,
+    sql,
+    sqlGuarded: sql,
+    removeFile: vi.fn(),
+  }
+})
 
 describe('canvas-asset module', () => {
   beforeEach(() => {

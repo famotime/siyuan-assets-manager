@@ -16,6 +16,26 @@ vi.mock('../src/utils/plugin-context', () => ({
   usePlugin: () => ({ name: 'siyuan-assets-manager' }),
 }));
 
+vi.mock('../src/utils/asset-catalog', () => ({
+  // 两阶段扫描的测试替身：两阶段都立即完成，等价于旧版单次 getAllAssetsInfo
+  fetchCatalogFiles: vi.fn(async () => ({ files: [], source: 'kernel', dirAvailable: true })),
+  fetchCatalogReferenceData: vi.fn(async () => ({ assets: hoisted.assets })),
+  emptyReferenceData: vi.fn(() => ({ assets: null })),
+  resolveCatalogInventory: vi.fn(() => ({
+    allAssets: hoisted.assets,
+    assetsMap: new Map(),
+    originalAssets: [],
+    orphanOriginals: [],
+    totalOrphanSize: 0,
+  })),
+  getCachedCatalogInventory: vi.fn(() => null),
+  setCachedCatalogInventory: vi.fn(),
+  invalidateCatalogCache: vi.fn(),
+  mergeAssetStatsInto: vi.fn(),
+  fillMissingAssetStats: vi.fn(async () => ({ updated: 0, skipped: false })),
+}));
+
+
 import AssetsManager from '../src/components/AssetsManager.vue';
 
 function makeRef(rootId: string, title: string): BlockRef {

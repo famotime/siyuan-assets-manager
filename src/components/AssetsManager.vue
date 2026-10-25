@@ -19,7 +19,7 @@
           </span>
 
           <div class="primary-action-icons">
-            <!-- 刷新 -->
+            <!-- 刷新（引用分析中/降级态也可用，scanSession 保证旧结果被丢弃） -->
             <button
               class="am-action-btn am-action-btn--refresh am-action-btn--with-text b3-tooltips b3-tooltips__s"
               @click="handleRefreshClick"
@@ -34,7 +34,8 @@
               <button
                 class="am-action-btn am-action-btn--batch-delete am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleBatchDelete"
-                :aria-label="`批量删除选中的 ${selectedNames.size} 个文件`"
+                :disabled="refsPending"
+                :aria-label="refsPending ? '引用分析进行中，暂不可删除' : `批量删除选中的 ${selectedNames.size} 个文件`"
               >
                 <Trash2 :size="14" style="fill: none !important;" />
                 <span>批量删除</span>
@@ -52,6 +53,7 @@
               <button
                 class="am-action-btn am-action-btn--dedup am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleOpenDeduplicate"
+                :disabled="refsPending"
                 aria-label="识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
               >
                 <CopyMinus :size="14" style="fill: none !important;" />
@@ -60,6 +62,7 @@
               <button
                 class="am-action-btn am-action-btn--clean am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleUnifiedCleanup"
+                :disabled="refsPending"
                 aria-label="综合清理所有未引用的孤儿资源与孤立底图"
               >
                 <Trash2 :size="14" style="fill: none !important;" />
@@ -185,15 +188,24 @@
       </button>
     </div>
 
-    <!-- 已有数据时刷新不卸载列表，否则每次刷新都会丢掉滚动位置并整表重建 -->
-    <div class="main-content" v-if="assets.length > 0 || !loading">
-      <VirtualAssetList 
-        v-if="viewMode === 'flat'"
+    <!-- 已有数据时刷新不卸载列表，否则每次刷新都会丢掉滚动位置并整表重建；
+         空列表且扫描失败时优先显示错误与重试，而不是渲染一个空列表 -->
+    <div class="main-content" v-if="assets.length > 0 || (!loading && !scanError)">
+      <!-- 引用关系仍在后台分析：先渲染文件列表，但清理/删除类操作在此之前一律禁用 -->
+      <div v-if="refsPending && !loading" class="refs-pending-banner">
+        <RotateCw :size="13" class="spinning" style="fill: none !important;" />
+        <span>{{ scanPhaseLabel || '正在分析文档引用关系' }}（已耗时 {{ scanElapsedText }}）</span>
+        <span class="refs-pending-hint">完成前清理 / 去重 / 删除暂不可用，列表当前仅含文件信息</span>
+      </div>
+
+      <VirtualAssetList
+        v-if="effectiveViewMode === 'flat'"
         ref="virtualListRef"
         :assets="sortedAssets"
         :sortField="sortField"
         :sortOrder="sortOrder"
         :selectedNames="selectedNames"
+        :refsPending="refsPending"
         @update:selectedNames="handleSelectionChange"
         @sort="handleSortChange"
         @open-docs="handleOpenDocs"
@@ -206,12 +218,13 @@
       />
 
       <DocumentAssetGroupList
-        v-else-if="viewMode === 'doc'"
+        v-else-if="effectiveViewMode === 'doc'"
         ref="docListRef"
         :groups="groupedDocAssets"
         :sortField="sortField"
         :sortOrder="sortOrder"
         :selectedNames="selectedNames"
+        :refsPending="refsPending"
         :collapsedDocIds="collapsedDocIds"
         :searchQuery="searchQuery"
         @toggle-collapse="toggleDocGroup"
@@ -229,7 +242,21 @@
     </div>
     
     <div v-else class="loading-state">
-      正在扫描 Siyuan 数据库并构建资源关联表，请稍候...
+      <template v-if="scanError">
+        <div class="loading-error">
+          <AlertCircle :size="18" style="fill: none !important;" />
+          <span>扫描失败：{{ scanError }}</span>
+          <button class="am-btn am-btn--sm" @click="handleRefreshClick">重试</button>
+        </div>
+      </template>
+      <template v-else>
+        <div class="loading-progress">
+          <RotateCw :size="16" class="spinning" style="fill: none !important;" />
+          <span>{{ scanPhaseLabel || '正在扫描 Siyuan 数据库并构建资源关联表，请稍候...' }}</span>
+          <span v-if="scanElapsed > 0" class="loading-elapsed">已耗时 {{ scanElapsedText }}</span>
+        </div>
+        <div class="loading-hint">大工作空间（10 万级资源 / 百万级块）全量扫描可能需要数分钟，期间请勿频繁刷新</div>
+      </template>
     </div>
 
     <!-- 限制在当前界面内的悬浮资源预览弹窗 (支持图片、MP4 视频与 MP3/常见音频) -->
@@ -247,13 +274,13 @@
     <DeduplicateDialog
       v-model:visible="deduplicateVisible"
       :assets="assets"
-      @completed="loadData"
+      @completed="loadData({ force: true })"
     />
 
     <!-- 删除操作审计与回退历史弹窗 -->
     <DeletionHistoryDialog
       v-model:visible="historyDialogVisible"
-      @refresh="loadData"
+      @refresh="loadData({ force: true })"
     />
 
     <!-- 底部悬浮批量操作浮岛 (就近操作，提升大屏长列表人机工效) -->
@@ -276,7 +303,8 @@
           type="button"
           class="am-btn am-btn--sm am-btn--danger"
           @click="handleBatchDelete"
-          :aria-label="`确认执行批量删除 (${selectedNames.size} 个文件)`"
+          :disabled="refsPending"
+          :aria-label="refsPending ? '引用分析进行中，暂不可删除' : `确认执行批量删除 (${selectedNames.size} 个文件)`"
         >
           <Trash2 :size="13" style="fill: none !important;" />
           <span>批量删除</span>
@@ -313,7 +341,19 @@ import {
   Search,
   X,
 } from 'lucide-vue-next';
-import { getAllAssetsInfo, countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
+import { countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
+import {
+  emptyReferenceData,
+  fetchCatalogFiles,
+  fetchCatalogReferenceData,
+  fillMissingAssetStats,
+  getCachedCatalogInventory,
+  invalidateCatalogCache,
+  mergeAssetStatsInto,
+  resolveCatalogInventory,
+  setCachedCatalogInventory,
+  type CatalogInventory,
+} from '../utils/asset-catalog';
 import { normalizeOriginalStoragePath, readOriginalImage } from '../utils/file-system';
 import { defaultStorage } from '../utils/storage';
 import {
@@ -368,6 +408,34 @@ const props = withDefaults(
 
 const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
+// 引用关系分析是否仍在后台进行（期间列表仅含文件信息，清理/删除类操作被禁用）
+const refsPending = ref(false);
+// 扫描阶段文案与耗时（替代原先一句静态的"正在扫描"，让用户能判断是否卡死）
+const scanPhaseLabel = ref('');
+const scanElapsed = ref(0);
+const scanError = ref<string | null>(null);
+const scanElapsedText = computed(() => {
+  const s = scanElapsed.value;
+  if (s < 60) return `${s} 秒`;
+  return `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
+});
+let scanTimer: number | null = null;
+let scanSession = 0;
+
+function startScanTimer() {
+  stopScanTimer();
+  scanElapsed.value = 0;
+  scanTimer = window.setInterval(() => {
+    scanElapsed.value += 1;
+  }, 1000);
+}
+
+function stopScanTimer() {
+  if (scanTimer !== null) {
+    clearInterval(scanTimer);
+    scanTimer = null;
+  }
+}
 // 最近一次成功从数据库载入资源列表的时刻，首次载入完成前显示占位符
 const lastRefreshedAt = ref<number | null>(null);
 const lastRefreshText = computed(() =>
@@ -418,6 +486,12 @@ function setViewMode(mode: 'flat' | 'doc') {
     localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
   } catch (e) {}
 }
+
+// 引用关系未就绪时文档归类视图没有分组依据（一切引用都是 0），临时回落平铺视图；
+// 引用阶段完成后自动恢复用户选择的视图。
+const effectiveViewMode = computed<'flat' | 'doc'>(() =>
+  refsPending.value ? 'flat' : viewMode.value
+);
 
 // 排序状态
 const sortField = ref<AssetSortField>('size');
@@ -640,8 +714,12 @@ function handleKeyDown(event: KeyboardEvent) {
     return;
   }
 
-  // Delete / Backspace 快捷触发批量删除
+  // Delete / Backspace 快捷触发批量删除（引用未就绪时禁止，防误删）
   if ((event.key === 'Delete' || event.key === 'Backspace') && selectedNames.value.size > 0) {
+    if (refsPending.value) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     handleBatchDelete();
   }
@@ -649,28 +727,138 @@ function handleKeyDown(event: KeyboardEvent) {
 
 onUnmounted(() => {
   handleHidePreview();
+  stopScanTimer();
   window.removeEventListener('assets-manager-refresh', handleGlobalRefresh);
   window.removeEventListener('keydown', handleKeyDown);
 });
 
-async function loadData(options: { resort?: boolean } = {}) {
-  loading.value = true;
-  try {
-    assets.value = await getAllAssetsInfo();
-    // 载入成功才记账，失败的刷新不该让顶部显示出「刚刚刷新过」
+/**
+ * 两阶段加载：
+ * 阶段一（快）：物理文件清单 → 立即渲染列表（引用列显示待定，危险操作禁用）
+ * 阶段二（慢）：SQL 引用关系 + 属性视图/画布/AI 会话 → 合并后放开全部操作
+ * size/updated 由后台并发 stat 补全，不再阻塞首屏。
+ */
+async function loadData(options: { resort?: boolean, force?: boolean } = {}) {
+  const session = ++scanSession;
+  scanError.value = null;
+  stopScanTimer();
+
+  const cached = options.force ? null : getCachedCatalogInventory();
+  if (cached) {
+    refsPending.value = false;
+    applyInventory(cached, options);
     lastRefreshedAt.value = Date.now();
-    // 过滤掉已不存在的选中项
-    const existingNames = new Set(assets.value.map(a => a.name));
-    selectedNames.value = new Set([...selectedNames.value].filter(name => existingNames.has(name)));
-    // 默认不重排：删除、编辑、去重等写入后保持用户当前看到的卡片顺序，仅刷新按钮显式要求重排
-    if (options.resort) {
-      resortNow();
-    }
-  } catch (e) {
-    error("Failed to load assets", e);
-  } finally {
-    loading.value = false;
+    return;
   }
+
+  loading.value = true;
+  refsPending.value = false;
+  startScanTimer();
+  try {
+    // 阶段二数据先行启动（与阶段一真正并行）：内核 SQL 在目录枚举的同时即开始执行
+    let refsLabel = '正在查询文档引用关系...';
+    const refDataPromise = fetchCatalogReferenceData((phase) => {
+      refsLabel = phase.label;
+      if (session === scanSession && loading.value) scanPhaseLabel.value = phase.label;
+    }).catch((err) => {
+      error('Failed to load asset references', err);
+      return null;
+    });
+
+    // 阶段一：文件清单（桌面端本地枚举为秒级；浏览器端走内核 readDir，受超时守卫保护）
+    scanPhaseLabel.value = '正在读取资源文件清单...';
+    const filesRes = await fetchCatalogFiles((phase) => {
+      if (session === scanSession) scanPhaseLabel.value = phase.label;
+    });
+    if (session !== scanSession) return;
+
+    if (!filesRes.dirAvailable) {
+      assets.value = [];
+      selectedNames.value = new Set<string>();
+      lastRefreshedAt.value = Date.now();
+      return;
+    }
+
+    // 用户先看到文件列表，引用关系随后合并
+    refsPending.value = true;
+    applyInventory(resolveCatalogInventory(filesRes.files, emptyReferenceData()), options);
+    scanPhaseLabel.value = refsLabel;
+    loading.value = false;
+
+    const refData = await refDataPromise;
+    if (session !== scanSession) return;
+
+    if (!refData) {
+      // 引用阶段失败：保留已渲染的文件列表并维持危险操作禁用；用户可点刷新整轮重试
+      scanPhaseLabel.value = '文档引用关系查询失败（网络或内核错误）。为安全起见清理 / 删除保持禁用，请点击刷新重试。';
+      return;
+    }
+
+    if (refData.degraded) {
+      // 关键引用源（主 SQL / 属性视图 / 画布）部分失败：数据不完整，
+      // 若照常放开清理按钮，被引用资源会被误判为孤儿而遭删除——必须保持禁用。
+      scanPhaseLabel.value = '引用数据不完整（部分查询超时或失败）。为安全起见清理 / 删除保持禁用，请点击刷新重试。';
+      return;
+    }
+
+    scanPhaseLabel.value = '正在构建资源关联表...';
+    const inventory = resolveCatalogInventory(filesRes.files, refData);
+    // 保留首屏期间后台 stat 已补全的 size/updated
+    mergeAssetStatsInto(inventory, assets.value);
+    refsPending.value = false;
+    applyInventory(inventory, options);
+    // 「上次刷新」记账完整载入（引用关系就绪）的时刻
+    lastRefreshedAt.value = Date.now();
+    setCachedCatalogInventory(inventory);
+
+    // 后台并发补全 size/updated（分批触发列表刷新，不阻塞交互）
+    runBackgroundStatFill(inventory.allAssets, session);
+  } catch (err) {
+    if (session !== scanSession) return;
+    error('Failed to load assets', err);
+    scanError.value = err instanceof Error ? err.message : String(err);
+    scanPhaseLabel.value = `扫描失败：${scanError.value}`;
+    refsPending.value = false;
+  } finally {
+    if (session === scanSession) {
+      loading.value = false;
+      stopScanTimer();
+    }
+  }
+}
+
+function applyInventory(inventory: CatalogInventory, options: { resort?: boolean } = {}) {
+  assets.value = inventory.allAssets;
+  // 过滤掉已不存在的选中项
+  const existingNames = new Set(assets.value.map(a => a.name));
+  selectedNames.value = new Set([...selectedNames.value].filter(name => existingNames.has(name)));
+  // 默认不重排：删除、编辑、去重等写入后保持用户当前看到的卡片顺序，仅刷新按钮显式要求重排
+  if (options.resort) {
+    resortNow();
+  }
+}
+
+async function runBackgroundStatFill(list: AssetInfo[], session: number) {
+  const result = await fillMissingAssetStats(list, {
+    onBatch: () => {
+      // 深层对象属性在原对象上补全后，用新数组身份分批触发响应式重算
+      if (session === scanSession) {
+        assets.value = [...assets.value];
+      }
+    },
+  });
+  if (session === scanSession) {
+    assets.value = [...assets.value];
+  }
+  if (result.skipped) {
+    // 浏览器模式下内核 /assets/* 不支持 HEAD，size 保持未知；不视为错误
+    warnScanNote('当前环境不支持远程文件大小查询，文件大小将在桌面端打开时补全');
+  }
+}
+
+function warnScanNote(message: string) {
+  scanError.value = null;
+  scanPhaseLabel.value = message;
 }
 
 export interface AssetTargetedUpdateDetail {
@@ -687,6 +875,8 @@ export interface AssetTargetedUpdateDetail {
 }
 
 function applyTargetedAssetUpdate(detail: AssetTargetedUpdateDetail) {
+  // 任何定向写入都意味着缓存库存已过期
+  invalidateCatalogCache();
   const {
     action,
     oldName,
@@ -837,7 +1027,7 @@ const handleGlobalRefresh = (event?: Event) => {
   if (detail && detail.oldName && detail.newName) {
     applyTargetedAssetUpdate(detail);
   } else {
-    loadData();
+    loadData({ force: true });
   }
 };
 
@@ -932,9 +1122,9 @@ function toggleAllDocGroups() {
   }
 }
 
-// 刷新按钮是唯一会按最新数据重新排序的入口
+// 刷新按钮是唯一会按最新数据重新排序的入口（显式刷新绕过缓存强制全量重扫）
 function handleRefreshClick() {
-  loadData({ resort: true });
+  loadData({ resort: true, force: true });
 }
 
 const docModeStats = computed(() => {
@@ -1053,6 +1243,7 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
 }
 
 function handleEdit(asset: AssetInfo) {
+  if (refsPending.value) return;
   if ((window as any)._siyuan_assets_manager_open_editor) {
     const targetBlockId = asset.reEditBlockId || (asset.references && asset.references.length > 0 ? asset.references[0].id : undefined);
     (window as any)._siyuan_assets_manager_open_editor(asset.name, targetBlockId);
@@ -1060,6 +1251,7 @@ function handleEdit(asset: AssetInfo) {
 }
 
 async function handleDelete(asset: AssetInfo) {
+  if (refsPending.value) return;
   const confirmOptions = buildSingleDeleteConfirmMessage(asset);
   const confirmDelete = await showConfirm(confirmOptions);
   if (!confirmDelete) return;
@@ -1075,6 +1267,7 @@ async function handleDelete(asset: AssetInfo) {
  * 多选批量删除
  */
 async function handleBatchDelete() {
+  if (refsPending.value) return;
   const summary = selectedSummary.value;
   if (summary.totalCount === 0) return;
 
@@ -1087,7 +1280,7 @@ async function handleBatchDelete() {
     const result = await executeBatchAssetsDeletion(summary);
     if (result.success) {
       clearSelection();
-      await loadData();
+      await loadData({ force: true });
     }
   } finally {
     loading.value = false;
@@ -1095,6 +1288,7 @@ async function handleBatchDelete() {
 }
 
 function handleRename(asset: AssetInfo) {
+  if (refsPending.value) return;
   if ((window as any)._siyuan_assets_manager_open_rename) {
     (window as any)._siyuan_assets_manager_open_rename(asset);
   }
@@ -1104,6 +1298,7 @@ function handleRename(asset: AssetInfo) {
  * 统一综合清理：整合孤儿资源文件与孤立原始底图的一键清理
  */
 async function handleUnifiedCleanup() {
+  if (refsPending.value) return;
   const summary = calculateTotalCleanup(assets.value);
   if (summary.totalCount === 0) {
     pushMsg("当前没有可清理的孤儿资源或孤立底图，存储空间很干净。");
@@ -1118,7 +1313,7 @@ async function handleUnifiedCleanup() {
   try {
     const result = await executeUnifiedCleanup(summary);
     if (result.success) {
-      await loadData();
+      await loadData({ force: true });
     }
   } finally {
     loading.value = false;
@@ -1514,10 +1709,72 @@ html[data-theme-mode="dark"] {
 .loading-state {
   flex: 1;
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
+  gap: 8px;
   color: var(--b3-theme-on-surface-light);
   font-size: 16px;
+}
+
+.loading-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.loading-elapsed {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.loading-hint {
+  font-size: 12px;
+  opacity: 0.55;
+  max-width: 420px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.loading-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--b3-theme-error, #ef4444);
+  font-size: 14px;
+
+  .am-btn {
+    flex-shrink: 0;
+  }
+}
+
+/* 引用分析进行中横幅：先渲染文件列表，但清理/删除类操作在此之前禁用 */
+.refs-pending-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--b3-theme-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--b3-theme-primary) 8%, transparent);
+  color: var(--b3-theme-on-surface);
+  font-size: 12px;
+  flex-shrink: 0;
+
+  .refs-pending-hint {
+    opacity: 0.7;
+  }
+}
+
+/* 危险操作在引用未就绪期间的禁用态 */
+.am-action-btn:disabled,
+.am-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 </style>

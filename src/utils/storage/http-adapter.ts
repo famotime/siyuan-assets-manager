@@ -1,5 +1,5 @@
 import type { IStorageAdapter, FileStat, StorageEntry } from './types';
-import { putFile, removeFile, readDir } from '../../api';
+import { putFile, removeFile, readDirGuarded } from '../../api';
 import { log, error } from '../logger';
 
 export class HttpStorageAdapter implements IStorageAdapter {
@@ -93,7 +93,7 @@ export class HttpStorageAdapter implements IStorageAdapter {
 
   async list(dirPath: string): Promise<StorageEntry[]> {
     try {
-      const files: any[] = await readDir(dirPath);
+      const files: any[] = await readDirGuarded(dirPath);
       if (!files || !Array.isArray(files)) return [];
       return files.map((f) => ({
         name: f.name,

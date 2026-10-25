@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../src/api', () => ({
+vi.mock('../src/api', () => {
+  const sql = vi.fn();
+  return {
   deleteBlock: vi.fn(),
-  sql: vi.fn(),
+  sql,
+  sqlGuarded: sql,
   updateBlock: vi.fn(),
   getBlockAttrs: vi.fn(),
   setBlockAttrs: vi.fn(),
   flushTransaction: vi.fn().mockResolvedValue({ code: 0 }),
   getBlockKramdown: vi.fn(),
-}))
+  };
+})
 
 import {
   deleteBlock,

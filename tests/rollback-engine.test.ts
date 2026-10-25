@@ -1,13 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('../src/api', () => ({
-  sql: vi.fn(),
+vi.mock('../src/api', () => {
+  const sql = vi.fn();
+  return {
+  sql,
+  sqlGuarded: sql,
   updateBlock: vi.fn(),
   insertBlock: vi.fn().mockResolvedValue([{ id: 'new-block' }]),
   getChildBlocks: vi.fn(),
   getBlockAttrs: vi.fn(),
   setBlockAttrs: vi.fn().mockResolvedValue({}),
-}));
+  };
+});
 
 vi.mock('../src/utils/attribute-view', () => ({
   replaceAssetInAttributeViews: vi.fn().mockResolvedValue(1),

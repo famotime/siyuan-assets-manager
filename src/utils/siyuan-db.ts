@@ -3,7 +3,7 @@ import {
   lsNotebooks,
   sql,
 } from "../api"
-import { fetchCatalogInventory } from "./asset-catalog"
+import { fetchCatalogInventory, fillMissingAssetStats } from "./asset-catalog"
 import { extractAssetNamesFromMarkdown } from "./asset-markdown"
 import { resolveAttributeViewReferences } from "./attribute-view"
 import {
@@ -313,9 +313,17 @@ export async function getNotebookMap(): Promise<Map<string, string>> {
 
 /**
  * 获取所有的 Asset 信息，包括物理文件和它被哪些 Block 引用以及二次编辑状态
+ * （兼容入口：一次性完成两阶段扫描，并在返回前同步补全 size/updated，
+ * 供非组件调用方获得与旧版一致的完整数据；组件走两阶段渐进渲染）
  */
 export async function getAllAssetsInfo(): Promise<AssetInfo[]> {
   const inventory = await fetchCatalogInventory()
+  const needsStat = inventory.allAssets.some(
+    (a) => !a.isOriginal && !a.isMissing && (a.size === 0 || !a.updated),
+  )
+  if (needsStat) {
+    await fillMissingAssetStats(inventory.allAssets)
+  }
   return inventory.allAssets
 }
 

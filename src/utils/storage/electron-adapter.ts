@@ -154,6 +154,60 @@ export class ElectronStorageAdapter implements IStorageAdapter {
     }
   }
 
+  async statAsync(absolutePath: string): Promise<FileStat | null> {
+    const fsp = this.fs?.promises;
+    if (!fsp || typeof fsp.stat !== 'function') {
+      return this.stat(absolutePath);
+    }
+    const realPath = this.resolveRealPath(absolutePath);
+    const toFileStat = (st: any): FileStat => ({
+      size: st.size,
+      updated: st.mtimeMs || 0,
+      isDir: typeof st.isDirectory === 'function' ? st.isDirectory() : false,
+    });
+    try {
+      return toFileStat(await fsp.stat(realPath));
+    } catch (e) {
+      // 与同步版保持一致的 URI 编码兜底
+      try {
+        const decoded = decodeURIComponent(realPath);
+        if (decoded !== realPath) {
+          return toFileStat(await fsp.stat(decoded));
+        }
+      } catch (e2) {}
+      return null;
+    }
+  }
+
+  async listDirEntries(dirPath: string): Promise<StorageEntry[]> {
+    try {
+      const realPath = this.resolveRealPath(dirPath);
+      // 只取 name/isDir（dirent 自带类型，无需逐条 stat）：
+      // 大目录（数万文件）上这一步是秒级，而逐条 stat 是分钟级且应由
+      // 后台并发 statAsync 分批补全，绝不能阻塞首屏。
+      const readEntries = async (): Promise<any[]> => {
+        const fsp = this.fs?.promises;
+        if (fsp && typeof fsp.readdir === 'function') {
+          return await fsp.readdir(realPath, { withFileTypes: true });
+        }
+        return this.fs.readdirSync(realPath, { withFileTypes: true });
+      };
+      const entries = await readEntries();
+      return entries.map((entry: any) => ({
+        name: entry.name,
+        isDir: typeof entry.isDirectory === 'function' ? entry.isDirectory() : Boolean(entry.isDir),
+        size: 0,
+        updated: 0,
+      }));
+    } catch (e: any) {
+      // 目录不存在时向上抛出，让调用方走内核 readDir 的可用性判定（404 → 空库）
+      if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) {
+        throw e;
+      }
+      return [];
+    }
+  }
+
   async read(absolutePath: string): Promise<Blob | null> {
     try {
       const realPath = this.resolveRealPath(absolutePath);

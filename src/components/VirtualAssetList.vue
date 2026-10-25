@@ -157,13 +157,14 @@
             {{ item.data.isMissing ? '-' : formatTime(item.data.updated) }}
           </div>
 
-          <div class="col-refs asset-refs">
-            {{ item.data.docCount }}
+          <div class="col-refs asset-refs" :title="refsPending ? '文档引用关系分析中' : undefined">
+            <span v-if="refsPending" class="refs-pending-cell">…</span>
+            <template v-else>{{ item.data.docCount }}</template>
           </div>
 
           <div class="col-actions asset-actions" @click.stop>
             <button
-              v-if="item.data.docCount > 0"
+              v-if="!refsPending && item.data.docCount > 0"
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('open-docs', item.data, $event)"
               aria-label="在后台打开并定位引用此资源的文档"
@@ -171,7 +172,7 @@
               <ExternalLink :size="15" style="fill: none !important;" />
             </button>
             <button
-              v-if="!item.data.isMissing && (isImage(item.data.name) || item.data.isOriginal) && !item.data.isCanvasAsset"
+              v-if="!refsPending && !item.data.isMissing && (isImage(item.data.name) || item.data.isOriginal) && !item.data.isCanvasAsset"
               class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('edit', item.data)"
               aria-label="二次编辑与矢量标注"
@@ -179,7 +180,7 @@
               <Pencil :size="15" style="fill: none !important;" />
             </button>
             <button
-              v-if="!item.data.isOriginal && !item.data.isMissing && !item.data.isCanvasAsset"
+              v-if="!refsPending && !item.data.isOriginal && !item.data.isMissing && !item.data.isCanvasAsset"
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('rename', item.data)"
               aria-label="重命名此资源并自动更新引用"
@@ -187,7 +188,7 @@
               <TextCursorInput :size="15" style="fill: none !important;" />
             </button>
             <button
-              v-if="!item.data.isCanvasAsset || item.data.docCount === 0"
+              v-if="!refsPending && (!item.data.isCanvasAsset || item.data.docCount === 0)"
               class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('delete', item.data)"
               :aria-label="item.data.isMissing ? '清理此丢失资源的文档引用' : item.data.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
@@ -216,6 +217,8 @@ const props = defineProps<{
   sortField: AssetSortField;
   sortOrder: AssetSortOrder;
   selectedNames: Set<string>;
+  /** 文档引用关系仍在分析中：引用数显示待定，引用相关的行操作全部隐藏 */
+  refsPending?: boolean;
 }>();
 
 const { assets, selectedNames } = toRefs(props);
@@ -663,6 +666,15 @@ onUnmounted(() => {
 
 .asset-ext, .asset-size, .asset-refs, .asset-updated {
   color: var(--b3-theme-on-surface-light);
+}
+
+/* 引用关系分析中的待定占位 */
+.refs-pending-cell {
+  display: inline-block;
+  min-width: 14px;
+  text-align: center;
+  letter-spacing: 2px;
+  opacity: 0.6;
 }
 
 .asset-actions {

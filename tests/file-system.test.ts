@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../src/api', () => ({
-  putFile: vi.fn(),
-  removeFile: vi.fn(),
-  readDir: vi.fn(),
-}));
+vi.mock('../src/api', () => {
+  const readDir = vi.fn();
+  return {
+    putFile: vi.fn(),
+    removeFile: vi.fn(),
+    readDir,
+    readDirGuarded: readDir,
+  };
+});
 
 import {
   normalizeOriginalStoragePath,

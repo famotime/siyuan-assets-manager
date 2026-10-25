@@ -5,10 +5,11 @@ import type {
   OrphanOriginalInfo,
 } from './siyuan-db'
 import {
-  readDir,
+  readDirGuarded,
   sql,
+  sqlGuarded,
 } from '../api'
-import { extractAssetNamesFromMarkdown } from './asset-markdown'
+import { extractAssetNamesFromMarkdown, markdownExcerpt } from './asset-markdown'
 import { resolveAttributeViewReferences } from './attribute-view'
 import { resolveCanvasAssetTimestamp, scanCanvasAssetsInventory } from './canvas-asset'
 import {
@@ -23,14 +24,11 @@ import {
 } from './logger'
 import { queryAllReEditableBlocks } from './siyuan-block'
 import {
-
   attachAttributeViewReferences,
   attachBlockReferences,
   attachReEditMetadata,
-
   createAssetInfoMap,
   getNotebookMap,
-
   SYSTEM_PROTECTED_ASSETS,
   updateAssetDocCounts,
 } from './siyuan-db'
@@ -38,6 +36,7 @@ import {
   blobToText,
   defaultStorage,
 } from './storage'
+import { mapWithConcurrency } from './concurrency'
 
 export { SYSTEM_PROTECTED_ASSETS }
 
@@ -58,6 +57,7 @@ export const AGENT_SESSIONS_STORAGE_DIR = '/data/storage/ai/agent/sessions'
 /**
  * 递归扫描 /data/assets 目录下的所有资源文件（含嵌套子目录），
  * 对齐思源官方 UnusedAssets / allAssetAbsPaths 递归发现所有嵌套资源。
+ * 内核 readDir 受超时守卫保护，不再可能无限挂起。
  */
 export async function listDataAssetsRecursively(
   baseDir: string = '/data/assets',
@@ -65,7 +65,7 @@ export async function listDataAssetsRecursively(
 ): Promise<Array<{ name: string, size: number, updated: number, isDir: boolean }>> {
   const result: Array<{ name: string, size: number, updated: number, isDir: boolean }> = []
   try {
-    const raw = await readDir(baseDir).catch(() => null)
+    const raw = await readDirGuarded(baseDir).catch(() => null)
     if (!raw || !Array.isArray(raw)) return result
 
     for (const entry of raw) {
@@ -87,6 +87,40 @@ export async function listDataAssetsRecursively(
     }
   } catch (err) {
     warn(`[asset-catalog] 递归扫描资产目录 [${baseDir}] 失败:`, err)
+  }
+  return result
+}
+
+/**
+ * 桌面端（Electron）本地快速递归枚举 /data/assets：
+ * readdir(withFileTypes) 一次性拿 name/isDir，不逐条 stat，
+ * 绕开内核 /api/file/readDir 的按路径互斥串行与每条目一次 os.Stat 的开销。
+ * size/updated 留空，由后台 fillMissingAssetStats 并发补全。
+ * 目录不存在时抛出异常，由调用方降级判定。
+ */
+async function listDataAssetsFast(
+  baseDir: string,
+  relativePrefix: string = '',
+): Promise<Array<{ name: string, size: number, updated: number, isDir: boolean }>> {
+  const adapter = defaultStorage.adapter as any
+  const result: Array<{ name: string, size: number, updated: number, isDir: boolean }> = []
+  const entries = await adapter.listDirEntries(baseDir)
+  for (const entry of entries) {
+    if (!entry || !entry.name || isIgnoredSystemAsset(entry.name)) {
+      continue
+    }
+    const relPath = relativePrefix ? `${relativePrefix}${entry.name}` : entry.name
+    if (entry.isDir) {
+      const subEntries = await listDataAssetsFast(`${baseDir}/${entry.name}`, `${relPath}/`)
+      result.push(...subEntries)
+    } else {
+      result.push({
+        name: relPath,
+        size: 0,
+        updated: 0,
+        isDir: false,
+      })
+    }
   }
   return result
 }
@@ -389,43 +423,165 @@ export function resolveCatalogPipeline(
 }
 
 /**
- * 异步获取全量目录库存与装配模型
+ * 异步获取全量目录库存与装配模型（兼容入口：文件 + 引用两阶段一次性完成）。
+ * 带短 TTL 内存缓存：插件重载、标签页重开等高频重复加载不再触发全量重扫。
  */
 export async function fetchCatalogInventory(): Promise<CatalogInventory> {
-  const rawFiles = await listDataAssetsRecursively('/data/assets').catch(() => null)
-  if (!rawFiles || !Array.isArray(rawFiles) || rawFiles.length === 0) {
-    const fallbackFiles = await readDir('/data/assets').catch(() => null)
-    if (!fallbackFiles || !Array.isArray(fallbackFiles)) {
+  const cached = getCachedCatalogInventory()
+  if (cached) return cached
+
+  const filesRes = await fetchCatalogFiles()
+  if (!filesRes.dirAvailable) {
+    return {
+      allAssets: [],
+      assetsMap: new Map(),
+      originalAssets: [],
+      orphanOriginals: [],
+      totalOrphanSize: 0,
+    }
+  }
+  const refData = await fetchCatalogReferenceData()
+  const inventory = resolveCatalogInventory(filesRes.files, refData)
+  setCachedCatalogInventory(inventory)
+  return inventory
+}
+
+// **************************************** 两阶段扫描架构 ****************************************
+// 大工作空间（10 万级资源 + 百万级块）上，一次全量扫描 = 目录枚举(内核串行) + 百万块
+// LIKE 全表扫描(分钟级) + 数万次 stat。此前这些全部串在 loading 一个状态里，首屏要
+// 十几分钟且无任何反馈。现拆为两个可独立汇报进度的阶段：
+//   阶段一 fetchCatalogFiles：拿物理文件清单（桌面端本地枚举，秒级）→ 先渲染列表
+//   阶段二 fetchCatalogReferenceData：SQL 引用关系 + 属性视图/画布/AI 会话 → 合并引用
+// size/updated 补全(fillMissingAssetStats)移到渲染后后台执行，不再阻塞首屏。
+
+export interface CatalogScanPhase {
+  stage: 'files' | 'refs' | 'resolve'
+  label: string
+}
+
+export type ScanPhaseReporter = (phase: CatalogScanPhase) => void
+
+export interface CatalogFilesResult {
+  files: Array<{ name: string, size: number, updated: number, isDir: boolean }>
+  /** 枚举来源：desktop 本地文件系统 或 内核 readDir */
+  source: 'local-fs' | 'kernel'
+  /** /data/assets 是否可用（不可用时上层直接呈现空列表，跳过引用阶段） */
+  dirAvailable: boolean
+}
+
+/**
+ * 阶段一：枚举 /data/assets 物理文件清单。
+ * 桌面端优先本地 readdir（绕过内核 readDir 按路径互斥锁），否则回退带超时守卫的内核接口。
+ */
+export async function fetchCatalogFiles(onPhase?: ScanPhaseReporter): Promise<CatalogFilesResult> {
+  onPhase?.({ stage: 'files', label: '正在读取资源文件清单...' })
+
+  const adapter = defaultStorage.adapter as any
+  if (typeof adapter.listDirEntries === 'function') {
+    try {
+      const files = await listDataAssetsFast('/data/assets')
       return {
-        allAssets: [],
-        assetsMap: new Map(),
-        originalAssets: [],
-        orphanOriginals: [],
-        totalOrphanSize: 0,
+        files,
+        source: 'local-fs',
+        dirAvailable: true,
       }
+    } catch (err) {
+      warn('[asset-catalog] 本地快速枚举资源目录失败，回退内核 readDir:', err)
     }
   }
 
-  const files = (rawFiles && rawFiles.length > 0 ? rawFiles : await readDir('/data/assets').catch(() => []))
+  const rawFiles = await listDataAssetsRecursively('/data/assets').catch(() => null)
+  if (!rawFiles || !Array.isArray(rawFiles) || rawFiles.length === 0) {
+    const fallbackFiles = await readDirGuarded('/data/assets').catch(() => null)
+    if (!fallbackFiles || !Array.isArray(fallbackFiles)) {
+      return { files: [], source: 'kernel', dirAvailable: false }
+    }
+  }
+
+  const files = (rawFiles && rawFiles.length > 0 ? rawFiles : await readDirGuarded('/data/assets').catch(() => [] as any[]))
     .filter((f: any) => !isIgnoredSystemAsset(f.name) && !f.isDir)
+  return { files, source: 'kernel', dirAvailable: true }
+}
+
+export interface CatalogReferenceData {
+  /** 主引用块 + PDF 标注引用块（content 已由 markdown 摘要兜底） */
+  blocks: any[]
+  reEditBlocks: Array<{ blockId: string, rootId: string, metadata: IAssetReEditMetadata }>
+  originalFiles: Array<{ name: string, path: string, size: number, updated: number }>
+  sidecarMetadataList: Array<{ assetName: string, metadata: IAssetReEditMetadata }>
+  avReferencesMap: Map<string, BlockRef[]>
+  agentAssets: Set<string>
+  canvasInventory: Awaited<ReturnType<typeof scanCanvasAssetsInventory>> | null
+  notebookMap: Map<string, string>
+  /**
+   * 引用数据不完整（大 SQL / 属性视图 / 画布扫描超时或失败）时为 true。
+   * 消费方必须把列表视为"引用未知"，禁止放开任何基于引用状态的清理操作，
+   * 否则被引用资源会被误判为孤儿而遭删除。
+   */
+  degraded: boolean
+}
+
+/**
+ * 阶段二：采集全部引用关系数据（SQL 块引用、属性视图、画布、AI 会话、二次编辑元数据、底图）。
+ * 与阶段一并行启动时可让内核 SQL 在首屏渲染期间后台执行。
+ */
+export async function fetchCatalogReferenceData(onPhase?: ScanPhaseReporter): Promise<CatalogReferenceData> {
+  onPhase?.({ stage: 'refs', label: '正在查询文档引用关系（大工作空间约需数分钟）...' })
+
   const notebookMap = await getNotebookMap().catch(() => new Map<string, string>())
-  const [blocks, annotationRefBlocks, reEditBlocks, originalFiles, sidecarMetadataList, avReferencesMap, agentAssets, canvasInventory] = await Promise.all([
-    sql(`SELECT id, root_id, box, content, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`).catch(() => []),
+  // 说明：主查询刻意不取 content 列 —— content 与 markdown 高度重复，裁掉后大库上
+  // 传输体积近乎减半（实测 79MB → 约 50MB），展示文本由 markdownExcerpt 兜底。
+  let degraded = false
+  // 三个"失败即不安全"的关键源：主 SQL、属性视图、画布——任何一个失败都意味着
+  // 部分真实引用缺失，绝不能当作"全未引用"参与清理判定。
+  // 这三者通过 then 副作用写入下方变量（而非依赖解构位置，避免错位）。
+  let blocks: any[] = []
+  let avReferencesMap = new Map<string, BlockRef[]>()
+  let canvasInventory: Awaited<ReturnType<typeof scanCanvasAssetsInventory>> | null = null
+  const [annotationRefBlocks, reEditBlocks, originalFiles, sidecarMetadataList, agentAssets] = await Promise.all([
     sql(`SELECT block_id as id, file_path as markdown FROM file_annotation_refs LIMIT 100000`).catch(() => []),
     queryAllReEditableBlocks().catch(() => []),
     listOriginalImages().catch(() => []),
     listAllAssetMetadataFiles().catch(() => []),
-    resolveAttributeViewReferences(notebookMap).catch(() => new Map<string, BlockRef[]>()),
     scanAgentSessionAssets().catch(() => new Set<string>()),
-    scanCanvasAssetsInventory().catch(() => ({
-      canvasAssets: [],
-      globalAssetRefs: new Map(),
-      orphanAssetDirs: [],
-    })),
+    // 主 SQL（带超时守卫）：业务码非 0 或超时/异常 → degraded
+    sqlGuarded(`SELECT id, root_id, box, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`)
+      .then((rows) => {
+        if (rows === null) {
+          degraded = true
+          blocks = []
+        } else {
+          blocks = rows
+        }
+      })
+      .catch((err) => {
+        warn('[asset-catalog] 引用主 SQL 查询失败，本轮引用数据标记为降级:', err)
+        degraded = true
+        blocks = []
+      }),
+    resolveAttributeViewReferences(notebookMap)
+      .then((m) => {
+        avReferencesMap = m
+      })
+      .catch((err) => {
+        warn('[asset-catalog] 属性视图引用解析失败，本轮引用数据标记为降级:', err)
+        degraded = true
+      }),
+    scanCanvasAssetsInventory()
+      .then((inv) => {
+        canvasInventory = inv
+      })
+      .catch((err) => {
+        warn('[asset-catalog] 画布资源扫描失败，本轮引用数据标记为降级:', err)
+        degraded = true
+      }),
   ])
 
   // 合并 PDF 标注专门索引表的引用数据
-  let mergedBlocks = Array.isArray(blocks) ? [...blocks] : []
+  let mergedBlocks = (Array.isArray(blocks) ? blocks : []).map((b: any) => ({
+    ...b,
+    content: b.content ?? markdownExcerpt(b.markdown || ''),
+  }))
   if (Array.isArray(annotationRefBlocks) && annotationRefBlocks.length > 0) {
     mergedBlocks = [...mergedBlocks, ...annotationRefBlocks]
   }
@@ -451,45 +607,180 @@ export async function fetchCatalogInventory(): Promise<CatalogInventory> {
     }
   }
 
-  const inventory = resolveCatalogPipeline(
-    files,
-    mergedBlocks,
+  return {
+    blocks: mergedBlocks,
     reEditBlocks,
     originalFiles,
-    notebookMap,
     sidecarMetadataList,
     avReferencesMap,
     agentAssets,
-    [],
-    canvasInventory?.globalAssetRefs,
-    canvasInventory?.canvasAssets,
-  )
+    canvasInventory,
+    notebookMap,
+    degraded,
+  }
+}
 
-  // 批量通过 storage stat 补全缺失的 size 与 updated（丢失资源物理文件不存在，跳过 stat）
-  const assetsToStat = inventory.allAssets.filter((a) => !a.isOriginal && !a.isMissing && (a.size === 0 || !a.updated))
-  if (assetsToStat.length > 0) {
-    const limit = 50
-    for (let i = 0; i < assetsToStat.length; i += limit) {
-      const batch = assetsToStat.slice(i, i + limit)
-      await Promise.all(
-        batch.map(async (asset) => {
-          try {
-            const st = asset.isCanvasAsset && asset.canvasAssetStoragePath
-              ? await defaultStorage.stat(asset.canvasAssetStoragePath)
-              : await defaultStorage.statAsset(asset.name)
-            if (st) {
-              if (asset.size === 0) asset.size = st.size
-              if (!asset.updated) {
-                asset.updated = asset.isCanvasAsset
-                  ? resolveCanvasAssetTimestamp(asset.name, st.updated)
-                  : st.updated
-              }
-            }
-          } catch (e) {}
-        }),
-      )
+/** 引用阶段尚未开始/失败时的空引用数据（阶段一先行渲染用） */
+export function emptyReferenceData(): CatalogReferenceData {
+  return {
+    blocks: [],
+    reEditBlocks: [],
+    originalFiles: [],
+    sidecarMetadataList: [],
+    avReferencesMap: new Map(),
+    agentAssets: new Set(),
+    canvasInventory: null,
+    notebookMap: new Map(),
+    degraded: false,
+  }
+}
+
+/** 纯装配：文件清单 + 引用数据 → 完整库存模型 */
+export function resolveCatalogInventory(
+  files: CatalogFilesResult['files'],
+  refData: CatalogReferenceData,
+  onPhase?: ScanPhaseReporter,
+): CatalogInventory {
+  onPhase?.({ stage: 'resolve', label: '正在构建资源关联表...' })
+  return resolveCatalogPipeline(
+    files,
+    refData.blocks,
+    refData.reEditBlocks,
+    refData.originalFiles,
+    refData.notebookMap,
+    refData.sidecarMetadataList,
+    refData.avReferencesMap,
+    refData.agentAssets,
+    [],
+    refData.canvasInventory?.globalAssetRefs,
+    refData.canvasInventory?.canvasAssets,
+  )
+}
+
+// **************************************** 库存缓存 ****************************************
+
+/** 缓存有效期：覆盖"重开标签页/刷新插件"等短间隔重复加载；所有写入路径会显式失效 */
+export const CATALOG_CACHE_TTL_MS = 90_000
+
+let catalogCache: { at: number, inventory: CatalogInventory } | null = null
+
+export function getCachedCatalogInventory(): CatalogInventory | null {
+  if (!catalogCache) return null
+  if (Date.now() - catalogCache.at > CATALOG_CACHE_TTL_MS) {
+    catalogCache = null
+    return null
+  }
+  return catalogCache.inventory
+}
+
+export function setCachedCatalogInventory(inventory: CatalogInventory): void {
+  catalogCache = { at: Date.now(), inventory }
+}
+
+/** 任何资源写入（删除/重命名/编辑/去重合并）后必须调用，避免读到脏缓存 */
+export function invalidateCatalogCache(): void {
+  catalogCache = null
+}
+
+// **************************************** 渲染后 stat 补全 ****************************************
+
+export interface StatFillHooks {
+  onProgress?: (done: number, total: number) => void
+  /** 每累计 batchSize 次有效更新回调一次，供 UI 分批刷新列表 */
+  onBatch?: (updatedCount: number) => void
+}
+
+export interface StatFillResult {
+  /** 成功补全 size/updated 的资源数 */
+  updated: number
+  /** true 表示环境不支持远程 stat（HTTP HEAD 404），已整体跳过避免数万次无效请求 */
+  skipped: boolean
+}
+
+/**
+ * 后台并发补全缺失的 size/updated。
+ *
+ * - 桌面端：adapter.statAsync（fs.promises.stat）+ 并发池，既不冻结渲染进程又能
+ *   用并发掩盖单次 stat 的过滤驱动延迟（实测串行 98k 次约 8 分钟，并发 32 可压到分钟内）。
+ * - 浏览器端：HEAD 探测一次，若内核 /assets/* 不支持 HEAD（GET-only 路由返回 404）
+ *   则整体跳过——此前会白发 9.8 万次 404 请求，耗时一分钟且 size 依旧为 0。
+ */
+export async function fillMissingAssetStats(
+  assets: AssetInfo[],
+  hooks: StatFillHooks = {},
+  concurrency: number = 32,
+): Promise<StatFillResult> {
+  const targets = assets.filter((a) => !a.isOriginal && !a.isMissing && (a.size === 0 || !a.updated))
+  if (targets.length === 0) {
+    return { updated: 0, skipped: false }
+  }
+
+  const adapter = defaultStorage.adapter as any
+  const statOne = async (asset: AssetInfo) => {
+    const path = asset.isCanvasAsset && asset.canvasAssetStoragePath
+      ? asset.canvasAssetStoragePath
+      : `/data/assets/${asset.name}`
+    if (typeof adapter.statAsync === 'function') {
+      return adapter.statAsync(path)
+    }
+    return defaultStorage.statAsset(asset.name)
+  }
+
+  // HTTP 模式探测：HEAD 是否被内核支持
+  if (typeof adapter.statAsync !== 'function') {
+    const probe = await defaultStorage.statAsset(targets[0].name).catch(() => null)
+    if (!probe) {
+      warn(`[asset-catalog] 当前环境 stat 不可用（HEAD 未支持），跳过 ${targets.length} 个资源的 size 补全`)
+      return { updated: 0, skipped: true }
     }
   }
 
-  return inventory
+  let updated = 0
+  const BATCH_SIZE = 400
+  await mapWithConcurrency(targets, concurrency, async (asset) => {
+    try {
+      const st = await statOne(asset)
+      if (st) {
+        let changed = false
+        if (asset.size === 0 && st.size > 0) {
+          asset.size = st.size
+          changed = true
+        }
+        if (!asset.updated && st.updated) {
+          asset.updated = asset.isCanvasAsset
+            ? resolveCanvasAssetTimestamp(asset.name, st.updated)
+            : st.updated
+          changed = true
+        }
+        if (changed) {
+          updated++
+          if (updated % BATCH_SIZE === 0) {
+            hooks.onBatch?.(updated)
+          }
+        }
+      }
+    } catch (e) {}
+  }, {
+    onProgress: hooks.onProgress,
+    onError: (err) => warn('[asset-catalog] 后台补全 stat 失败:', err),
+  })
+
+  hooks.onBatch?.(updated)
+  return { updated, skipped: false }
+}
+
+/**
+ * 将上一轮已补全的 size/updated 合并进新装配的库存（阶段二替换列表时保留后台填充成果）
+ */
+export function mergeAssetStatsInto(inventory: CatalogInventory, prevAssets: Iterable<AssetInfo>): void {
+  const prevByName = new Map<string, AssetInfo>()
+  for (const a of prevAssets) {
+    if (!prevByName.has(a.name)) prevByName.set(a.name, a)
+  }
+  for (const asset of inventory.allAssets) {
+    const prev = prevByName.get(asset.name)
+    if (!prev) continue
+    if ((!asset.size || asset.size === 0) && prev.size > 0) asset.size = prev.size
+    if (!asset.updated && prev.updated) asset.updated = prev.updated
+  }
 }

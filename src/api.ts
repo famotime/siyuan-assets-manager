@@ -6,6 +6,7 @@
  */
 
 import { fetchSyncPost, IWebSocketData } from "siyuan";
+import { withTimeoutRetry, type RequestGuardOptions } from "./utils/request-guard";
 
 async function request(url: string, data: any): Promise<any> {
   const response: IWebSocketData = await fetchSyncPost(url, data);
@@ -20,6 +21,38 @@ async function request(url: string, data: any): Promise<any> {
 export async function sql(sqlStmt: string): Promise<any[]> {
   const url = "/api/query/sql";
   return request(url, { stmt: sqlStmt });
+}
+
+/**
+ * 全库引用扫描类的重 SQL 默认守卫：
+ * 大工作空间（百万级块）上 LIKE 全表扫描加传输可达数分钟，超时必须给足；
+ * 超时后不自动重试，避免在内核侧再压一条同等的重查询。
+ */
+export const HEAVY_SQL_GUARD: RequestGuardOptions = {
+  label: "sql-scan",
+  timeoutMs: 10 * 60 * 1000,
+  retries: 0,
+};
+
+/**
+ * readDir 默认守卫：内核对 readDir 按路径串行（ControlConcurrency），
+ * 排队时间可能长于单次执行时间，因此超时给足并允许一次重试。
+ */
+export const READ_DIR_GUARD: RequestGuardOptions = {
+  label: "readDir",
+  timeoutMs: 6 * 60 * 1000,
+  retries: 1,
+  retryDelayMs: 2000,
+};
+
+export async function sqlGuarded(sqlStmt: string, guard: RequestGuardOptions = HEAVY_SQL_GUARD): Promise<any[]> {
+  // code != 0 时 request 立即返回 null（非超时），直接透传给调用方按现有约定处理；
+  // 只有真正的超时/网络异常才会触发守卫重试。
+  return withTimeoutRetry(() => sql(sqlStmt), guard);
+}
+
+export async function readDirGuarded(path: string, guard: RequestGuardOptions = READ_DIR_GUARD): Promise<IResReadDir[] | null> {
+  return withTimeoutRetry(() => readDir(path), guard);
 }
 
 // **************************************** 通知推送 ****************************************

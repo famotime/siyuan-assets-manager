@@ -289,6 +289,23 @@ export function safeEncodeURIComponent(value: string): string {
   }
 }
 
+/**
+ * 从 Markdown 生成纯文本摘要（仅用于引用块的展示兜底）。
+ * 引用扫描大 SQL 已裁掉 content 列以减小传输（大库上可省近半流量），
+ * 引用详情中显示的块文本由此函数从 markdown 提取。
+ */
+export function markdownExcerpt(markdown: string, maxLength: number = 80): string {
+  if (!markdown) return ''
+  const text = markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength)}…`
+}
+
 export function replaceAssetInMarkdown(markdown: string, oldAssetName: string, newAssetName: string): string {
   let res = markdown
   // 若包含中文或特殊字符，同步支持被 URI 编码过的旧名称替换
