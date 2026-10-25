@@ -947,7 +947,12 @@ export async function fillMissingAssetStats(
   }
 
   let updated = 0
-  const BATCH_SIZE = 400
+  // UI 刷新按时间节流而非按条数：98k 资源若每 400 条刷一次列表（245 次 × 全量
+  // 重算），数万毫秒级的主线程占用会把界面彻底冻结并饿死 stat 回调本身。
+  const BATCH_MIN_INTERVAL_MS = 1200
+  const PROGRESS_MIN_INTERVAL_MS = 500
+  let lastBatchAt = 0
+  let lastProgressAt = 0
   await mapWithConcurrency(targets, concurrency, async (asset) => {
     try {
       const st = await statOne(asset)
@@ -965,18 +970,28 @@ export async function fillMissingAssetStats(
         }
         if (changed) {
           updated++
-          if (updated % BATCH_SIZE === 0) {
+          const now = Date.now()
+          if (now - lastBatchAt >= BATCH_MIN_INTERVAL_MS) {
+            lastBatchAt = now
             hooks.onBatch?.(updated)
           }
         }
       }
     } catch (e) {}
   }, {
-    onProgress: hooks.onProgress,
+    onProgress: (done, total) => {
+      const now = Date.now()
+      if (done === total || now - lastProgressAt >= PROGRESS_MIN_INTERVAL_MS) {
+        lastProgressAt = now
+        hooks.onProgress?.(done, total)
+      }
+    },
     onError: (err) => warn('[asset-catalog] 后台补全 stat 失败:', err),
   })
 
-  hooks.onBatch?.(updated)
+  // 收尾必发一次，保证最终状态（含最后一个不满节流间隔的批次）一定上屏。
+  // onProgress 不必再显式补发：池内最后一条 done===total 已透传。
+  if (updated > 0) hooks.onBatch?.(updated)
   return { updated, skipped: false }
 }
 

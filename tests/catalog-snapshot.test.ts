@@ -8,8 +8,10 @@ import {
   buildCatalogWatermark,
   formatSiYuanTimestamp,
   loadCatalogSnapshot,
+  loadCatalogStatCache,
   overlaySnapshotFileStats,
   saveCatalogSnapshot,
+  saveCatalogStatCache,
   WATERMARK_MARGIN_MS,
   type CatalogSnapshot,
 } from '../src/utils/catalog-snapshot';
@@ -131,3 +133,72 @@ describe('overlaySnapshotFileStats 体积持久化覆盖', () => {
     expect(merged[0].updated).toBe(555)
   })
 })
+
+
+describe('catalog-stat-cache 补全进度侧缓存', () => {
+  const STAT_CACHE_PATH = '/data/storage/petal/siyuan-assets-manager/cache/catalog-stat-cache.json';
+
+  beforeEach(() => {
+    setStorageAdapter(new MemoryStorageAdapter());
+  });
+
+  it('往返：只保留 size>0 条目，读取还原为 Map', async () => {
+    const ok = await saveCatalogStatCache([
+      { name: 'a.mp4', size: 1024, updated: 1770000000000 },
+      { name: 'zero.png', size: 0, updated: 0 },
+      { name: 'b.pdf', size: 55, updated: 0 },
+    ]);
+    expect(ok).toBe(true);
+    const map = await loadCatalogStatCache();
+    expect(map).not.toBeNull();
+    expect(map!.size).toBe(2);
+    expect(map!.get('a.mp4')).toEqual({ size: 1024, updated: 1770000000000 });
+    expect(map!.get('b.pdf')).toEqual({ size: 55, updated: 0 });
+    expect(map!.has('zero.png')).toBe(false);
+  });
+
+  it('缺失或损坏的侧缓存返回 null（静默降级）', async () => {
+    expect(await loadCatalogStatCache()).toBeNull();
+    const adapter = new MemoryStorageAdapter();
+    setStorageAdapter(adapter);
+    await adapter.write(STAT_CACHE_PATH, new Blob(['{oops']));
+    expect(await loadCatalogStatCache()).toBeNull();
+  });
+
+  it('loadCatalogSnapshot 会用侧缓存覆盖文件元组的 size（补全中断后断点续填）', async () => {
+    // 快照文件本身 size 全 0（模拟补全未完成即关闭界面）
+    await saveCatalogSnapshot({
+      savedAt: Date.now(),
+      watermark: '20261001120000',
+      files: [
+        { name: 'a.mp4', size: 0, updated: 0, isDir: false },
+        { name: 'b.png', size: 0, updated: 0, isDir: false },
+        { name: 'c.png', size: 40, updated: 9, isDir: false },
+      ],
+      entries: new Map([
+        ['blk-1', {
+          id: 'blk-1',
+          root_id: 'doc-1',
+          box: 'box-1',
+          content: '',
+          path: '/d.sy',
+          hpath: undefined,
+          rawAssetNames: ['a.mp4'],
+        }],
+      ]),
+    });
+    // 侧缓存已积累 a.mp4 与 c.png 的补全成果
+    await saveCatalogStatCache([
+      { name: 'a.mp4', size: 2048, updated: 1770000000000 },
+      { name: 'c.png', size: 30, updated: 8 }, // 更小的 size 不覆盖快照已有值
+      { name: 'ghost.png', size: 999, updated: 0 }, // 不在快照中，忽略
+    ]);
+
+    const snapshot = await loadCatalogSnapshot();
+    expect(snapshot).not.toBeNull();
+    const byName = new Map(snapshot!.files.map((f) => [f.name, f]));
+    expect(byName.get('a.mp4')).toMatchObject({ size: 2048, updated: 1770000000000 });
+    expect(byName.get('b.png')).toMatchObject({ size: 0, updated: 0 });
+    expect(byName.get('c.png')!.size).toBe(30); // 侧缓存较新的 stat 值覆盖旧值（新值更可信）
+  });
+});

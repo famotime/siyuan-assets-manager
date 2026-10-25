@@ -18,6 +18,18 @@
             上次刷新：{{ lastRefreshText }}
           </span>
 
+          <!-- 后台 size 补全进度：显式计数 + 进度条，替代仅凭 ≈ 前缀猜测 -->
+          <span
+            v-if="statFillActive"
+            class="stat-fill-progress"
+            title="正在后台补全文件大小：体积统计将持续逼近真实值，期间界面可正常操作"
+          >
+            <span class="stat-fill-progress-bar">
+              <span class="stat-fill-progress-fill" :style="{ width: statFillPercent + '%' }"></span>
+            </span>
+            <span>补全大小 {{ statFillProgressText }}</span>
+          </span>
+
           <div class="primary-action-icons">
             <!-- 刷新（引用分析中/降级态也可用，scanSession 保证旧结果被丢弃） -->
             <button
@@ -315,7 +327,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
+import { ref, shallowRef, triggerRef, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { openTab, Menu } from 'siyuan';
 import { openCanvasInTab } from '../utils/canvas-asset';
 import {
@@ -364,6 +376,7 @@ import {
   loadCatalogSnapshot,
   overlaySnapshotFileStats,
   saveCatalogSnapshot,
+  saveCatalogStatCache,
   type CatalogSnapshot,
 } from '../utils/catalog-snapshot';
 import { normalizeOriginalStoragePath, readOriginalImage } from '../utils/file-system';
@@ -418,7 +431,10 @@ const props = withDefaults(
   }
 );
 
-const assets = ref<AssetInfo[]>([]);
+// 9.8 万资源必须用 shallowRef：深度响应式代理会让每次列表刷新（filter/sort/统计）
+// 的属性访问都过 Proxy 拦截，单轮全量重算达数百毫秒，后台补全期间反复触发即冻结界面。
+// 元素属性的就地变更由变更方显式 triggerRef 通知；数组整体替换天然触发。
+const assets = shallowRef<AssetInfo[]>([]);
 const loading = ref(false);
 // 引用关系分析是否仍在后台进行（期间列表仅含文件信息，清理/删除类操作被禁用）
 const refsPending = ref(false);
@@ -427,6 +443,19 @@ const refsPending = ref(false);
 const refsFromSnapshot = ref(false);
 // 后台 size 补全是否仍在进行（期间体积统计为部分和，显示 ≈ 前缀提示）
 const statFillActive = ref(false);
+// 补全进度（done/total 来自 fill 的节流 onProgress），null 表示尚未开始计数
+const statFillProgress = ref<{ done: number, total: number } | null>(null);
+const statFillProgressText = computed(() => {
+  const p = statFillProgress.value;
+  if (!p || !p.total) return '准备中…';
+  const pct = Math.min(100, Math.floor((p.done / p.total) * 100));
+  return `${p.done.toLocaleString()} / ${p.total.toLocaleString()}（${pct}%）`;
+});
+const statFillPercent = computed(() => {
+  const p = statFillProgress.value;
+  if (!p || !p.total) return 0;
+  return Math.min(100, Math.floor((p.done / p.total) * 100));
+});
 // 扫描阶段文案与耗时（替代原先一句静态的"正在扫描"，让用户能判断是否卡死）
 const scanPhaseLabel = ref('');
 const scanElapsed = ref(0);
@@ -448,12 +477,16 @@ let snapshotContext: {
 
 function persistCatalogSnapshot() {
   if (!snapshotContext) return;
-  void saveCatalogSnapshot({
-    savedAt: Date.now(),
-    watermark: snapshotContext.watermark,
-    files: overlaySnapshotFileStats(snapshotContext.files, assets.value),
-    entries: snapshotContext.entries,
-  });
+  const ctx = snapshotContext;
+  // 延后一拍：完整快照序列化 20MB+ 需 1~3 秒主线程，不能与列表大刷新同帧叠加
+  window.setTimeout(() => {
+    void saveCatalogSnapshot({
+      savedAt: Date.now(),
+      watermark: ctx.watermark,
+      files: overlaySnapshotFileStats(ctx.files, assets.value),
+      entries: ctx.entries,
+    });
+  }, 0);
 }
 
 function startScanTimer() {
@@ -1002,24 +1035,45 @@ async function runBackgroundStatFill(list: AssetInfo[], session: number) {
   } finally {
     if (session === scanSession) {
       statFillActive.value = false;
-      assets.value = [...assets.value];
+      statFillProgress.value = null;
+      triggerRef(assets);
     }
   }
+}
+
+/** stat 侧缓存最小落盘间隔：补全中断时保住进度，又不让序列化本身成为卡顿源 */
+const STAT_CACHE_SAVE_INTERVAL_MS = 60_000;
+let lastStatCacheSaveAt = 0;
+
+function maybeSaveStatCache(force = false) {
+  const now = Date.now();
+  if (!force && now - lastStatCacheSaveAt < STAT_CACHE_SAVE_INTERVAL_MS) return;
+  lastStatCacheSaveAt = now;
+  const snapshot = assets.value;
+  window.setTimeout(() => {
+    void saveCatalogStatCache(snapshot);
+  }, 0);
 }
 
 async function runBackgroundStatFillInner(list: AssetInfo[], session: number) {
   const result = await fillMissingAssetStats(list, {
     onBatch: () => {
-      // 深层对象属性在原对象上补全后，用新数组身份分批触发响应式重算
+      // 元素属性已就地补全，用 triggerRef 分批触发重算（shallowRef 下无需复制数组）
       if (session === scanSession) {
-        assets.value = [...assets.value];
+        triggerRef(assets);
       }
+    },
+    onProgress: (done, total) => {
+      if (session !== scanSession) return;
+      statFillProgress.value = { done, total };
+      maybeSaveStatCache();
     },
   });
   if (session === scanSession) {
-    assets.value = [...assets.value];
+    triggerRef(assets);
     // 补全出的 size 持久化进快照，下次打开立即呈现接近真实的体积统计
     persistCatalogSnapshot();
+    maybeSaveStatCache(true);
   }
   if (result.skipped) {
     // 浏览器模式下内核 /assets/* 不支持 HEAD，size 保持未知；不视为错误
@@ -1769,6 +1823,34 @@ html[data-theme-mode="dark"] {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
+}
+
+/* 后台 size 补全进度指示（计数 + 迷你进度条） */
+.stat-fill-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--b3-theme-primary, #3575f0);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-fill-progress-bar {
+  width: 72px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--b3-border-color, rgba(128, 128, 128, 0.25));
+  overflow: hidden;
+  flex: none;
+}
+
+.stat-fill-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--b3-theme-primary, #3575f0);
+  transition: width 0.4s ease;
 }
 
 /* 复合搜索胶囊舱 */

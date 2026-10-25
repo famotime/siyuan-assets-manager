@@ -12,6 +12,15 @@ import { log, warn } from './logger'
 /** 快照落盘位置（工作空间内，随工作空间切换自动隔离） */
 export const CATALOG_SNAPSHOT_PATH = '/data/storage/petal/siyuan-assets-manager/cache/catalog-snapshot.json'
 
+/**
+ * stat 补全进度侧缓存：只存 [name, size, updated] 三元组（约为完整快照的 1/5 体积），
+ * 补全进行期间低频（约 60 秒）增量落盘。完整快照只在补全**完成**时写入——若用户在
+ * 完成 前关闭界面，侧缓存保证下次打开时已补出的 size 不清零，补全从断点继续。
+ * 已知取舍：同名文件被更小的文件替换时旧 size 会暂被沿用（仅影响显示，不影响清理正确性），
+ * 直到下一次全量扫描重新校正。
+ */
+export const CATALOG_STAT_CACHE_PATH = '/data/storage/petal/siyuan-assets-manager/cache/catalog-stat-cache.json'
+
 const SNAPSHOT_SCHEMA_VERSION = 1
 
 /**
@@ -150,6 +159,7 @@ export function overlaySnapshotFileStats(
 /**
  * 读取快照；缺失、损坏或版本不符一律返回 null（调用方回退全量扫描）。
  * 解析在主线程 JSON.parse 内完成，20MB 量级约 0.5~1.5 秒，仅在冷启动读一次。
+ * 读取成功后用 stat 侧缓存覆盖文件元组的 size/updated（上次补全的断点成果）。
  */
 export async function loadCatalogSnapshot(): Promise<CatalogSnapshot | null> {
   try {
@@ -161,6 +171,13 @@ export async function loadCatalogSnapshot(): Promise<CatalogSnapshot | null> {
     if (snapshot && snapshot.entries.size === 0 && snapshot.files.length === 0) {
       // 空快照没有秒开价值，直接回退全量
       return null
+    }
+    if (snapshot) {
+      const statCache = await loadCatalogStatCache()
+      if (statCache && statCache.size > 0) {
+        const stats = Array.from(statCache, ([name, s]) => ({ name, size: s.size, updated: s.updated }))
+        snapshot.files = overlaySnapshotFileStats(snapshot.files, stats)
+      }
     }
     return snapshot
   } catch (err) {
@@ -190,5 +207,51 @@ export async function removeCatalogSnapshot(): Promise<void> {
     await defaultStorage.delete(CATALOG_SNAPSHOT_PATH).catch(() => {})
   } catch (e) {
     log('[catalog-snapshot] 删除快照失败（可忽略）')
+  }
+}
+
+// **************************************** stat 补全侧缓存 ****************************************
+
+interface SerializedStatCacheV1 {
+  v: 1
+  /** [name, size, updated] 三元组，只保留 size > 0 的条目 */
+  stats: Array<[string, number, number]>
+}
+
+/** 读取 stat 侧缓存；缺失/损坏返回 null（无侧缓存是常态，静默降级） */
+export async function loadCatalogStatCache(): Promise<Map<string, { size: number, updated: number }> | null> {
+  try {
+    const blob = await defaultStorage.read(CATALOG_STAT_CACHE_PATH).catch(() => null)
+    if (!blob) return null
+    const text = await blobToText(blob)
+    if (!text) return null
+    const data = JSON.parse(text)
+    if (!data || data.v !== 1 || !Array.isArray(data.stats)) return null
+    const map = new Map<string, { size: number, updated: number }>()
+    for (const tuple of data.stats as Array<[string, number, number]>) {
+      if (!Array.isArray(tuple) || !tuple[0] || !(Number(tuple[1]) > 0)) continue
+      map.set(String(tuple[0]), { size: Number(tuple[1]), updated: Number(tuple[2]) || 0 })
+    }
+    return map.size > 0 ? map : null
+  } catch {
+    return null
+  }
+}
+
+/** 写入 stat 侧缓存（补全进行期间每约 60 秒调用一次；写失败静默，下次再试） */
+export async function saveCatalogStatCache(
+  allAssets: Array<{ name: string, size: number, updated: number }>,
+): Promise<boolean> {
+  try {
+    const stats: Array<[string, number, number]> = []
+    for (const a of allAssets) {
+      if (a && a.name && (a.size || 0) > 0) stats.push([a.name, a.size, a.updated || 0])
+    }
+    const json = JSON.stringify({ v: 1, stats })
+    await defaultStorage.write(CATALOG_STAT_CACHE_PATH, new Blob([json], { type: 'application/json' }))
+    return true
+  } catch (err) {
+    warn('[catalog-snapshot] stat 侧缓存写入失败（不影响主流程）:', err)
+    return false
   }
 }

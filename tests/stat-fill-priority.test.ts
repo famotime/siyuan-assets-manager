@@ -69,3 +69,62 @@ describe('fillMissingAssetStats 体积大头优先补全', () => {
     expect(statOrder).toEqual(['todo.mp4']);
   });
 });
+
+
+describe('fillMissingAssetStats UI 回调节流', () => {
+  function makeFastAdapter(statOrder: string[]): IStorageAdapter {
+    return {
+      stat: vi.fn(async () => null),
+      read: vi.fn(async () => null),
+      write: vi.fn(async () => {}),
+      delete: vi.fn(async () => true),
+      list: vi.fn(async () => []),
+      statAsync: vi.fn(async (path: string) => {
+        const name = path.split('/').pop() || path;
+        statOrder.push(name);
+        return { size: 1000, updated: 1770000000000, isDir: false };
+      }),
+    };
+  }
+
+  it('onBatch 按时间节流：数千条目快速补全时只有首发 + 收尾两次，而非每 400 条一次', async () => {
+    const statOrder: string[] = [];
+    setStorageAdapter(makeFastAdapter(statOrder));
+    const assets = Array.from({ length: 2000 }, (_, i) => makeAsset(`img-${i}.png`));
+    const onBatch = vi.fn();
+    const startedAt = Date.now();
+    await fillMissingAssetStats(assets, { onBatch }, 32);
+    const elapsed = Date.now() - startedAt;
+    expect(statOrder.length).toBe(2000);
+    // 上界按真实耗时自适应（首发 + 收尾 + 每满 1.2s 至多一次中间批次）：
+    // 2000 条瞬时补全绝不该出现"每 400 条一次"的 5 次刷新
+    const maxCalls = 2 + Math.floor(elapsed / 1200);
+    expect(onBatch.mock.calls.length).toBeLessThanOrEqual(maxCalls);
+    expect(onBatch).toHaveBeenLastCalledWith(2000);
+  });
+
+  it('onProgress 首发与收尾必达，中间按 500ms 节流；收尾回调 done===total', async () => {
+    const statOrder: string[] = [];
+    setStorageAdapter(makeFastAdapter(statOrder));
+    const assets = Array.from({ length: 500 }, (_, i) => makeAsset(`img-${i}.png`));
+    const onProgress = vi.fn();
+    const startedAt = Date.now();
+    await fillMissingAssetStats(assets, { onProgress }, 32);
+    const elapsed = Date.now() - startedAt;
+    expect(onProgress).toHaveBeenLastCalledWith(500, 500);
+    // 上界按真实耗时自适应（首条 + 收尾 + 每满 500ms 至多一次中间回调）
+    const maxCalls = 2 + Math.floor(elapsed / 500);
+    expect(onProgress.mock.calls.length).toBeLessThanOrEqual(maxCalls);
+  });
+
+  it('无补全目标时不触发任何回调', async () => {
+    const statOrder: string[] = [];
+    setStorageAdapter(makeFastAdapter(statOrder));
+    const onBatch = vi.fn();
+    const onProgress = vi.fn();
+    const result = await fillMissingAssetStats([makeAsset('full.png', { size: 9, updated: 1 })], { onBatch, onProgress }, 32);
+    expect(result.updated).toBe(0);
+    expect(onBatch).not.toHaveBeenCalled();
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+});

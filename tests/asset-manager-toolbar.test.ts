@@ -8,6 +8,11 @@ const hoisted = vi.hoisted(() => ({
   pending: [] as Array<() => void>,
   /** 置为 true 时下一次查询以失败告终，用于验证失败的刷新不改写刷新时间 */
   failNext: false,
+  /** 挂起的后台 size 补全，测试可手动推进 onProgress / 完成 */
+  pendingFill: [] as Array<{
+    hooks: { onProgress?: (done: number, total: number) => void; onBatch?: (n: number) => void },
+    resolve: (v: { updated: number; skipped: boolean }) => void,
+  }>,
 }));
 
 vi.mock('../src/utils/siyuan-db', () => ({
@@ -37,6 +42,8 @@ vi.mock('../src/utils/plugin-context', () => ({
 vi.mock('../src/utils/catalog-snapshot', () => ({
   loadCatalogSnapshot: vi.fn(async () => null),
   saveCatalogSnapshot: vi.fn(async () => true),
+  saveCatalogStatCache: vi.fn(async () => true),
+  overlaySnapshotFileStats: vi.fn((_files: unknown, assets: unknown) => assets),
   buildCatalogWatermark: vi.fn((t: number) => String(t)),
   removeCatalogSnapshot: vi.fn(async () => {}),
   formatSiYuanTimestamp: vi.fn((t: number) => String(t)),
@@ -55,7 +62,7 @@ vi.mock('../src/utils/asset-catalog', () => ({
             hoisted.failNext = false;
             reject(new Error('sqlite unavailable'));
           } else {
-            resolve({ assets: hoisted.assets });
+            resolve({ assets: hoisted.assets, entries: [], degraded: false });
           }
         });
       })
@@ -72,7 +79,15 @@ vi.mock('../src/utils/asset-catalog', () => ({
   setCachedCatalogInventory: vi.fn(),
   invalidateCatalogCache: vi.fn(),
   mergeAssetStatsInto: vi.fn(),
-  fillMissingAssetStats: vi.fn(async () => ({ updated: 0, skipped: false })),
+  fillMissingAssetStats: vi.fn(
+    (
+      _assets: unknown,
+      hooks: { onProgress?: (done: number, total: number) => void; onBatch?: (n: number) => void } = {}
+    ) =>
+      new Promise((resolve) => {
+        hoisted.pendingFill.push({ hooks, resolve });
+      })
+  ),
 }));
 
 
@@ -124,6 +139,7 @@ describe('AssetsManager 顶部操作区', () => {
   beforeEach(() => {
     hoisted.assets = FIXTURE.map((a) => ({ ...a }));
     hoisted.pending = [];
+    hoisted.pendingFill = [];
     mountContainer = document.createElement('div');
     document.body.appendChild(mountContainer);
   });
@@ -277,4 +293,32 @@ describe('AssetsManager 顶部操作区', () => {
     await flushLoad();
     expect(mountContainer.querySelectorAll('.asset-item').length).toBe(cardsBefore);
   });
+  it('size 补全进行中显示显式进度（计数与百分比），完成后消失', async () => {
+    await mountManager();
+    await flushLoad();
+    await settle();
+
+    // 加载完成后进入后台补全：指示器已出现（尚无计数时显示准备中）
+    let indicator = mountContainer.querySelector('.stat-fill-progress');
+    expect(indicator).not.toBeNull();
+    expect(indicator!.textContent).toContain('补全大小');
+
+    // 推进进度到 40%
+    const fill = hoisted.pendingFill[hoisted.pendingFill.length - 1];
+    expect(fill).toBeDefined();
+    fill.hooks.onProgress?.(400, 1000);
+    await settle();
+    indicator = mountContainer.querySelector('.stat-fill-progress');
+    expect(indicator).not.toBeNull();
+    expect(indicator!.textContent).toContain('400 / 1,000');
+    expect(indicator!.textContent).toContain('40%');
+    expect((indicator as HTMLElement).querySelector('.stat-fill-progress-fill')!.getAttribute('style')).toContain('40%');
+
+    // 补全完成后指示器与进度一并消失
+    fill.resolve({ updated: 1000, skipped: false });
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mountContainer.querySelector('.stat-fill-progress')).toBeNull();
+  });
+
 });
