@@ -1,8 +1,9 @@
-import { updateBlock, deleteBlock, sql, getBlockAttrs, setBlockAttrs, flushTransaction, getBlockKramdown } from "../api";
+import { updateBlock, deleteBlock, sql, sqlGuarded, getBlockAttrs, setBlockAttrs, flushTransaction, getBlockKramdown } from "../api";
 import { BlockRef } from "./siyuan-db";
 import {
   removeAssetFromMarkdown,
   replaceAssetInMarkdown,
+  extractAssetNamesFromMarkdown,
 } from "./asset-markdown";
 import type { IAssetReEditMetadata } from "../types/reedit";
 import { serializeReEditMetadata, deserializeReEditMetadata, decodeHtmlEntities } from "./reedit-data";
@@ -475,4 +476,84 @@ export async function queryAllReEditableBlocks(): Promise<Array<{ blockId: strin
     error("[siyuan-block] 查询可二次编辑块失败:", err);
     return [];
   }
+}
+
+/** 批量核查的单查询候选名数量（OR 条件数 = 名数 × 2~4，控制语句体积） */
+export const BATCH_VERIFY_CHUNK = 25
+
+/**
+ * 批量实时核查一组资源名当前的文档引用块数（清理前的最后防线）。
+ *
+ * 用一个合并的 OR-LIKE 查询同时核查多个名字——每个名字单查都是一次内核全表
+ * 扫描，N 个候选逐个核查不可接受；合并后每批只付一次扫描成本。
+ * LIKE 的子串误匹配由结果侧的精确资源名提取过滤。
+ *
+ * 任一批查询失败直接抛出：清理前置核查不容许静默放行。
+ */
+export async function batchQueryAssetsReferenceCounts(names: string[]): Promise<Map<string, number>> {
+  const targets = Array.from(new Set((names || []).filter(Boolean)))
+  const counts = new Map<string, number>(targets.map((n) => [n, 0]))
+  if (targets.length === 0) return counts
+
+  // 规范化映射：原始名与 URI 解码名都指向计数的原始名
+  const canonicalToTarget = new Map<string, string>()
+  for (const n of targets) {
+    canonicalToTarget.set(n, n)
+    try {
+      const decoded = decodeURIComponent(n)
+      if (decoded && decoded !== n && !canonicalToTarget.has(decoded)) {
+        canonicalToTarget.set(decoded, n)
+      }
+    } catch {}
+  }
+
+  const escapeSqlLiteral = (v: string) => v.replace(/'/g, "''")
+  const conditionsFor = (name: string): string[] => {
+    const conds = [
+      `markdown LIKE '%assets/${escapeSqlLiteral(name)}%'`,
+      `ial LIKE '%assets/${escapeSqlLiteral(name)}%'`,
+    ]
+    let encoded = ""
+    try {
+      encoded = encodeURIComponent(name)
+    } catch {}
+    if (encoded && encoded !== name) {
+      conds.push(
+        `markdown LIKE '%assets/${escapeSqlLiteral(encoded)}%'`,
+        `ial LIKE '%assets/${escapeSqlLiteral(encoded)}%'`,
+      )
+    }
+    return conds
+  }
+
+  for (let i = 0; i < targets.length; i += BATCH_VERIFY_CHUNK) {
+    const chunk = targets.slice(i, i + BATCH_VERIFY_CHUNK)
+    const where = chunk.flatMap(conditionsFor).join(" OR ")
+    const rows = await sqlGuarded(
+      `SELECT id, markdown, ial FROM blocks WHERE ${where} LIMIT 100000`,
+    )
+    if (!Array.isArray(rows)) continue
+    for (const row of rows) {
+      const rawNames = [
+        ...extractAssetNamesFromMarkdown(row.markdown || ""),
+        ...(row.ial ? extractAssetNamesFromMarkdown(row.ial) : []),
+      ]
+      const seen = new Set<string>()
+      for (const raw of rawNames) {
+        let canonical = raw
+        try {
+          const decoded = decodeURIComponent(raw)
+          if (decoded) canonical = decoded
+        } catch {}
+        if (seen.has(canonical)) continue
+        seen.add(canonical)
+        const target = canonicalToTarget.get(canonical)
+        if (target) {
+          counts.set(target, (counts.get(target) || 0) + 1)
+        }
+      }
+    }
+  }
+
+  return counts
 }

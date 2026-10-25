@@ -9,7 +9,7 @@
           <div class="header-summary-badge" v-if="assets.length > 0">
             <span class="summary-count">{{ sortedAssets.length }} / {{ assets.length }} 项</span>
             <span class="summary-dot">·</span>
-            <span class="summary-size">{{ totalAssetsSizeText }}</span>
+            <span class="summary-size">{{ statFillActive ? '≈ ' : '' }}{{ totalAssetsSizeText }}</span>
           </div>
         </div>
 
@@ -184,7 +184,7 @@
         </span>
         <span class="pill-label">{{ card.label }}</span>
         <span class="pill-badge">{{ categoryStats[card.key]?.count || 0 }}</span>
-        <span class="pill-size">{{ categoryStats[card.key]?.sizeText || '0 B' }}</span>
+        <span class="pill-size">{{ statFillActive ? '≈' : '' }}{{ categoryStats[card.key]?.sizeText || '0 B' }}</span>
       </button>
     </div>
 
@@ -205,7 +205,7 @@
         :sortField="sortField"
         :sortOrder="sortOrder"
         :selectedNames="selectedNames"
-        :refsPending="refsPending"
+        :refsPending="refsPending && !refsFromSnapshot"
         @update:selectedNames="handleSelectionChange"
         @sort="handleSortChange"
         @open-docs="handleOpenDocs"
@@ -224,7 +224,7 @@
         :sortField="sortField"
         :sortOrder="sortOrder"
         :selectedNames="selectedNames"
-        :refsPending="refsPending"
+        :refsPending="refsPending && !refsFromSnapshot"
         :collapsedDocIds="collapsedDocIds"
         :searchQuery="searchQuery"
         @toggle-collapse="toggleDocGroup"
@@ -341,19 +341,31 @@ import {
   Search,
   X,
 } from 'lucide-vue-next';
-import { countReferencedDocs, type AssetInfo } from '../utils/siyuan-db';
+import { countReferencedDocs, getNotebookMap, type AssetInfo } from '../utils/siyuan-db';
 import {
+  applyCatalogBlockDelta,
   emptyReferenceData,
+  fetchCatalogBlockDelta,
   fetchCatalogFiles,
   fetchCatalogReferenceData,
+  fetchCatalogSupportData,
   fillMissingAssetStats,
   getCachedCatalogInventory,
   invalidateCatalogCache,
   mergeAssetStatsInto,
   resolveCatalogInventory,
+  resolveCatalogInventoryFromSources,
+  resolveCatalogPipelineFromEntries,
   setCachedCatalogInventory,
   type CatalogInventory,
 } from '../utils/asset-catalog';
+import {
+  buildCatalogWatermark,
+  loadCatalogSnapshot,
+  overlaySnapshotFileStats,
+  saveCatalogSnapshot,
+  type CatalogSnapshot,
+} from '../utils/catalog-snapshot';
 import { normalizeOriginalStoragePath, readOriginalImage } from '../utils/file-system';
 import { defaultStorage } from '../utils/storage';
 import {
@@ -410,6 +422,11 @@ const assets = ref<AssetInfo[]>([]);
 const loading = ref(false);
 // 引用关系分析是否仍在后台进行（期间列表仅含文件信息，清理/删除类操作被禁用）
 const refsPending = ref(false);
+// 列表当前展示的引用关系来自持久化快照（秒开渲染）：
+// 引用数可照常显示，但数据存在过期窗口，危险操作仍由 refsPending 禁用
+const refsFromSnapshot = ref(false);
+// 后台 size 补全是否仍在进行（期间体积统计为部分和，显示 ≈ 前缀提示）
+const statFillActive = ref(false);
 // 扫描阶段文案与耗时（替代原先一句静态的"正在扫描"，让用户能判断是否卡死）
 const scanPhaseLabel = ref('');
 const scanElapsed = ref(0);
@@ -421,6 +438,23 @@ const scanElapsedText = computed(() => {
 });
 let scanTimer: number | null = null;
 let scanSession = 0;
+// 最近一次成功扫描的快照上下文：stat 补全完成后用它重写快照，
+// 把补全出的 size 持久化（否则每次重开都要从零重填，体积统计长期偏小）
+let snapshotContext: {
+  watermark: string,
+  files: Array<{ name: string, size: number, updated: number, isDir: boolean }>,
+  entries: Map<string, any>,
+} | null = null;
+
+function persistCatalogSnapshot() {
+  if (!snapshotContext) return;
+  void saveCatalogSnapshot({
+    savedAt: Date.now(),
+    watermark: snapshotContext.watermark,
+    files: overlaySnapshotFileStats(snapshotContext.files, assets.value),
+    entries: snapshotContext.entries,
+  });
+}
 
 function startScanTimer() {
   stopScanTimer();
@@ -488,9 +522,9 @@ function setViewMode(mode: 'flat' | 'doc') {
 }
 
 // 引用关系未就绪时文档归类视图没有分组依据（一切引用都是 0），临时回落平铺视图；
-// 引用阶段完成后自动恢复用户选择的视图。
+// 快照渲染虽有过期窗口但引用数据完整，允许文档归类视图。
 const effectiveViewMode = computed<'flat' | 'doc'>(() =>
-  refsPending.value ? 'flat' : viewMode.value
+  refsPending.value && !refsFromSnapshot.value ? 'flat' : viewMode.value
 );
 
 // 排序状态
@@ -746,13 +780,127 @@ async function loadData(options: { resort?: boolean, force?: boolean } = {}) {
   const cached = options.force ? null : getCachedCatalogInventory();
   if (cached) {
     refsPending.value = false;
+    refsFromSnapshot.value = false;
     applyInventory(cached, options);
     lastRefreshedAt.value = Date.now();
     return;
   }
 
+  // 非强制刷新且存在可用快照：先秒开渲染快照，再后台增量校验
+  if (!options.force) {
+    const snapshot = await loadCatalogSnapshot();
+    if (session !== scanSession) return;
+    if (snapshot && snapshot.watermark && snapshot.entries.size > 0) {
+      const handled = await runSnapshotIncrementalLoad(session, snapshot, options);
+      if (handled || session !== scanSession) return;
+      // 快速渲染本身失败（快照数据异常）：回退全量扫描
+    }
+  }
+
+  await runFullScan(session, options);
+}
+
+/**
+ * 快照路径：立即用上次扫描结果渲染完整列表（含引用关系），
+ * 后台并行做增量校验（文件清单 + 支持源 + 块引用三路增量）。
+ * 返回 false 表示快速渲染阶段失败，调用方应回退全量扫描。
+ */
+async function runSnapshotIncrementalLoad(
+  session: number,
+  snapshot: CatalogSnapshot,
+  options: { resort?: boolean },
+): Promise<boolean> {
+  try {
+    // 秒开渲染：快照文件 + 快照引用条目（笔记本名一次轻量调用，保证易读路径完整）
+    const notebookMap = await getNotebookMap().catch(() => new Map<string, string>());
+    const quickInventory = resolveCatalogPipelineFromEntries(
+      snapshot.files,
+      Array.from(snapshot.entries.values()),
+      [],
+      [],
+      notebookMap,
+    );
+    if (session !== scanSession) return true;
+    refsPending.value = true;
+    refsFromSnapshot.value = true;
+    applyInventory(quickInventory, options);
+    lastRefreshedAt.value = Date.now();
+    loading.value = false;
+    startScanTimer();
+    scanPhaseLabel.value = `数据来自上次扫描（${formatAssetTime(snapshot.savedAt)}），正在增量校验引用与文件变动...`;
+  } catch (err) {
+    error('Failed to render catalog snapshot', err);
+    return false;
+  }
+
+  // 增量校验（与渲染后并行）：水位线取样必须在发起任何查询之前
+  const verifyStartedAt = Date.now();
+  try {
+    const [filesRes, support, delta] = await Promise.all([
+      fetchCatalogFiles(),
+      fetchCatalogSupportData(),
+      fetchCatalogBlockDelta(snapshot.entries, snapshot.watermark as string),
+    ]);
+    if (session !== scanSession) return true;
+
+    if (support.degraded) {
+      scanPhaseLabel.value = '引用数据不完整（属性视图或画布扫描失败）。为安全起见清理 / 删除保持禁用，请点击刷新重试。';
+      return true;
+    }
+
+    if (!filesRes.dirAvailable) {
+      assets.value = [];
+      selectedNames.value = new Set<string>();
+      refsPending.value = false;
+      refsFromSnapshot.value = false;
+      lastRefreshedAt.value = Date.now();
+      return true;
+    }
+
+    scanPhaseLabel.value = '正在合并增量变更并构建资源关联表...';
+    applyCatalogBlockDelta(snapshot.entries, delta);
+    const inventory = resolveCatalogInventoryFromSources(
+      filesRes.files,
+      Array.from(snapshot.entries.values()),
+      support,
+    );
+    mergeAssetStatsInto(inventory, assets.value);
+    refsPending.value = false;
+    refsFromSnapshot.value = false;
+    applyInventory(inventory, options);
+    lastRefreshedAt.value = Date.now();
+    setCachedCatalogInventory(inventory);
+
+    // 校验通过后推进水位线并重写快照（后台执行，不阻塞交互）；
+    // files 携带上一轮持久化的 size（overlay 保底），本次补全完成后再次重写
+    snapshotContext = {
+      watermark: buildCatalogWatermark(verifyStartedAt),
+      files: filesRes.files,
+      entries: snapshot.entries,
+    };
+    persistCatalogSnapshot();
+
+    runBackgroundStatFill(inventory.allAssets, session);
+  } catch (err) {
+    if (session !== scanSession) return true;
+    // 增量校验失败：保留快照渲染（引用可能过期），维持危险操作禁用
+    error('Incremental verification failed', err);
+    scanPhaseLabel.value = '增量校验失败（查询超时或内核错误）。为安全起见清理 / 删除保持禁用，请点击刷新重试。';
+    return true;
+  } finally {
+    if (session === scanSession) {
+      stopScanTimer();
+    }
+  }
+  return true;
+}
+
+/** 全量两阶段扫描（无快照、强制刷新或快照渲染失败时） */
+async function runFullScan(session: number, options: { resort?: boolean }) {
+  const scanStartedAt = Date.now();
   loading.value = true;
   refsPending.value = false;
+  refsFromSnapshot.value = false;
   startScanTimer();
   try {
     // 阶段二数据先行启动（与阶段一真正并行）：内核 SQL 在目录枚举的同时即开始执行
@@ -811,6 +959,15 @@ async function loadData(options: { resort?: boolean, force?: boolean } = {}) {
     lastRefreshedAt.value = Date.now();
     setCachedCatalogInventory(inventory);
 
+    // 全量扫描成功后写快照：水位线取扫描起始时刻（早于任何查询，安全）；
+    // size 用当前已知值覆盖（此刻大多为 0，后台补全完成后会再重写一次）
+    snapshotContext = {
+      watermark: buildCatalogWatermark(scanStartedAt),
+      files: filesRes.files,
+      entries: new Map(refData.entries.map((e) => [e.id, e])),
+    };
+    persistCatalogSnapshot();
+
     // 后台并发补全 size/updated（分批触发列表刷新，不阻塞交互）
     runBackgroundStatFill(inventory.allAssets, session);
   } catch (err) {
@@ -839,6 +996,18 @@ function applyInventory(inventory: CatalogInventory, options: { resort?: boolean
 }
 
 async function runBackgroundStatFill(list: AssetInfo[], session: number) {
+  statFillActive.value = true;
+  try {
+    await runBackgroundStatFillInner(list, session);
+  } finally {
+    if (session === scanSession) {
+      statFillActive.value = false;
+      assets.value = [...assets.value];
+    }
+  }
+}
+
+async function runBackgroundStatFillInner(list: AssetInfo[], session: number) {
   const result = await fillMissingAssetStats(list, {
     onBatch: () => {
       // 深层对象属性在原对象上补全后，用新数组身份分批触发响应式重算
@@ -849,6 +1018,8 @@ async function runBackgroundStatFill(list: AssetInfo[], session: number) {
   });
   if (session === scanSession) {
     assets.value = [...assets.value];
+    // 补全出的 size 持久化进快照，下次打开立即呈现接近真实的体积统计
+    persistCatalogSnapshot();
   }
   if (result.skipped) {
     // 浏览器模式下内核 /assets/* 不支持 HEAD，size 保持未知；不视为错误

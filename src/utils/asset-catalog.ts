@@ -25,18 +25,21 @@ import {
 import { queryAllReEditableBlocks } from './siyuan-block'
 import {
   attachAttributeViewReferences,
-  attachBlockReferences,
+  attachPreExtractedReferences,
   attachReEditMetadata,
   createAssetInfoMap,
   getNotebookMap,
   SYSTEM_PROTECTED_ASSETS,
+  toPreExtractedEntry,
   updateAssetDocCounts,
+  type PreExtractedBlockEntry,
 } from './siyuan-db'
 import {
   blobToText,
   defaultStorage,
 } from './storage'
 import { mapWithConcurrency } from './concurrency'
+import { isImageAsset } from './asset-list'
 
 export { SYSTEM_PROTECTED_ASSETS }
 
@@ -180,10 +183,43 @@ export function resolveCatalogPipeline(
   canvasGlobalRefs: Map<string, BlockRef[]> = new Map(),
   canvasAssets: AssetInfo[] = [],
 ): CatalogInventory {
+  return resolveCatalogPipelineFromEntries(
+    files,
+    (blocks || []).map(toPreExtractedEntry),
+    reEditBlocks,
+    originalFiles,
+    notebookMap,
+    sidecarMetadataList,
+    avReferencesMap,
+    agentAssets,
+    avRawContents,
+    canvasGlobalRefs,
+    canvasAssets,
+  )
+}
+
+/**
+ * 与 resolveCatalogPipeline 完全同语义的条目化入口：
+ * 直接消费预提取的块条目（快照载入 / 增量校验管线使用），
+ * 免去对全量 markdown 的重复正则提取。
+ */
+export function resolveCatalogPipelineFromEntries(
+  files: any[],
+  entries: PreExtractedBlockEntry[],
+  reEditBlocks: Array<{ blockId: string, rootId: string, metadata: IAssetReEditMetadata }>,
+  originalFiles: Array<{ name: string, path: string, size: number, updated: number }>,
+  notebookMap: Map<string, string>,
+  sidecarMetadataList: Array<{ assetName: string, metadata: IAssetReEditMetadata }> = [],
+  avReferencesMap: Map<string, BlockRef[]> = new Map(),
+  agentAssets: Set<string> = new Set(),
+  avRawContents: string[] = [],
+  canvasGlobalRefs: Map<string, BlockRef[]> = new Map(),
+  canvasAssets: AssetInfo[] = [],
+): CatalogInventory {
   // 1. 构建常规资产 Map 并挂载文档块引用
   const assetsMap = createAssetInfoMap(files)
-  if (blocks && blocks.length > 0) {
-    attachBlockReferences(assetsMap, blocks, notebookMap)
+  if (entries && entries.length > 0) {
+    attachPreExtractedReferences(assetsMap, entries, notebookMap)
   }
 
   // 1.0 挂载数据库属性视图引用 (Attribute View)
@@ -504,8 +540,8 @@ export async function fetchCatalogFiles(onPhase?: ScanPhaseReporter): Promise<Ca
 }
 
 export interface CatalogReferenceData {
-  /** 主引用块 + PDF 标注引用块（content 已由 markdown 摘要兜底） */
-  blocks: any[]
+  /** 预提取的主引用块 + PDF 标注引用条目（content 已由 markdown 摘要兜底） */
+  entries: PreExtractedBlockEntry[]
   reEditBlocks: Array<{ blockId: string, rootId: string, metadata: IAssetReEditMetadata }>
   originalFiles: Array<{ name: string, path: string, size: number, updated: number }>
   sidecarMetadataList: Array<{ assetName: string, metadata: IAssetReEditMetadata }>
@@ -521,44 +557,56 @@ export interface CatalogReferenceData {
   degraded: boolean
 }
 
-/**
- * 阶段二：采集全部引用关系数据（SQL 块引用、属性视图、画布、AI 会话、二次编辑元数据、底图）。
- * 与阶段一并行启动时可让内核 SQL 在首屏渲染期间后台执行。
- */
-export async function fetchCatalogReferenceData(onPhase?: ScanPhaseReporter): Promise<CatalogReferenceData> {
-  onPhase?.({ stage: 'refs', label: '正在查询文档引用关系（大工作空间约需数分钟）...' })
+/** 除"主块引用 SQL"外的全部引用支持源（均为轻量采集，增量与全量共用） */
+export interface CatalogSupportData {
+  reEditBlocks: Array<{ blockId: string, rootId: string, metadata: IAssetReEditMetadata }>
+  originalFiles: Array<{ name: string, path: string, size: number, updated: number }>
+  sidecarMetadataList: Array<{ assetName: string, metadata: IAssetReEditMetadata }>
+  avReferencesMap: Map<string, BlockRef[]>
+  agentAssets: Set<string>
+  canvasInventory: Awaited<ReturnType<typeof scanCanvasAssetsInventory>> | null
+  notebookMap: Map<string, string>
+  /** 属性视图 / 画布两个关键支持源失败时为 true */
+  degraded: boolean
+}
 
-  const notebookMap = await getNotebookMap().catch(() => new Map<string, string>())
-  // 说明：主查询刻意不取 content 列 —— content 与 markdown 高度重复，裁掉后大库上
-  // 传输体积近乎减半（实测 79MB → 约 50MB），展示文本由 markdownExcerpt 兜底。
+/** PDF 标注索引表行 → 预提取条目（file_path 即 markdown 语义） */
+function annotationRowsToEntries(rows: any[]): PreExtractedBlockEntry[] {
+  return (Array.isArray(rows) ? rows : []).map((r: any) =>
+    toPreExtractedEntry({ id: r.id, markdown: r.markdown || '' }),
+  )
+}
+
+/** SQL 原始行 → 预提取条目（content 列已裁剪，展示文本由 markdown 摘要兜底） */
+function blockRowsToEntries(rows: any[]): PreExtractedBlockEntry[] {
+  return (Array.isArray(rows) ? rows : []).map((b: any) =>
+    toPreExtractedEntry({
+      ...b,
+      content: b.content ?? markdownExcerpt(b.markdown || ''),
+    }),
+  )
+}
+
+/**
+ * 采集支持源数据（属性视图、画布、AI 会话、二次编辑元数据、底图、PDF 标注引用）。
+ * 均为轻量操作，全量扫描与增量校验共用；属性视图 / 画布任一失败置 degraded。
+ * 返回值附带 annotationEntries（PDF 标注条目，交由装配阶段并入）。
+ */
+export interface CatalogSupportDataWithAnnotations extends CatalogSupportData {
+  annotationEntries: PreExtractedBlockEntry[]
+}
+
+export async function fetchCatalogSupportData(): Promise<CatalogSupportDataWithAnnotations> {
   let degraded = false
-  // 三个"失败即不安全"的关键源：主 SQL、属性视图、画布——任何一个失败都意味着
-  // 部分真实引用缺失，绝不能当作"全未引用"参与清理判定。
-  // 这三者通过 then 副作用写入下方变量（而非依赖解构位置，避免错位）。
-  let blocks: any[] = []
   let avReferencesMap = new Map<string, BlockRef[]>()
   let canvasInventory: Awaited<ReturnType<typeof scanCanvasAssetsInventory>> | null = null
-  const [annotationRefBlocks, reEditBlocks, originalFiles, sidecarMetadataList, agentAssets] = await Promise.all([
+  const notebookMap = await getNotebookMap().catch(() => new Map<string, string>())
+  const [annotationRefRows, reEditBlocks, originalFiles, sidecarMetadataList, agentAssets] = await Promise.all([
     sql(`SELECT block_id as id, file_path as markdown FROM file_annotation_refs LIMIT 100000`).catch(() => []),
     queryAllReEditableBlocks().catch(() => []),
     listOriginalImages().catch(() => []),
     listAllAssetMetadataFiles().catch(() => []),
     scanAgentSessionAssets().catch(() => new Set<string>()),
-    // 主 SQL（带超时守卫）：业务码非 0 或超时/异常 → degraded
-    sqlGuarded(`SELECT id, root_id, box, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`)
-      .then((rows) => {
-        if (rows === null) {
-          degraded = true
-          blocks = []
-        } else {
-          blocks = rows
-        }
-      })
-      .catch((err) => {
-        warn('[asset-catalog] 引用主 SQL 查询失败，本轮引用数据标记为降级:', err)
-        degraded = true
-        blocks = []
-      }),
     resolveAttributeViewReferences(notebookMap)
       .then((m) => {
         avReferencesMap = m
@@ -575,16 +623,7 @@ export async function fetchCatalogReferenceData(onPhase?: ScanPhaseReporter): Pr
         warn('[asset-catalog] 画布资源扫描失败，本轮引用数据标记为降级:', err)
         degraded = true
       }),
-  ])
-
-  // 合并 PDF 标注专门索引表的引用数据
-  let mergedBlocks = (Array.isArray(blocks) ? blocks : []).map((b: any) => ({
-    ...b,
-    content: b.content ?? markdownExcerpt(b.markdown || ''),
-  }))
-  if (Array.isArray(annotationRefBlocks) && annotationRefBlocks.length > 0) {
-    mergedBlocks = [...mergedBlocks, ...annotationRefBlocks]
-  }
+  ]) as [any[], any[], any[], any[], Set<string>, void, void]
 
   // 自动平滑向后迁移：将存在于块 IAL 但尚未落盘 Sidecar 的元数据自动持久化到 Sidecar
   if (reEditBlocks && reEditBlocks.length > 0) {
@@ -608,7 +647,6 @@ export async function fetchCatalogReferenceData(onPhase?: ScanPhaseReporter): Pr
   }
 
   return {
-    blocks: mergedBlocks,
     reEditBlocks,
     originalFiles,
     sidecarMetadataList,
@@ -617,13 +655,156 @@ export async function fetchCatalogReferenceData(onPhase?: ScanPhaseReporter): Pr
     canvasInventory,
     notebookMap,
     degraded,
+    annotationEntries: annotationRowsToEntries(annotationRefRows),
   }
+}
+
+/**
+ * 全量采集主引用块（大 SQL，带超时守卫）并预提取为条目。
+ * 说明：主查询刻意不取 content 列 —— content 与 markdown 高度重复，裁掉后大库上
+ * 传输体积近乎减半（实测 79MB → 约 50MB），展示文本由 markdownExcerpt 兜底。
+ */
+export async function fetchAllReferencingBlockEntries(): Promise<{ entries: PreExtractedBlockEntry[], degraded: boolean }> {
+  let degraded = false
+  let rows: any[] = []
+  try {
+    const result = await sqlGuarded(`SELECT id, root_id, box, markdown, path, hpath, ial FROM blocks WHERE markdown LIKE '%assets/%' OR ial LIKE '%assets/%' LIMIT 1000000`)
+    if (result === null) {
+      degraded = true
+    } else {
+      rows = result
+    }
+  } catch (err) {
+    warn('[asset-catalog] 引用主 SQL 查询失败，本轮引用数据标记为降级:', err)
+    degraded = true
+  }
+  return { entries: blockRowsToEntries(rows), degraded }
+}
+
+/**
+ * 阶段二：采集全部引用关系数据（SQL 块引用、属性视图、画布、AI 会话、二次编辑元数据、底图）。
+ * 与阶段一并行启动时可让内核 SQL 在首屏渲染期间后台执行。
+ */
+export async function fetchCatalogReferenceData(onPhase?: ScanPhaseReporter): Promise<CatalogReferenceData> {
+  onPhase?.({ stage: 'refs', label: '正在查询文档引用关系（大工作空间约需数分钟）...' })
+
+  const [support, blockResult] = await Promise.all([
+    fetchCatalogSupportData(),
+    fetchAllReferencingBlockEntries(),
+  ])
+
+  return {
+    entries: [...blockResult.entries, ...support.annotationEntries],
+    reEditBlocks: support.reEditBlocks,
+    originalFiles: support.originalFiles,
+    sidecarMetadataList: support.sidecarMetadataList,
+    avReferencesMap: support.avReferencesMap,
+    agentAssets: support.agentAssets,
+    canvasInventory: support.canvasInventory,
+    notebookMap: support.notebookMap,
+    degraded: support.degraded || blockResult.degraded,
+  }
+}
+
+// **************************************** 增量校验 ****************************************
+
+export interface CatalogBlockDelta {
+  /** 新增或内容变化的块条目（已重新提取，直接替换旧条目） */
+  upserted: PreExtractedBlockEntry[]
+  /** 已消失的块 ID（含被编辑为不再引用任何资源的块） */
+  removedIds: string[]
+}
+
+/** 存在性核查的单批 ID 数量（字符串内插，ID 均为内核生成的安全字符集） */
+const EXISTENCE_CHECK_CHUNK = 900
+
+/**
+ * 增量块引用校验：三路查询补齐上次扫描后的全部引用增删。
+ *
+ * 1) `updated >= 水位线`（不带 LIKE）：抓回所有近期变更块的完整行——
+ *    无论引用是新增还是被删掉，块 updated 都会变化，因此增删两个方向都完备；
+ * 2) `ial LIKE '%assets/%'` 全量（结果集小）：思源内核 setBlockAttrs 不更新 updated
+ *    （见 kernel/model/blockial.go），属性携带的引用（文档题头图等）只有这条路能抓到；
+ *    该查询幂等，未变化的块重提取后替换旧条目无副作用；
+ * 3) 快照内全部引用块 ID 的存在性核查（PK 索引分片查询）：块删除不留 updated 痕迹。
+ *
+ * 查询 1/2 内核侧仍是全表扫描（blocks 无 updated 索引），但结果集从 10 万行降到
+ * 近期变更量级，序列化/传输/解析成本近乎归零。
+ */
+export async function fetchCatalogBlockDelta(
+  snapshotEntries: Map<string, PreExtractedBlockEntry>,
+  watermark: string,
+): Promise<CatalogBlockDelta> {
+  const changedById = new Map<string, any>()
+
+  const [updatedRows, ialRows] = await Promise.all([
+    sqlGuarded(`SELECT id, root_id, box, markdown, path, hpath, ial FROM blocks WHERE updated >= '${watermark}' LIMIT 1000000`),
+    sqlGuarded(`SELECT id, root_id, box, markdown, path, hpath, ial FROM blocks WHERE ial LIKE '%assets/%' LIMIT 1000000`),
+  ])
+
+  for (const row of Array.isArray(updatedRows) ? updatedRows : []) {
+    if (row && row.id) changedById.set(String(row.id), row)
+  }
+  for (const row of Array.isArray(ialRows) ? ialRows : []) {
+    if (row && row.id) changedById.set(String(row.id), row)
+  }
+
+  const upserted: PreExtractedBlockEntry[] = []
+  const removedIdSet = new Set<string>()
+  for (const row of changedById.values()) {
+    const entry = toPreExtractedEntry({
+      ...row,
+      content: row.content ?? markdownExcerpt(row.markdown || ''),
+    })
+    if (entry.rawAssetNames.length === 0) {
+      // 块已不再引用任何资源：从条目集中移除其历史贡献
+      removedIdSet.add(entry.id)
+    } else {
+      upserted.push(entry)
+    }
+  }
+
+  // 存在性核查：仅快照中已有的条目需要检查（upserted 刚刚查到必然存在）
+  const idsToCheck = Array.from(snapshotEntries.keys())
+  const found = new Set<string>()
+  const chunks: string[][] = []
+  for (let i = 0; i < idsToCheck.length; i += EXISTENCE_CHECK_CHUNK) {
+    chunks.push(idsToCheck.slice(i, i + EXISTENCE_CHECK_CHUNK))
+  }
+  await mapWithConcurrency(chunks, 4, async (chunk) => {
+    const quoted = chunk.map((id) => `'${id}'`).join(',')
+    const rows = await sqlGuarded(`SELECT id FROM blocks WHERE id IN (${quoted})`)
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (row && row.id) found.add(String(row.id))
+    }
+  })
+  for (const id of idsToCheck) {
+    if (!found.has(id)) removedIdSet.add(id)
+  }
+
+  return { upserted, removedIds: Array.from(removedIdSet) }
+}
+
+/**
+ * 将增量差异应用到条目集（就地修改并返回同一 Map）
+ */
+export function applyCatalogBlockDelta(
+  entries: Map<string, PreExtractedBlockEntry>,
+  delta: CatalogBlockDelta,
+): Map<string, PreExtractedBlockEntry> {
+  for (const id of delta.removedIds) {
+    entries.delete(id)
+  }
+  for (const entry of delta.upserted) {
+    entries.set(entry.id, entry)
+  }
+  return entries
 }
 
 /** 引用阶段尚未开始/失败时的空引用数据（阶段一先行渲染用） */
 export function emptyReferenceData(): CatalogReferenceData {
   return {
-    blocks: [],
+    entries: [],
     reEditBlocks: [],
     originalFiles: [],
     sidecarMetadataList: [],
@@ -642,9 +823,9 @@ export function resolveCatalogInventory(
   onPhase?: ScanPhaseReporter,
 ): CatalogInventory {
   onPhase?.({ stage: 'resolve', label: '正在构建资源关联表...' })
-  return resolveCatalogPipeline(
+  return resolveCatalogPipelineFromEntries(
     files,
-    refData.blocks,
+    refData.entries,
     refData.reEditBlocks,
     refData.originalFiles,
     refData.notebookMap,
@@ -654,6 +835,27 @@ export function resolveCatalogInventory(
     [],
     refData.canvasInventory?.globalAssetRefs,
     refData.canvasInventory?.canvasAssets,
+  )
+}
+
+/** 纯装配（支持源分离版）：文件清单 + 条目集 + 支持源 → 完整库存模型（增量校验用） */
+export function resolveCatalogInventoryFromSources(
+  files: CatalogFilesResult['files'],
+  entries: PreExtractedBlockEntry[],
+  support: CatalogSupportData,
+): CatalogInventory {
+  return resolveCatalogPipelineFromEntries(
+    files,
+    [...entries, ...(support as CatalogSupportDataWithAnnotations).annotationEntries],
+    support.reEditBlocks,
+    support.originalFiles,
+    support.notebookMap,
+    support.sidecarMetadataList,
+    support.avReferencesMap,
+    support.agentAssets,
+    [],
+    support.canvasInventory?.globalAssetRefs,
+    support.canvasInventory?.canvasAssets,
   )
 }
 
@@ -714,6 +916,15 @@ export async function fillMissingAssetStats(
   if (targets.length === 0) {
     return { updated: 0, skipped: false }
   }
+
+  // 体积大头优先：视频/音频/文档/压缩包等非图片资源数量极少（通常几百个）但
+  // 占据绝大部分体积，先补全它们能让分类体积统计在数秒内逼近真值；
+  // 数万张图片随后批量补齐。Array.sort 稳定，组内保持原序。
+  targets.sort((a, b) => {
+    const aIsBulk = isImageAsset(a.name) ? 1 : 0
+    const bIsBulk = isImageAsset(b.name) ? 1 : 0
+    return aIsBulk - bIsBulk
+  })
 
   const adapter = defaultStorage.adapter as any
   const statOne = async (asset: AssetInfo) => {

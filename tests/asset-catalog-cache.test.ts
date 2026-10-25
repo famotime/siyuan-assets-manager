@@ -97,7 +97,7 @@ describe('mergeAssetStatsInto 阶段合并', () => {
 describe('emptyReferenceData', () => {
   it('返回结构完整且全部为空的引用数据', () => {
     const data = emptyReferenceData();
-    expect(data.blocks).toEqual([]);
+    expect(data.entries).toEqual([]);
     expect(data.reEditBlocks).toEqual([]);
     expect(data.originalFiles).toEqual([]);
     expect(data.sidecarMetadataList).toEqual([]);

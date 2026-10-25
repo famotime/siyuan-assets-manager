@@ -16,6 +16,16 @@ vi.mock('../src/utils/plugin-context', () => ({
   usePlugin: () => ({ name: 'siyuan-assets-manager' }),
 }));
 
+vi.mock('../src/utils/catalog-snapshot', () => ({
+  loadCatalogSnapshot: vi.fn(async () => null),
+  saveCatalogSnapshot: vi.fn(async () => true),
+  buildCatalogWatermark: vi.fn((t: number) => String(t)),
+  removeCatalogSnapshot: vi.fn(async () => {}),
+  formatSiYuanTimestamp: vi.fn((t: number) => String(t)),
+  WATERMARK_MARGIN_MS: 120000,
+  CATALOG_SNAPSHOT_PATH: '/data/storage/petal/siyuan-assets-manager/cache/catalog-snapshot.json',
+}));
+
 vi.mock('../src/utils/asset-catalog', () => ({
   // 两阶段扫描的测试替身：两阶段都立即完成，等价于旧版单次 getAllAssetsInfo
   fetchCatalogFiles: vi.fn(async () => ({ files: [], source: 'kernel', dirAvailable: true })),

@@ -32,6 +32,7 @@ vi.mock('../src/utils/file-system', () => ({
   isTrashSupported: vi.fn(() => true),
   deleteOriginalImage: vi.fn(async () => true),
   readOriginalImage: vi.fn(async () => new Blob(['dummy'])),
+  listAllAssetMetadataFiles: vi.fn(async () => []),
 }));
 
 vi.mock('../src/utils/siyuan-db', () => ({
@@ -41,6 +42,7 @@ vi.mock('../src/utils/siyuan-db', () => ({
 
 vi.mock('../src/utils/siyuan-block', () => ({
   removeAssetFromBlocks: vi.fn(async () => {}),
+  batchQueryAssetsReferenceCounts: vi.fn(async () => new Map()),
 }));
 
 vi.mock('../src/utils/deletion-logger', () => ({
@@ -320,6 +322,75 @@ describe('cleanup-workflow service', () => {
           canRollback: false,
         })
       );
+    });
+
+    it('skips candidates that re-acquired references in pre-deletion verification', async () => {
+      // 列表数据来自快照：orphan.png 自上次扫描后已被新文档引用
+      vi.mocked(siyuanBlock.batchQueryAssetsReferenceCounts).mockResolvedValue(
+        new Map([['orphan.png', 2]]),
+      );
+
+      const staleOrphan: AssetInfo = {
+        name: 'orphan.png',
+        size: 500,
+        updated: Date.now(),
+        isDir: false,
+        references: [],
+        refCount: 0,
+        docCount: 0,
+        isReEditable: false,
+        isOriginal: false,
+      };
+      const trulyOrphan: AssetInfo = { ...staleOrphan, name: 'real.png' };
+
+      const summary: ICleanupSummary = {
+        totalCount: 2,
+        unreferencedCount: 2,
+        unreferencedSizeText: '1 KB',
+        orphanOriginalsCount: 0,
+        orphanOriginalsSizeText: '0 B',
+        sizeText: '1 KB',
+        unreferencedAssets: [staleOrphan, trulyOrphan],
+        orphanOriginals: [],
+      };
+
+      const result = await executeUnifiedCleanup(summary);
+
+      expect(result.success).toBe(true);
+      expect(result.skippedRecentlyReferenced).toBe(1);
+      expect(result.deletedAssetsCount).toBe(1);
+    });
+
+    it('aborts the whole cleanup when pre-deletion verification fails', async () => {
+      vi.mocked(siyuanBlock.batchQueryAssetsReferenceCounts).mockRejectedValue(
+        new Error('sql timeout'),
+      );
+
+      const orphan: AssetInfo = {
+        name: 'orphan.png',
+        size: 500,
+        updated: Date.now(),
+        isDir: false,
+        references: [],
+        refCount: 0,
+        docCount: 0,
+        isReEditable: false,
+        isOriginal: false,
+      };
+      const summary: ICleanupSummary = {
+        totalCount: 1,
+        unreferencedCount: 1,
+        unreferencedSizeText: '500 B',
+        orphanOriginalsCount: 0,
+        orphanOriginalsSizeText: '0 B',
+        sizeText: '500 B',
+        unreferencedAssets: [orphan],
+        orphanOriginals: [],
+      };
+
+      const result = await executeUnifiedCleanup(summary);
+      expect(result.success).toBe(false);
+      expect(result.deletedAssetsCount).toBe(0);
     });
   });
 });

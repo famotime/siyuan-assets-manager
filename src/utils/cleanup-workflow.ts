@@ -25,11 +25,13 @@ import {
   captureBlockAnchors,
   createChildBlocksCache,
 } from './rollback-anchor'
-import { removeAssetFromBlocks } from './siyuan-block'
+import { batchQueryAssetsReferenceCounts, removeAssetFromBlocks } from './siyuan-block'
 import {
 
   deleteAssetFile,
 } from './siyuan-db'
+import { listAllAssetMetadataFiles } from './file-system'
+import { normalizeOriginalStoragePath } from './storage'
 
 export interface IConfirmDialogOptions {
   title: string
@@ -82,6 +84,8 @@ export interface IUnifiedCleanupResult {
   deletedAssetsCount: number
   deletedOriginalsCount: number
   freedBytes: number
+  /** 实时复核发现已重新获得引用而被安全跳过的候选数 */
+  skippedRecentlyReferenced?: number
   error?: unknown
 }
 
@@ -551,11 +555,72 @@ export async function executeUnifiedCleanup(
   let deletedAssetsCount = 0
   let deletedOriginalsCount = 0
   let freedBytes = 0
+  let skippedRecentlyReferenced = 0
   const deletedRecords: IDeletedItemRecord[] = []
+
+  // 0. 删除前的最后防线：实时复核候选是否已重新获得文档引用。
+  // 列表数据可能来自快照/增量校验，存在短暂的过期窗口；孤儿判定一旦过期，
+  // 直接删除就是数据丢失。合并 OR-LIKE 批量核查，每批只付一次内核扫描。
+  let unreferencedAssets = summary.unreferencedAssets
+  let orphanOriginals = summary.orphanOriginals
+  try {
+    const candidateNames = new Set<string>()
+    for (const asset of summary.unreferencedAssets) {
+      candidateNames.add(asset.name)
+    }
+    // 孤立底图：通过最新 Sidecar 元数据映射到渲染名一并核查
+    const renderedByOriginalPath = new Map<string, string>()
+    try {
+      const sidecars = await listAllAssetMetadataFiles()
+      for (const item of sidecars) {
+        const rendered = item.metadata.renderedAssetName
+        const orig = item.metadata.originalStoragePath
+        if (rendered && orig) {
+          renderedByOriginalPath.set(normalizeOriginalStoragePath(orig), rendered)
+        }
+      }
+    } catch (e) {
+      error('[cleanup-workflow] 清理前读取 Sidecar 元数据失败，孤立底图复核降级为仅按底图文件名核查:', e)
+    }
+    for (const orig of summary.orphanOriginals) {
+      candidateNames.add(orig.name)
+      const rendered = renderedByOriginalPath.get(normalizeOriginalStoragePath(orig.path || orig.name))
+      if (rendered) candidateNames.add(rendered)
+    }
+
+    if (candidateNames.size > 0) {
+      const counts = await batchQueryAssetsReferenceCounts(Array.from(candidateNames))
+      const stillOrphan = unreferencedAssets.filter((a) => (counts.get(a.name) || 0) === 0)
+      skippedRecentlyReferenced += unreferencedAssets.length - stillOrphan.length
+      unreferencedAssets = stillOrphan
+      const stillOrphanOriginals = orphanOriginals.filter((o) => {
+        if ((counts.get(o.name) || 0) > 0) return false
+        const rendered = renderedByOriginalPath.get(normalizeOriginalStoragePath(o.path || o.name))
+        return !rendered || (counts.get(rendered) || 0) === 0
+      })
+      skippedRecentlyReferenced += orphanOriginals.length - stillOrphanOriginals.length
+      orphanOriginals = stillOrphanOriginals
+      if (skippedRecentlyReferenced > 0) {
+        notify(`实时复核发现 ${skippedRecentlyReferenced} 个候选已重新获得引用，已自动跳过`)
+      }
+    }
+  } catch (verifyErr) {
+    // 复核查询失败：秉持安全第一，中止本轮清理
+    error('[cleanup-workflow] 清理前实时复核失败，为安全起见中止本轮清理:', verifyErr)
+    notify('清理前引用复核失败，已中止本轮清理，请稍后重试')
+    return {
+      success: false,
+      deletedAssetsCount: 0,
+      deletedOriginalsCount: 0,
+      freedBytes: 0,
+      skippedRecentlyReferenced: 0,
+      error: verifyErr,
+    }
+  }
 
   try {
     // 1. 清理普通孤儿资源
-    for (const asset of summary.unreferencedAssets) {
+    for (const asset of unreferencedAssets) {
       try {
         let thumbnail: string | undefined
         if (isImageAsset(asset.name)) {
@@ -583,7 +648,7 @@ export async function executeUnifiedCleanup(
     }
 
     // 2. 清理孤立底图
-    for (const orig of summary.orphanOriginals) {
+    for (const orig of orphanOriginals) {
       try {
         let thumbnail: string | undefined
         try {
@@ -630,6 +695,7 @@ export async function executeUnifiedCleanup(
       deletedAssetsCount,
       deletedOriginalsCount,
       freedBytes,
+      skippedRecentlyReferenced,
     }
   } catch (e) {
     error('[cleanup-workflow] 综合清理异常:', e)
@@ -639,6 +705,7 @@ export async function executeUnifiedCleanup(
       deletedAssetsCount,
       deletedOriginalsCount,
       freedBytes,
+      skippedRecentlyReferenced,
       error: e,
     }
   }

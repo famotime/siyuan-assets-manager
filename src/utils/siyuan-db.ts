@@ -108,16 +108,73 @@ export function formatReadableDocPath(boxName: string, hpath?: string, fallbackP
   return hpath || fallbackPath || ""
 }
 
+/**
+ * 预提取后的引用块条目：rawAssetNames 是从 markdown+ial 中提取出的原始资源名
+ * （未 decode、可能包含目录型引用，如 "assets/widget/"）。
+ * 快照与增量校验管线直接持有这类条目，避免每次载入都重跑全量正则提取。
+ */
+export interface PreExtractedBlockEntry {
+  id: string
+  root_id: string
+  box: string
+  content: string
+  path: string
+  hpath?: string
+  rawAssetNames: string[]
+  /** 原始 markdown（仅调试用途，无消费方；快照条目刻意不存以控制体积） */
+  markdown?: string
+}
+
+/**
+ * 从块的 markdown 与 ial 中提取原始资源名（去重、保持出现顺序）
+ */
+export function extractBlockEntryNames(block: { markdown?: string, ial?: string }): string[] {
+  const mdAssets = extractAssetNamesFromMarkdown(block.markdown || "")
+  const ialAssets = block.ial ? extractAssetNamesFromMarkdown(block.ial) : []
+  return Array.from(new Set([...mdAssets, ...ialAssets]))
+}
+
+/**
+ * 把 SQL 原始块行转换为预提取条目；raw = true 时保留原始行上的 content
+ */
+export function toPreExtractedEntry(block: any): PreExtractedBlockEntry {
+  return {
+    id: String(block.id || ''),
+    root_id: String(block.root_id || ''),
+    box: String(block.box || ''),
+    content: String(block.content ?? ''),
+    path: String(block.path || ''),
+    hpath: block.hpath ? String(block.hpath) : undefined,
+    rawAssetNames: extractBlockEntryNames(block),
+  }
+}
+
 export function attachBlockReferences(
   assetsMap: Map<string, AssetInfo>,
   blocks: any[] = [],
   notebookMap: Map<string, string> = new Map(),
   options: { includeMissing?: boolean } = { includeMissing: true },
 ): void {
-  for (const block of blocks) {
-    const mdAssets = extractAssetNamesFromMarkdown(block.markdown || "")
-    const ialAssets = block.ial ? extractAssetNamesFromMarkdown(block.ial) : []
-    const referencedAssets = Array.from(new Set([...mdAssets, ...ialAssets]))
+  attachPreExtractedReferences(
+    assetsMap,
+    (blocks || []).map(toPreExtractedEntry),
+    notebookMap,
+    options,
+  )
+}
+
+/**
+ * 挂载预提取条目的资源引用（与 attachBlockReferences 完全同语义，
+ * 仅跳过 markdown/ial 的正则提取步骤）
+ */
+export function attachPreExtractedReferences(
+  assetsMap: Map<string, AssetInfo>,
+  entries: PreExtractedBlockEntry[] = [],
+  notebookMap: Map<string, string> = new Map(),
+  options: { includeMissing?: boolean } = { includeMissing: true },
+): void {
+  for (const block of entries) {
+    const referencedAssets = block.rawAssetNames
     const boxName = notebookMap.get(block.box) || ""
     const readablePath = formatReadableDocPath(boxName, block.hpath, block.path)
 
@@ -146,7 +203,7 @@ export function attachBlockReferences(
                 root_id: block.root_id,
                 box: block.box,
                 content: block.content,
-                markdown: block.markdown,
+                markdown: block.markdown || '',
                 path: block.path,
                 hpath: block.hpath,
                 boxName,
@@ -186,7 +243,7 @@ export function attachBlockReferences(
             root_id: block.root_id,
             box: block.box,
             content: block.content,
-            markdown: block.markdown,
+            markdown: block.markdown || '',
             path: block.path,
             hpath: block.hpath,
             boxName,
