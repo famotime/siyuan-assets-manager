@@ -3,6 +3,7 @@ import type {
   BlockRef,
   OrphanOriginalInfo,
 } from './siyuan-db'
+import { t } from '@/i18n'
 
 export type AssetAttributeFilter = 'all' | 'reeditable' | 'original' | 'unreferenced' | 'large' | 'missing' | 'canvas'
 export type AssetFilterType = AssetAttributeFilter | 'image'
@@ -427,6 +428,12 @@ export interface GroupAssetsByDocumentOptions {
   assetSortOrder?: AssetSortOrder
 }
 
+/**
+ * 未引用分组搜索关键词并集（中英双语硬编码，不得走 t()——t 仅用于显示文案）。
+ * 分组标题已国际化（catalog.unreferencedGroupTitle），搜索匹配需同时覆盖两种语言的输入。
+ */
+const UNREFERENCED_KEYWORDS = ['未被任何文档引用', '未引用', '孤立', 'unreferenced', 'orphan', 'not referenced']
+
 export function extractDocTitle(ref: BlockRef): string {
   if (ref.hpath) {
     const parts = ref.hpath.split('/').filter(Boolean)
@@ -440,7 +447,7 @@ export function extractDocTitle(ref: BlockRef): string {
       return parts[parts.length - 1]
     }
   }
-  return ref.root_id || '未命名文档'
+  return ref.root_id || t('catalog.unnamedDocTitle')
 }
 
 /**
@@ -580,12 +587,7 @@ export function groupAssetsByDocument(
     if (!cleanQuery) {
       matchedUnrefAssets = allUnrefAssets
     } else {
-      const unrefNameMatch =
-        '未被任何文档引用'.includes(cleanQuery)
-        || '未引用'.includes(cleanQuery)
-        || '孤立'.includes(cleanQuery)
-        || 'unreferenced'.includes(cleanQuery)
-        || 'orphan'.includes(cleanQuery)
+      const unrefNameMatch = UNREFERENCED_KEYWORDS.some((keyword) => keyword.includes(cleanQuery))
 
       if (unrefNameMatch) {
         unrefMatchedByDoc = true
@@ -600,8 +602,8 @@ export function groupAssetsByDocument(
       const totalSize = sortedUnrefAssets.reduce((sum, a) => sum + (a.size || 0), 0)
       unrefGroup = {
         id: 'unreferenced',
-        title: '未被任何文档引用',
-        readablePath: '未引用 / 孤立资源',
+        title: t('catalog.unreferencedGroupTitle'),
+        readablePath: t('catalog.unreferencedGroupPath'),
         assets: sortedUnrefAssets,
         totalSize,
         assetCount: sortedUnrefAssets.length,

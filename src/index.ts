@@ -13,6 +13,7 @@ import AssetsManager from '@/components/AssetsManager.vue'
 import { DEFAULT_HASH_CONCURRENCY, DEFAULT_DECODE_CONCURRENCY } from '@/utils/deduplicate'
 import { ALL_IMAGE_EDITOR_TOOLS, DEFAULT_IMAGE_EDITOR_TOOLS } from '@/utils/editor-tools'
 import { openPluginSettingsDialog, type PluginSettingsData } from '@/utils/plugin-settings'
+import { t } from '@/i18n'
 
 export const ASSETS_MANAGER_TAB_TYPE = "assets_manager_tab";
 export { ALL_IMAGE_EDITOR_TOOLS, DEFAULT_IMAGE_EDITOR_TOOLS };
@@ -188,12 +189,12 @@ export default class AssetsManagerPlugin extends Plugin {
       if (!menu) return;
 
       menu.addItem({
-        label: "资源管家",
+        label: t('common.appTitle'),
         icon: "iconAssetsManager",
         type: "submenu",
         submenu: [
           {
-            label: "编辑标注",
+            label: t('menu.editAnnotate'),
             click: () => {
               if ((window as any)._siyuan_assets_manager_open_editor) {
                 (window as any)._siyuan_assets_manager_open_editor(assetName, blockId || undefined);
@@ -201,7 +202,7 @@ export default class AssetsManagerPlugin extends Plugin {
             }
           },
           {
-            label: "重命名",
+            label: t('common.rename'),
             click: () => {
               if ((window as any)._siyuan_assets_manager_open_rename) {
                 (window as any)._siyuan_assets_manager_open_rename(assetName);

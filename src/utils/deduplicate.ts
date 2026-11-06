@@ -1,6 +1,7 @@
 import { readAssetFile } from './file-system';
 import type { AssetInfo } from './siyuan-db';
 import { usePlugin } from './plugin-context';
+import { t } from '@/i18n';
 import {
   createEmptyFingerprintStore,
   isFingerprintValid,
@@ -298,7 +299,7 @@ export async function scanDuplicates(
     phase: 'grouping',
     current: 0,
     total: validAssets.length,
-    message: '正在按文件大小初筛候选文件...',
+    message: t('scan.groupingMessage'),
   });
 
   const sizeCandidatesMap = groupBySize(validAssets);
@@ -323,7 +324,7 @@ export async function scanDuplicates(
     phase: 'hashing',
     current: 0,
     total: candidateAssets.length,
-    message: `正在计算 ${candidateAssets.length} 个候选文件的精确哈希...`,
+    message: t('scan.hashingStartMessage', { n: candidateAssets.length }),
   });
 
   const assetHashMap = new Map<string, string>(); // assetName -> sha256
@@ -366,7 +367,7 @@ export async function scanDuplicates(
             phase: 'hashing',
             current: done,
             total,
-            message: `复用 ${reused} 个指纹，重算 ${computed} 个精确哈希 (${done}/${total})...`,
+            message: t('scan.hashingProgressMessage', { reused, computed, done, total }),
           });
         }
       },
@@ -432,7 +433,7 @@ export async function scanDuplicates(
     phase: 'perceptual',
     current: 0,
     total: imageAssets.length,
-    message: `正在提取 ${imageAssets.length} 张图片的视觉感知特征...`,
+    message: t('scan.perceptualStartMessage', { n: imageAssets.length }),
   });
 
   const featureResults = await mapWithConcurrency(
@@ -493,7 +494,7 @@ export async function scanDuplicates(
             phase: 'perceptual',
             current: done,
             total,
-            message: `复用 ${reused} 张图片特征，重算 ${computed} 张 (${done}/${total})...`,
+            message: t('scan.perceptualProgressMessage', { reused, computed, done, total }),
           });
         }
       },
@@ -594,7 +595,7 @@ export async function scanDuplicates(
     phase: 'done',
     current: validAssets.length,
     total: validAssets.length,
-    message: '扫描完成！',
+    message: t('scan.doneMessage'),
   });
 
   return { exactGroups, similarGroups, fingerprints, stats: { reused, computed } };

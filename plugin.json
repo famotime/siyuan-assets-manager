@@ -27,7 +27,8 @@
     "zh_CN": "笔记内嵌图片、视频等资源的全生命周期管理，支持图片二次编辑、智能去重与孤儿资源清理。"
   },
   "readme": {
-    "default": "README.md"
+    "default": "README.md",
+    "zh_CN": "README.zh_CN.md"
   },
   "keywords": [
     "图像编辑",
@@ -35,6 +36,12 @@
     "清理优化",
     "去重",
     "大文件管理",
-    "截图标注"
+    "截图标注",
+    "image editing",
+    "asset management",
+    "cleanup",
+    "deduplication",
+    "orphan cleanup",
+    "annotation"
   ]
 }

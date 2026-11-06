@@ -8,36 +8,36 @@
           :checked="isAllSelected"
           :indeterminate.prop="isSomeSelected"
           @change="handleHeaderCheckboxChange"
-          title="全选 / 取消全选 (支持快捷键 Ctrl+A)"
+          :title="t('list.selectAllTooltip')"
         />
       </div>
       <div class="col-preview"></div>
       <div class="col-name sortable" :class="{ active: sortField === 'name' }" @click="handleSort('name')">
-        文件名
+        {{ t('list.colFileName') }}
         <ArrowUp v-if="sortField === 'name' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
         <ArrowDown v-else-if="sortField === 'name' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
       <div class="col-ext sortable" :class="{ active: sortField === 'ext' }" @click="handleSort('ext')">
-        后缀名
+        {{ t('list.colExt') }}
         <ArrowUp v-if="sortField === 'ext' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
         <ArrowDown v-else-if="sortField === 'ext' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
       <div class="col-size sortable" :class="{ active: sortField === 'size' }" @click="handleSort('size')">
-        大小
+        {{ t('list.colSize') }}
         <ArrowUp v-if="sortField === 'size' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
         <ArrowDown v-else-if="sortField === 'size' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
       <div class="col-updated sortable" :class="{ active: sortField === 'updated' }" @click="handleSort('updated')">
-        更新时间
+        {{ t('list.colUpdated') }}
         <ArrowUp v-if="sortField === 'updated' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
         <ArrowDown v-else-if="sortField === 'updated' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
-      <div class="col-refs sortable" :class="{ active: sortField === 'docCount' }" @click="handleSort('docCount')" title="引用此资源的文档篇数（同一文档内多处引用只计一篇）">
-        文档数
+      <div class="col-refs sortable" :class="{ active: sortField === 'docCount' }" @click="handleSort('docCount')" :title="t('list.colDocCountTitle')">
+        {{ t('list.colDocCount') }}
         <ArrowUp v-if="sortField === 'docCount' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
         <ArrowDown v-else-if="sortField === 'docCount' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
       </div>
-      <div class="col-actions">操作</div>
+      <div class="col-actions">{{ t('list.colActions') }}</div>
     </div>
 
     <div class="list-container" v-bind="containerProps">
@@ -60,16 +60,16 @@
 
           <div
             class="asset-preview"
-            :title="item.data.isMissing ? `[丢失资源] 物理文件已不存在，引用处数: ${item.data.references?.length || item.data.refCount || 0}` : undefined"
+            :title="item.data.isMissing ? t('list.missingRefTitle', { count: item.data.references?.length || item.data.refCount || 0 }) : undefined"
             @mouseenter="$emit('show-preview', { event: $event, asset: item.data, previewSrc: getThumbnailSrc(item.data) })"
             @mousemove="$emit('update-preview', { event: $event })"
             @mouseleave="$emit('hide-preview')"
           >
             <template v-if="item.data.isMissing">
-              <div class="file-icon file-icon--missing" title="物理文件已丢失">
+              <div class="file-icon file-icon--missing" :title="t('list.missingFileTitle')">
                 <ImageOff :size="16" style="color: var(--b3-theme-error); fill: none !important;" />
               </div>
-              <span class="preview-badge preview-badge--missing" title="物理文件在磁盘中不存在">丢失</span>
+              <span class="preview-badge preview-badge--missing" :title="t('list.missingDiskTitle')">{{ t('list.lostBadge') }}</span>
             </template>
             <template v-else-if="isImage(item.data.name) || item.data.isOriginal">
               <img v-if="getThumbnailSrc(item.data)" :src="getThumbnailSrc(item.data)" />
@@ -77,20 +77,20 @@
               <span
                 v-if="item.data.isReEditable"
                 class="preview-badge preview-badge--reedit"
-                title="该图片包含可二次编辑的矢量图层，点击右侧编辑按钮可无损修改"
-              >可编辑</span>
+                :title="t('list.reeditBadgeTitle')"
+              >{{ t('list.reeditableBadge') }}</span>
               <span
                 v-else-if="item.data.isOriginal"
                 class="preview-badge preview-badge--original"
-                title="隔离存储的干净原始底图，供二次编辑无损还原使用"
-              >底图</span>
+                :title="t('list.originalBadgeTitle')"
+              >{{ t('list.originalBadge') }}</span>
             </template>
             <div v-else class="file-icon">{{ getAssetBadgeText(item.data.name) }}</div>
           </div>
           
           <div
             class="asset-name"
-            :title="item.data.isMissing ? `[丢失资源] 物理文件已不存在，引用处数: ${item.data.references?.length || item.data.refCount || 0}` : undefined"
+            :title="item.data.isMissing ? t('list.missingRefTitle', { count: item.data.references?.length || item.data.refCount || 0 }) : undefined"
             @mouseenter="!item.data.isMissing && $emit('show-preview', { event: $event, asset: item.data, previewSrc: getThumbnailSrc(item.data) })"
             @mousemove="!item.data.isMissing && $emit('update-preview', { event: $event })"
             @mouseleave="!item.data.isMissing && $emit('hide-preview')"
@@ -99,7 +99,7 @@
             <span
               v-if="item.data.isMissing"
               class="asset-badge-icon-wrapper"
-              title="在 /data/assets 中未找到物理文件"
+              :title="t('list.missingPathTitle')"
             >
               <AlertTriangle
                 :size="14"
@@ -110,8 +110,8 @@
             <span
               v-else-if="item.data.isReEditable"
               class="asset-badge-icon-wrapper"
-              title="该图片包含可二次编辑的矢量图层，点击右侧编辑按钮可无损修改"
-              aria-label="该图片包含可二次编辑的矢量图层，点击右侧编辑按钮可无损修改"
+              :title="t('list.reeditBadgeTitle')"
+              :aria-label="t('list.reeditBadgeTitle')"
             >
               <Palette
                 :size="15"
@@ -122,8 +122,8 @@
             <span
               v-else-if="item.data.isOriginal"
               class="asset-badge-icon-wrapper"
-              title="隔离存储的干净原始底图，供二次编辑无损还原使用"
-              aria-label="隔离存储的干净原始底图，供二次编辑无损还原使用"
+              :title="t('list.originalBadgeTitle')"
+              :aria-label="t('list.originalBadgeTitle')"
             >
               <Layers
                 :size="15"
@@ -134,8 +134,8 @@
             <span
               v-else-if="item.data.isCanvasAsset"
               class="asset-badge-icon-wrapper"
-              title="无界插件专属画布资源"
-              aria-label="无界插件专属画布资源"
+              :title="t('list.canvasBadgeTitle')"
+              :aria-label="t('list.canvasBadgeTitle')"
             >
               <Layout
                 :size="15"
@@ -150,14 +150,14 @@
           </div>
 
           <div class="col-size asset-size" :class="{ 'asset-size--missing': item.data.isMissing }">
-            {{ item.data.isMissing ? '文件丢失' : formatSize(item.data.size) }}
+            {{ item.data.isMissing ? t('list.missingSize') : formatSize(item.data.size) }}
           </div>
 
           <div class="col-updated asset-updated">
             {{ item.data.isMissing ? '-' : formatTime(item.data.updated) }}
           </div>
 
-          <div class="col-refs asset-refs" :title="refsPending ? '文档引用关系分析中' : undefined">
+          <div class="col-refs asset-refs" :title="refsPending ? t('list.refsPendingTitle') : undefined">
             <span v-if="refsPending" class="refs-pending-cell">…</span>
             <template v-else>{{ item.data.docCount }}</template>
           </div>
@@ -167,7 +167,7 @@
               v-if="!refsPending && item.data.docCount > 0"
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('open-docs', item.data, $event)"
-              aria-label="在后台打开并定位引用此资源的文档"
+              :aria-label="t('list.openDocsAria')"
             >
               <ExternalLink :size="15" style="fill: none !important;" />
             </button>
@@ -175,7 +175,7 @@
               v-if="!refsPending && !item.data.isMissing && (isImage(item.data.name) || item.data.isOriginal) && !item.data.isCanvasAsset"
               class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('edit', item.data)"
-              aria-label="二次编辑与矢量标注"
+              :aria-label="t('list.editAria')"
             >
               <Pencil :size="15" style="fill: none !important;" />
             </button>
@@ -183,7 +183,7 @@
               v-if="!refsPending && !item.data.isOriginal && !item.data.isMissing && !item.data.isCanvasAsset"
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('rename', item.data)"
-              aria-label="重命名此资源并自动更新引用"
+              :aria-label="t('list.renameAria')"
             >
               <TextCursorInput :size="15" style="fill: none !important;" />
             </button>
@@ -191,7 +191,7 @@
               v-if="!refsPending && (!item.data.isCanvasAsset || item.data.docCount === 0)"
               class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
               @click.stop="$emit('delete', item.data)"
-              :aria-label="item.data.isMissing ? '清理此丢失资源的文档引用' : item.data.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
+              :aria-label="item.data.isMissing ? t('list.deleteMissingAria') : item.data.isOriginal ? t('list.deleteOriginalAria') : t('list.deleteAria')"
             >
               <Trash2 :size="15" style="fill: none !important;" />
             </button>
@@ -211,6 +211,7 @@ import type { AssetInfo } from '../utils/siyuan-db';
 import { formatAssetSize, formatAssetTime, getAssetBadgeText, isImageAsset, splitFileName, type AssetSortField, type AssetSortOrder } from '../utils/asset-list';
 import { readOriginalImage } from '../utils/file-system';
 import { defaultStorage } from '../utils/storage';
+import { t } from '../i18n';
 
 const props = defineProps<{
   assets: AssetInfo[];

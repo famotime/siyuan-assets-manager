@@ -1,3 +1,5 @@
+import { t } from '@/i18n';
+
 /**
  * 内核请求超时与重试守卫。
  *
@@ -13,7 +15,7 @@ export class RequestTimeoutError extends Error {
     public readonly timeoutMs: number,
     public readonly attempt: number,
   ) {
-    super(`[${label}] 第 ${attempt} 次请求超过 ${timeoutMs}ms 未响应`);
+    super(t('guard.timeoutMessage', { label, attempt, timeoutMs }));
     this.name = 'RequestTimeoutError';
   }
 }

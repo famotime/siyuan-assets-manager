@@ -5,11 +5,11 @@
       <div class="dialog-header">
         <div class="dialog-title">
           <History :size="18" class="title-icon" />
-          <span>删除操作审计与回退历史</span>
-          <span class="batch-count-badge">{{ filteredHistory.length }} 条记录</span>
+          <span>{{ t('history.title') }}</span>
+          <span class="batch-count-badge">{{ t('history.recordCount', { count: filteredHistory.length, n: filteredHistory.length }) }}</span>
         </div>
         <div class="header-actions">
-          <button class="am-icon-btn b3-tooltips b3-tooltips__sw" @click="handleClose" aria-label="关闭窗口 (Esc)">
+          <button class="am-icon-btn b3-tooltips b3-tooltips__sw" @click="handleClose" :aria-label="t('history.closeWindowAria')">
             <X :size="16" style="fill: none !important;" />
           </button>
         </div>
@@ -24,36 +24,36 @@
               :class="{ 'is-active': activeFilter === 'all' }"
               @click="activeFilter = 'all'"
             >
-              全部 ({{ historyList.length }})
+              {{ t('history.filterAll', { count: historyList.length }) }}
             </button>
             <button
               class="filter-chip"
               :class="{ 'is-active': activeFilter === 'deduplicate' }"
               @click="activeFilter = 'deduplicate'"
             >
-              去重 ({{ dedupCount }})
+              {{ t('history.filterDedup', { count: dedupCount }) }}
             </button>
             <button
               class="filter-chip"
               :class="{ 'is-active': activeFilter === 'cleanup' }"
               @click="activeFilter = 'cleanup'"
             >
-              清理 ({{ cleanupCount }})
+              {{ t('history.filterCleanup', { count: cleanupCount }) }}
             </button>
             <button
               class="filter-chip"
               :class="{ 'is-active': activeFilter === 'manual' }"
               @click="activeFilter = 'manual'"
             >
-              手动删除 ({{ manualCount }})
+              {{ t('history.filterManual', { count: manualCount }) }}
             </button>
           </div>
         </div>
 
         <div class="toolbar-right">
           <!-- 历史容量上限配置 (0~100) -->
-          <div class="limit-config" title="设置保留的最近删除操作批次数（0 表示关闭历史日志）">
-            <span class="limit-label">保留上限:</span>
+          <div class="limit-config" :title="t('history.limitTitle')">
+            <span class="limit-label">{{ t('history.limitLabel') }}</span>
             <input
               type="number"
               class="limit-input b3-text-field"
@@ -62,26 +62,26 @@
               max="100"
               @change="handleLimitChange"
             />
-            <span class="limit-unit">批次</span>
+            <span class="limit-unit">{{ t('history.limitUnit') }}</span>
           </div>
 
           <button
             class="am-action-btn am-action-btn--recycle am-action-btn--with-text b3-tooltips b3-tooltips__sw"
             @click="handleOpenRecycleBin"
-            aria-label="打开操作系统回收站窗口（检索与手工还原文件）"
+            :aria-label="t('history.recycleBinAria')"
           >
             <ExternalLink :size="14" style="fill: none !important;" />
-            <span>回收站</span>
+            <span>{{ t('history.recycleBinBtn') }}</span>
           </button>
 
           <button
             v-if="historyList.length > 0"
             class="am-action-btn am-action-btn--clear am-action-btn--with-text b3-tooltips b3-tooltips__sw"
             @click="handleClearAll"
-            aria-label="清空所有历史操作记录（不影响磁盘文件）"
+            :aria-label="t('history.clearAllAria')"
           >
             <Trash2 :size="14" style="fill: none !important;" />
-            <span>清空</span>
+            <span>{{ t('history.clearAllBtn') }}</span>
           </button>
         </div>
       </div>
@@ -107,12 +107,12 @@
       <div v-else class="dialog-empty">
         <History :size="48" class="empty-icon" />
         <div class="empty-text">
-          <span v-if="historyLimit === 0">历史日志记录当前已关闭（保留上限为 0）</span>
-          <span v-else-if="historyList.length === 0">暂无删除历史记录</span>
-          <span v-else>当前分类下暂无历史记录</span>
+          <span v-if="historyLimit === 0">{{ t('history.emptyDisabled') }}</span>
+          <span v-else-if="historyList.length === 0">{{ t('history.emptyNoRecords') }}</span>
+          <span v-else>{{ t('history.emptyNoCategory') }}</span>
         </div>
         <div class="empty-subtext">
-          去重与清理操作将自动移入操作系统回收站，并记录详细批次流水与引用回退信息。
+          {{ t('history.emptySubtext') }}
         </div>
       </div>
 
@@ -121,8 +121,8 @@
         <div class="am-modal-dialog rollback-confirm-dialog">
           <div class="confirm-header">
             <RotateCcw :size="18" class="confirm-icon" />
-            <span v-if="rollbackConfirmBatch.actionType === 'deduplicate'">确认回退去重引用语法</span>
-            <span v-else>确认回退被删图片文档引用</span>
+            <span v-if="rollbackConfirmBatch.actionType === 'deduplicate'">{{ t('history.confirmDedupTitle') }}</span>
+            <span v-else>{{ t('history.confirmDeletedTitle') }}</span>
           </div>
 
           <div class="confirm-body">
@@ -130,24 +130,24 @@
               <AlertCircle :size="16" class="notice-icon" />
               <div class="notice-text">
                 <p v-if="rollbackConfirmBatch.actionType === 'deduplicate'">
-                  <strong>【重要提示】</strong>此操作将逆向改回文档正文及属性视图中被替换的图片引用语法。
+                  <strong>{{ t('history.noticeImportant') }}</strong>{{ t('history.noticeDedupBody') }}
                 </p>
                 <p v-else>
-                  <strong>【重要提示】</strong>此操作将自动恢复文档中被清理的图片引用语法。
+                  <strong>{{ t('history.noticeImportant') }}</strong>{{ t('history.noticeCleanupBody') }}
                 </p>
-                <p><strong>物理资源文件请由您在操作系统回收站中<span class="text-danger-emphasis">手工还原</span>回 <code>data/assets/</code> 目录。</strong></p>
+                <p><strong>{{ t('history.restoreNoticePrefix') }}<span class="text-danger-emphasis">{{ t('history.restoreNoticeAction') }}</span>{{ t('history.restoreNoticeBack') }}<code>data/assets/</code>{{ t('history.restoreNoticeDir') }}</strong></p>
               </div>
             </div>
 
             <div class="checklist-box">
               <div class="checklist-header">
-                <span>需从系统回收站放回的文件清单（共 {{ rollbackChecklist.length }} 个）：</span>
+                <span>{{ t('history.checklistHeader', { count: rollbackChecklist.length }) }}</span>
                 <div class="checklist-header-actions">
                   <button
                     class="am-action-btn am-action-btn--copy b3-tooltips b3-tooltips__w"
                     @click="copyChecklist"
-                    aria-label="复制待放回清单"
-                    title="复制待放回文件清单到剪贴板"
+                    :aria-label="t('history.copyChecklistAria')"
+                    :title="t('history.copyChecklistTitle')"
                   >
                     <Copy :size="14" style="fill: none !important;" />
                   </button>
@@ -159,9 +159,9 @@
                   <span
                     v-if="isRollbackFileMissing(name)"
                     class="badge badge-status is-missing-file"
-                    title="该文件尚未放回 data/assets/，现在回退会把引用指向不存在的文件"
+                    :title="t('history.missingFileBadgeTitle')"
                   >
-                    未还原
+                    {{ t('history.notRestoredBadge') }}
                   </span>
                 </li>
               </ul>
@@ -171,38 +171,33 @@
             <div v-if="isRollbackBlocked" class="presence-warning is-blocked">
               <AlertCircle :size="14" class="presence-icon" />
               <div>
-                <strong>已禁用回退：</strong>
-                本批次为永久删除（当前环境无系统回收站），且上述
-                <strong>{{ missingRollbackFiles.length }}</strong>
-                个文件已无法找回。回退只会把文档引用指向不存在的文件，因此不提供该操作。
+                <strong>{{ t('history.blockedTitle') }}</strong>{{ t('history.blockedBefore') }}<strong>{{ missingRollbackFiles.length }}</strong>{{ t('history.blockedAfter') }}
               </div>
             </div>
             <div v-else-if="missingRollbackFiles.length > 0" class="presence-warning">
               <AlertCircle :size="14" class="presence-icon" />
               <div>
-                <strong>提示：</strong>
-                上述 <strong>{{ missingRollbackFiles.length }}</strong> 个文件尚未放回
-                <code>data/assets/</code>。现在回退会把这些引用指向不存在的文件；建议先从回收站还原文件再回退。
+                <strong>{{ t('history.missingHintTitle') }}</strong>{{ t('history.missingHintBefore') }}<strong>{{ missingRollbackFiles.length }}</strong>{{ t('history.missingHintMid') }}<code>data/assets/</code>{{ t('history.missingHintAfter') }}
               </div>
             </div>
 
             <div class="drift-defense-tip">
-              <strong>智能安全防御已生效：</strong>若某些块在此前已被您再次修改（如替换为其他图或移除了内容），回退引擎将自动安全跳过，绝不破坏您的最新编辑内容。
+              <strong>{{ t('history.driftDefenseTitle') }}</strong>{{ t('history.driftDefenseBody') }}
             </div>
           </div>
 
           <div class="confirm-footer">
             <button class="am-btn am-btn--secondary" @click="rollbackConfirmBatch = null" :disabled="isRollingBack">
-              取消
+              {{ t('common.cancel') }}
             </button>
             <button
               class="am-btn am-btn--primary"
               @click="executeRollback"
               :disabled="isRollingBack || isRollbackBlocked"
             >
-              <span v-if="isRollingBack">正在执行逆向恢复...</span>
-              <span v-else-if="isRollbackBlocked">不可回退（文件已永久删除）</span>
-              <span v-else>确认开始回退</span>
+              <span v-if="isRollingBack">{{ t('history.rollingBackBtn') }}</span>
+              <span v-else-if="isRollbackBlocked">{{ t('history.rollbackBlockedBtn') }}</span>
+              <span v-else>{{ t('history.rollbackConfirmBtn') }}</span>
             </button>
           </div>
         </div>
@@ -215,15 +210,15 @@
         :style="hoverPreviewStyle"
       >
         <div class="hover-preview-img-box">
-          <img :src="hoverPreviewItem.thumbnail" alt="预览缩略图" />
+          <img :src="hoverPreviewItem.thumbnail" :alt="t('history.previewAlt')" />
         </div>
         <div class="hover-preview-meta">
           <div class="hover-preview-title" :title="hoverPreviewItem.fileName">
             {{ hoverPreviewItem.fileName }}
           </div>
           <div class="hover-preview-sub">
-            <span>大小: {{ formatSize(hoverPreviewItem.size) }}</span>
-            <span class="hover-preview-tag">已在回收站</span>
+            <span>{{ t('history.previewSize', { size: formatSize(hoverPreviewItem.size) }) }}</span>
+            <span class="hover-preview-tag">{{ t('history.inRecycleBinTag') }}</span>
           </div>
         </div>
       </div>
@@ -261,6 +256,7 @@ import {
 } from '../utils/rollback-engine';
 import { formatAssetSize } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
+import { t } from '@/i18n';
 import { showMessage, openTab } from 'siyuan';
 import { openOSRecycleBin } from '../utils/file-system';
 import { usePlugin } from '../utils/plugin-context';
@@ -418,21 +414,21 @@ async function handleLimitChange() {
   const updated = await setDeletionHistoryLimit(historyLimit.value);
   historyLimit.value = updated;
   historyList.value = await getDeletionHistory();
-  showMessage(`历史保留上限已设置为 ${updated} 批次`);
+  showMessage(t('history.limitSetMsg', { count: updated, n: updated }));
 }
 
 async function handleClearAll() {
   const confirmed = await showConfirm({
-    title: '清空操作历史',
-    message: '确定要清空所有的删除与回退操作日志吗？此操作仅清除记录流水，不会影响系统回收站或本地磁盘文件。',
-    confirmText: '清空记录',
+    title: t('history.clearConfirmTitle'),
+    message: t('history.clearConfirmMsg'),
+    confirmText: t('history.clearConfirmBtn'),
     danger: true,
   });
   if (!confirmed) return;
 
   await clearDeletionHistory();
   historyList.value = [];
-  showMessage('操作日志已清空');
+  showMessage(t('history.clearDoneMsg'));
 }
 
 function toggleExpand(batchId: string) {
@@ -454,25 +450,19 @@ function formatSize(bytes: number): string {
   return formatAssetSize(bytes);
 }
 
-/** 用户可见文案优先取插件 i18n，缺失时回落中文（取值方式与 src/index.ts 一致） */
-function t(key: string, fallback: string): string {
-  const i18n = (usePlugin() as any)?.i18n;
-  return (i18n && i18n[key]) || fallback;
-}
-
 async function handleOpenRecycleBin() {
   const ok = await openOSRecycleBin();
   if (ok) {
-    showMessage('已为您打开操作系统回收站窗口');
+    showMessage(t('history.recycleOpenedMsg'));
   } else {
-    showMessage('未能自动打开系统回收站，请您手动在操作系统桌面或文件管理器中打开', 5000, 'info');
+    showMessage(t('history.recycleOpenFailMsg'), 5000, 'info');
   }
 }
 
 function copyChecklist() {
   const text = rollbackChecklist.value.join('\n');
   navigator.clipboard.writeText(text).then(() => {
-    showMessage(`已复制待放回文件清单 (${rollbackChecklist.value.length} 个) 到剪贴板`);
+    showMessage(t('history.checklistCopiedMsg', { count: rollbackChecklist.value.length, n: rollbackChecklist.value.length }));
   });
 }
 
@@ -558,7 +548,7 @@ async function openRollbackConfirm(batch: IDeletionBatch) {
 async function executeRollback() {
   if (!rollbackConfirmBatch.value) return;
   if (isRollbackBlocked.value) {
-    showMessage('该批次文件已被永久删除且无法找回，回退只会产生坏引用，已阻止操作', 5000, 'error');
+    showMessage(t('history.rollbackBlockedMsg'), 5000, 'error');
     return;
   }
   const batchId = rollbackConfirmBatch.value.id;
@@ -568,24 +558,26 @@ async function executeRollback() {
     const result = await rollbackBatch(batchId);
     const extraParts: string[] = [];
     if ((result.report.approximateRestoredCount || 0) > 0) {
-      extraParts.push(`近似还原 ${result.report.approximateRestoredCount} 处`);
+      extraParts.push(t('history.extraApprox', { count: result.report.approximateRestoredCount, n: result.report.approximateRestoredCount }));
     }
     if ((result.report.restoredViewCellsCount || 0) > 0) {
-      extraParts.push(`数据库单元格 ${result.report.restoredViewCellsCount} 处`);
+      extraParts.push(t('history.extraViewCells', { count: result.report.restoredViewCellsCount, n: result.report.restoredViewCellsCount }));
     }
     if (result.report.skippedBlocksCount > 0) {
-      extraParts.push(`跳过 ${result.report.skippedBlocksCount} 处已漂移/无变化的块`);
+      extraParts.push(t('history.extraSkipped', { count: result.report.skippedBlocksCount, n: result.report.skippedBlocksCount }));
     }
+    const extraSuffix =
+      extraParts.length > 0
+        ? t('history.rollbackDoneExtra', { parts: extraParts.join(t('history.extraSeparator')) })
+        : '';
     showMessage(
-      `回退完成！已成功恢复 ${result.report.restoredBlocksCount} 处块引用${
-        extraParts.length > 0 ? `（${extraParts.join('，')}）` : ''
-      }`
+      t('history.rollbackDoneMsg', { count: result.report.restoredBlocksCount, n: result.report.restoredBlocksCount }) + extraSuffix
     );
     rollbackConfirmBatch.value = null;
     await loadData();
     emit('refresh');
   } catch (err: any) {
-    showMessage(`回退失败: ${err.message || err}`, 5000, 'error');
+    showMessage(t('history.rollbackFailed', { error: err.message || err }), 5000, 'error');
   } finally {
     isRollingBack.value = false;
   }
@@ -628,13 +620,13 @@ function getItemDocIds(item: IDeletedItemRecord): string[] {
  */
 async function openDocumentByIds(docIds: string[]) {
   if (docIds.length === 0) {
-    showMessage('未找到关联文档', 4000, 'info');
+    showMessage(t('history.noRelatedDocsMsg'), 4000, 'info');
     return;
   }
 
   const plugin = usePlugin();
   if (!plugin || !plugin.app) {
-    showMessage('插件上下文未就绪，无法跳转', 4000, 'error');
+    showMessage(t('history.pluginNotReadyMsg'), 4000, 'error');
     return;
   }
 
@@ -668,13 +660,13 @@ async function openDocumentByIds(docIds: string[]) {
     }
 
     if (openedTitles.length === 1) {
-      showMessage(`已在后台打开文档: ${openedTitles[0]}`);
+      showMessage(t('history.docOpenedMsg', { title: openedTitles[0] }));
     } else {
-      showMessage(`已在后台打开 ${openedTitles.length} 篇关联文档`);
+      showMessage(t('history.docsOpenedMsg', { count: openedTitles.length, n: openedTitles.length }));
     }
   } catch (err: any) {
     warn('[DeletionHistory] 跳转文档失败:', err);
-    showMessage(`跳转文档失败: ${err.message || err}`, 5000, 'error');
+    showMessage(t('history.jumpFailedMsg', { error: err.message || err }), 5000, 'error');
   }
 }
 
@@ -683,7 +675,7 @@ async function openDocumentByIds(docIds: string[]) {
  */
 async function handleJumpToItemDoc(item: IDeletedItemRecord) {
   if (!item.affectedBlocks || item.affectedBlocks.length === 0) {
-    showMessage('该文件未记录关联文档', 4000, 'info');
+    showMessage(t('history.itemNoDocMsg'), 4000, 'info');
     return;
   }
 
@@ -696,7 +688,7 @@ async function handleJumpToItemDoc(item: IDeletedItemRecord) {
   );
 
   if (docIds.length === 0) {
-    showMessage('该文件未记录关联文档', 4000, 'info');
+    showMessage(t('history.itemNoDocMsg'), 4000, 'info');
     return;
   }
 

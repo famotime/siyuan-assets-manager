@@ -3,15 +3,15 @@
     <div class="am-dialog image-editor-dialog-content" :style="{ width: dialogWidth, height: dialogHeight }">
       <div class="am-dialog__header">
         <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; margin-right: 12px;">
-          <h3 class="editor-header-title" :title="`编辑图片: ${assetName}`">编辑图片: {{ assetName }}</h3>
-          <span v-if="isReEditMode" class="reedit-badge b3-tooltips b3-tooltips__s" aria-label="当前处于二次编辑模式，图层为可交互矢量状态">二次编辑模式</span>
+          <h3 class="editor-header-title" :title="t('editor.editImageTitle', { name: assetName })">{{ t('editor.editImageTitle', { name: assetName }) }}</h3>
+          <span v-if="isReEditMode" class="reedit-badge b3-tooltips b3-tooltips__s" :aria-label="t('editor.reeditBadgeAria')">{{ t('editor.reeditBadge') }}</span>
         </div>
         <div class="header-actions" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
           <button 
             v-if="isReEditMode" 
             class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw" 
             @click="handleResetOriginal" 
-            aria-label="重置为原始底图（清空所有矢量标注）"
+            :aria-label="t('editor.resetOriginalAria')"
           >
             <RotateCcw :size="16" style="fill: none !important;" />
           </button>
@@ -19,11 +19,11 @@
             v-if="isReEditMode" 
             class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw" 
             @click="handleFlattenLayers" 
-            aria-label="合并固化图层（转换为普通图片，移除二次编辑数据）"
+            :aria-label="t('editor.flattenLayersAria')"
           >
             <Layers :size="16" style="fill: none !important;" />
           </button>
-          <button class="am-dialog__close b3-tooltips b3-tooltips__sw" @click="close" aria-label="关闭窗口 (Esc)">
+          <button class="am-dialog__close b3-tooltips b3-tooltips__sw" @click="close" :aria-label="t('editor.closeWindowEsc')">
             <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
@@ -39,28 +39,28 @@
           class="am-btn am-btn--outline b3-tooltips b3-tooltips__n" 
           @click="downloadLocal" 
           style="margin-right: 8px; display: inline-flex; align-items: center; gap: 4px;" 
-          aria-label="当前编辑的图片另存到本地"
+          :aria-label="t('editor.saveAsLocalAria')"
         >
           <Download :size="14" style="fill: none !important;" />
-          <span>另存</span>
+          <span>{{ t('editor.saveAs') }}</span>
         </button>
         <button 
           class="am-btn am-btn--ghost b3-tooltips b3-tooltips__n" 
           @click="close" 
           style="display: inline-flex; align-items: center; gap: 4px;"
-          aria-label="取消编辑并关闭窗口 (Esc)"
+          :aria-label="t('editor.cancelEditAria')"
         >
           <X :size="14" style="fill: none !important;" />
-          <span>取消</span>
+          <span>{{ t('common.cancel') }}</span>
         </button>
         <button 
           class="am-btn am-btn--primary b3-tooltips b3-tooltips__n" 
           @click="save" 
           style="display: inline-flex; align-items: center; gap: 4px;"
-          aria-label="保存修改并同步到所有引用此图片的文档块"
+          :aria-label="t('editor.saveAria')"
         >
           <Check :size="14" style="fill: none !important;" />
-          <span>保存</span>
+          <span>{{ t('editor.save') }}</span>
         </button>
       </div>
     </div>
@@ -76,6 +76,7 @@ import { readAssetFile, readOriginalImage, readAssetMetadataFile, saveAssetMetad
 import { getImageBlockReEditData, removeImageBlockReEditData } from '../utils/siyuan-block';
 import { getAssetInfoByName } from '../utils/siyuan-db';
 import localeZhCN from '../i18n/tui-locale-zh';
+import { isZhUi } from '../i18n';
 import { calculateDialogSize, getEditorShortcutAction, prepareCanvasExport, resetCanvasObjects, trimAndScaleDataUrl } from '../utils/image-editor';
 import { cleanTuiSvgArtifacts, removeTuiSvgArtifacts, lockHostScroll, unlockHostScroll, resetHostViewport } from '../utils/host-isolation';
 import { showConfirm } from '../utils/confirm';
@@ -347,7 +348,7 @@ function initEditor(url: string, onReady?: () => Promise<void>) {
         'common.bisize.width': '0px',
         'common.bisize.height': '0px'
       },
-      locale: localeZhCN,
+      ...(isZhUi() ? { locale: localeZhCN } : {}),
       menu: menuTools,
       // 默认初始化打开裁剪操作菜单（若已禁用裁剪则自动切换为首个可用菜单）
       initMenu: initMenu,
@@ -404,9 +405,9 @@ function close() {
 async function handleResetOriginal() {
   if (!editorInstance) return;
   const confirmed = await showConfirm({
-    title: '重置为原始底图',
-    message: '确定要清空画布上的所有矢量标注并重置为干净原始底图吗？',
-    confirmText: '确认重置',
+    title: t('editor.resetOriginalTitle'),
+    message: t('editor.resetOriginalMsg'),
+    confirmText: t('editor.confirmReset'),
     danger: true,
   });
   if (!confirmed) return;
@@ -414,15 +415,15 @@ async function handleResetOriginal() {
   const canvas = getFabricCanvasFromTui(editorInstance);
   if (canvas) {
     resetCanvasObjects(canvas);
-    pushMsg('已重置为干净原始底图');
+    pushMsg(t('editor.resetDone'));
   }
 }
 
 async function handleFlattenLayers() {
   const confirmed = await showConfirm({
-    title: '合并固化图层',
-    message: '合并固化后，将移除二次编辑元数据并降级为普通图片，后续保存后将无法再单独调整已有矢量元素。确定要合并固化吗？',
-    confirmText: '合并固化',
+    title: t('editor.flattenLayersTitle'),
+    message: t('editor.flattenLayersMsg'),
+    confirmText: t('editor.confirmFlatten'),
     danger: true,
   });
   if (!confirmed) return;
@@ -432,7 +433,7 @@ async function handleFlattenLayers() {
   if (props.blockId) {
     await removeImageBlockReEditData(props.blockId);
   }
-  pushMsg('已合并固化图层，本次保存将作为普通位图存储');
+  pushMsg(t('editor.flattenDone'));
 }
 
 async function downloadLocal() {

@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import { sql } from '../api';
 import { defaultStorage, blobToText } from './storage';
 import { extractAssetNamesFromMarkdown, escapeRegExp } from './asset-markdown';
@@ -232,7 +233,7 @@ export async function resolveAttributeViewReferences(
         // 查找此资产关联的列信息（用于在引用详情中显示友好的列名提示）
         const matchedDetail = parsed.detailedRefs.find((r) => r.assetName === assetName);
         const colSuffix = matchedDetail?.keyName ? ` (${matchedDetail.keyName})` : '';
-        const avTitle = parsed.avName ? `[数据库] ${parsed.avName}${colSuffix}` : `[数据库] ${currentAvId}${colSuffix}`;
+        const avTitle = parsed.avName ? t('av.dbRefTitle', { name: `${parsed.avName}${colSuffix}` }) : t('av.dbRefTitle', { name: `${currentAvId}${colSuffix}` });
 
         if (hostBlocks.length > 0) {
           // 如果该数据库被一个或多个文档块嵌入，为每个嵌入块生成引用
@@ -263,11 +264,11 @@ export async function resolveAttributeViewReferences(
               id: fakeRefId,
               root_id: fakeRefId,
               box: '',
-              content: parsed.avName ? `[独立数据库] ${parsed.avName}${colSuffix}` : `[独立数据库] ${currentAvId}${colSuffix}`,
+              content: parsed.avName ? t('av.standaloneDbRefTitle', { name: `${parsed.avName}${colSuffix}` }) : t('av.standaloneDbRefTitle', { name: `${currentAvId}${colSuffix}` }),
               markdown: '',
               path: '',
-              boxName: '数据库',
-              readablePath: `数据库 / ${parsed.avName || currentAvId}`,
+              boxName: t('av.databaseBoxName'),
+              readablePath: t('av.standaloneReadablePath', { name: parsed.avName || currentAvId }),
             });
           }
         }

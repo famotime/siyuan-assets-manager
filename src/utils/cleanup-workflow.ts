@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import type {
   DeleteDestination,
   IDeletedItemRecord,
@@ -94,60 +95,84 @@ export interface IUnifiedCleanupResult {
  */
 export function buildSingleDeleteConfirmMessage(asset: AssetInfo): IConfirmDialogOptions {
   if (asset.isMissing) {
-    let confirmMsg = `资源文件 ${asset.name} 在磁盘中已不存在（丢失资源）。\n确定要清理所有引用该文件的文档块引用（共 ${asset.references?.length || asset.refCount || 0} 处引用）吗？\n\n（操作将记录到日志中，支持随时回退撤销）`
+    const refCount = asset.references?.length || asset.refCount || 0
+    let confirmMsg = t('cleanup.missingResourceConfirm', {
+      n: refCount,
+      name: asset.name,
+      refCount,
+    })
     if (asset.docCount > 1) {
-      confirmMsg = `【多文档引用警告】此丢失资源正被 ${asset.docCount} 篇不同的文档共同引用！\n\n${confirmMsg}`
+      confirmMsg = t('cleanup.missingMultiDocWarning', {
+        docCount: asset.docCount,
+        message: confirmMsg,
+      })
     }
 
     return {
-      title: '确认清理丢失资源引用',
+      title: t('cleanup.missingConfirmTitle'),
       message: confirmMsg,
-      confirmText: '清理引用',
+      confirmText: t('cleanup.missingConfirmText'),
       danger: true,
     }
   }
 
   if (asset.isOriginal) {
-    let confirmMsg = `确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（文件将移入操作系统回收站）' : '【高危警告】当前运行环境不支持系统回收站，此操作将永久彻底删除底图物理文件！'}`
+    let confirmMsg = t('cleanup.originalConfirmBase', {
+      name: asset.name,
+      trashHint: isTrashSupported() ? t('cleanup.trashHint') : t('cleanup.noTrashOriginalWarning'),
+    })
     if (asset.docCount > 0) {
-      confirmMsg = `【高风险警告】此原始底图正被 ${asset.docCount} 个文档中的二次编辑图片关联！\n删除此底图后，未来将无法对这些图片进行图层还原与二次编辑。\n\n确定要删除原始底图 ${asset.name} 吗？\n${isTrashSupported() ? '（将移入操作系统回收站）' : '（Web/Docker 环境：将永久硬删除）'}`
+      confirmMsg = t('cleanup.originalReferencedConfirm', {
+        n: asset.docCount,
+        name: asset.name,
+        trashHint: isTrashSupported() ? t('cleanup.originalTrashHint') : t('cleanup.originalNoTrashHint'),
+      })
     }
 
     return {
-      title: '确认删除原始底图',
+      title: t('cleanup.originalConfirmTitle'),
       message: confirmMsg,
-      confirmText: '删除底图',
+      confirmText: t('cleanup.originalConfirmText'),
       danger: true,
     }
   }
 
   if (asset.isCanvasAsset) {
-    let confirmMsg = `确定要删除画布专属资源 ${asset.name} 吗？\n${isTrashSupported() ? '（文件将移入操作系统回收站）' : '【高危警告】当前运行环境不支持系统回收站，此操作将永久彻底删除物理文件！'}`
+    let confirmMsg = t('cleanup.canvasConfirmBase', {
+      name: asset.name,
+      trashHint: isTrashSupported() ? t('cleanup.trashHint') : t('cleanup.noTrashCanvasWarning'),
+    })
     if (asset.docCount > 0) {
-      const canvasTitle = asset.canvasPath ? asset.canvasPath.split('/').pop() : '无界画布'
-      confirmMsg = `【画布引用警告】此资源正被画布 [${canvasTitle}] 引用！\n删除后画布中对应的节点图片可能会失效显示。\n\n${confirmMsg}`
+      const canvasTitle = asset.canvasPath ? asset.canvasPath.split('/').pop() : t('cleanup.untitledCanvas')
+      confirmMsg = t('cleanup.canvasReferencedWarning', {
+        canvasTitle,
+        message: confirmMsg,
+      })
     }
 
     return {
-      title: '确认删除画布资源',
+      title: t('cleanup.canvasConfirmTitle'),
       message: confirmMsg,
-      confirmText: '删除文件',
+      confirmText: t('cleanup.canvasConfirmText'),
       danger: true,
     }
   }
 
   let confirmMsg = isTrashSupported()
-    ? `确定要删除 ${asset.name} 吗？\n注意：文件将移入操作系统回收站，且文档中的对应引用块也将被清理。`
-    : `【高危警告】当前运行环境不支持系统回收站，确定要永久删除 ${asset.name} 吗？\n注意：物理文件将被直接抹除且不可撤销，文档中的对应引用块也将被清理。`
+    ? t('cleanup.plainConfirmTrash', { name: asset.name })
+    : t('cleanup.plainConfirmNoTrash', { name: asset.name })
 
   if (asset.docCount > 1) {
-    confirmMsg = `【多文档共享警告】此资源正被 ${asset.docCount} 篇不同的文档共同引用！\n删除后将同步清理所有 ${asset.docCount} 篇文档中的引用块。\n\n${confirmMsg}`
+    confirmMsg = t('cleanup.plainMultiDocWarning', {
+      docCount: asset.docCount,
+      message: confirmMsg,
+    })
   }
 
   return {
-    title: '确认删除',
+    title: t('cleanup.plainConfirmTitle'),
     message: confirmMsg,
-    confirmText: '删除',
+    confirmText: t('common.delete'),
     danger: true,
   }
 }
@@ -157,40 +182,40 @@ export function buildSingleDeleteConfirmMessage(asset: AssetInfo): IConfirmDialo
  */
 export function buildBatchDeleteConfirmMessage(summary: IBatchDeleteSummary): IConfirmDialogOptions {
   const messageLines = [
-    `确定要批量删除选中的 ${summary.totalCount} 个文件吗？`,
+    t('cleanup.batchIntroLine', { n: summary.totalCount }),
     '',
-    '清单概要：',
-    `• 普通资源文件：${summary.regularCount} 个`,
-    `• 隔离原始底图：${summary.originalCount} 个`,
+    t('cleanup.batchListHeader'),
+    t('cleanup.batchLineRegular', { n: summary.regularCount }),
+    t('cleanup.batchLineOriginal', { n: summary.originalCount }),
   ]
 
   if (summary.missingCount && summary.missingCount > 0) {
-    messageLines.push(`• 丢失资源引用：${summary.missingCount} 项（物理文件已缺失，将清理文档引用链接）`)
+    messageLines.push(t('cleanup.batchLineMissing', { n: summary.missingCount }))
   }
 
-  messageLines.push(`• 预计释放总空间：${summary.sizeText}`)
+  messageLines.push(t('cleanup.lineSizeEstimate', { sizeText: summary.sizeText }))
 
   if (summary.referencedCount > 0) {
     messageLines.push('')
-    messageLines.push(`【重要提示】所选资源中有 ${summary.referencedCount} 个已被文档引用，删除将自动清理文档中对应的引用块。`)
+    messageLines.push(t('cleanup.batchReferencedNotice', { n: summary.referencedCount }))
   }
 
   if (summary.referencedOriginalsCount > 0) {
     messageLines.push('')
-    messageLines.push(`【高风险警告】所选底图中有 ${summary.referencedOriginalsCount} 个正被文档中的二次编辑图片关联，删除后将无法再次进行图层无损还原！`)
+    messageLines.push(t('cleanup.batchReferencedOriginalsNotice', { n: summary.referencedOriginalsCount }))
   }
 
   messageLines.push('')
   if (isTrashSupported()) {
-    messageLines.push('文件将移入操作系统回收站，若误删可从回收站手工找回。确定要执行批量删除吗？')
+    messageLines.push(t('cleanup.batchTrashLine'))
   } else {
-    messageLines.push('【高危警告】当前运行环境（Web / Docker）不支持系统回收站，此操作将永久彻底抹除物理文件，无法撤销！确定要执行批量删除吗？')
+    messageLines.push(t('cleanup.batchNoTrashLine'))
   }
 
   return {
-    title: `批量删除资源 (${summary.totalCount} 个)`,
+    title: t('cleanup.batchConfirmTitle', { n: summary.totalCount }),
     message: messageLines.join('\n'),
-    confirmText: '执行批量删除',
+    confirmText: t('cleanup.batchConfirmText'),
     danger: true,
   }
 }
@@ -201,23 +226,23 @@ export function buildBatchDeleteConfirmMessage(summary: IBatchDeleteSummary): IC
 export function buildUnifiedCleanupConfirmMessage(summary: ICleanupSummary): IConfirmDialogOptions {
   const messageLines = [
     isTrashSupported()
-      ? '【安全清理】此操作将清理所有未被文档引用的孤儿资源文件及孤立原始底图，所有文件将移入操作系统回收站。'
-      : '【高危警告】当前运行环境（Web / Docker）不支持系统回收站，此操作将永久彻底抹除文件且不可撤销！',
+      ? t('cleanup.unifiedTrashIntro')
+      : t('cleanup.unifiedNoTrashIntro'),
     '',
-    '待清理清单：',
-    `• 孤儿资源文件：${summary.unreferencedCount} 个 (${summary.unreferencedSizeText})`,
-    `• 孤立原始底图：${summary.orphanOriginalsCount} 个 (${summary.orphanOriginalsSizeText})`,
-    `• 预计释放总空间：${summary.sizeText}`,
+    t('cleanup.unifiedListHeader'),
+    t('cleanup.unifiedLineUnreferenced', { n: summary.unreferencedCount, sizeText: summary.unreferencedSizeText }),
+    t('cleanup.unifiedLineOrphanOriginals', { n: summary.orphanOriginalsCount, sizeText: summary.orphanOriginalsSizeText }),
+    t('cleanup.lineSizeEstimate', { sizeText: summary.sizeText }),
     '',
     isTrashSupported()
-      ? '确定要执行清理并将这些文件移入系统回收站吗？'
-      : '此操作将直接彻底删除物理文件，确定要继续吗？',
+      ? t('cleanup.unifiedTrashConfirmLine')
+      : t('cleanup.unifiedNoTrashConfirmLine'),
   ]
 
   return {
-    title: '清理未引用资源与孤立底图',
+    title: t('cleanup.unifiedConfirmTitle'),
     message: messageLines.join('\n'),
-    confirmText: '执行清理',
+    confirmText: t('cleanup.unifiedConfirmText'),
     danger: true,
   }
 }
@@ -242,7 +267,7 @@ export async function executeSingleAssetDeletion(
       } catch {}
 
       await deleteOriginalImage(asset.originalStoragePath || asset.name)
-      notify(`原始底图 ${asset.name} 已删除`)
+      notify(t('cleanup.originalDeletedNotify', { name: asset.name }))
 
       const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent'
       try {
@@ -268,7 +293,7 @@ export async function executeSingleAssetDeletion(
       }
     } catch (e) {
       error('[cleanup-workflow] 删除原始底图失败:', e)
-      notify('删除底图失败')
+      notify(t('cleanup.deleteOriginalFailedNotify'))
       return {
         success: false,
         freedBytes: 0,
@@ -332,10 +357,10 @@ export async function executeSingleAssetDeletion(
 
     notify(
       asset.isMissing
-        ? `丢失资源 ${asset.name} 的文档引用已清理`
+        ? t('cleanup.missingRefsClearedNotify', { name: asset.name })
         : asset.isCanvasAsset
-          ? `画布专属资源 ${asset.name} 已删除`
-          : `资源 ${asset.name} 及其文档引用已删除`,
+          ? t('cleanup.canvasDeletedNotify', { name: asset.name })
+          : t('cleanup.assetRefsDeletedNotify', { name: asset.name }),
     )
 
     const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent'
@@ -370,7 +395,7 @@ export async function executeSingleAssetDeletion(
     }
   } catch (e) {
     error('[cleanup-workflow] 删除资源失败:', e)
-    notify('删除失败')
+    notify(t('cleanup.deleteFailedNotify'))
     return {
       success: false,
       freedBytes: 0,
@@ -519,11 +544,11 @@ export async function executeBatchAssetsDeletion(
     }
 
     const parts: string[] = []
-    if (deletedRegularCount > 0) parts.push(`${deletedRegularCount} 个资源`)
-    if (deletedOriginalCount > 0) parts.push(`${deletedOriginalCount} 个底图`)
-    if (deletedMissingCount > 0) parts.push(`${deletedMissingCount} 项丢失资源引用`)
-    const countText = parts.length > 0 ? parts.join('、') : '0 个项'
-    notify(`批量删除完成！已成功处理 ${countText}，释放 ${summary.sizeText} 空间。`)
+    if (deletedRegularCount > 0) parts.push(t('cleanup.countRegularPart', { n: deletedRegularCount }))
+    if (deletedOriginalCount > 0) parts.push(t('cleanup.countOriginalPart', { n: deletedOriginalCount }))
+    if (deletedMissingCount > 0) parts.push(t('cleanup.countMissingPart', { n: deletedMissingCount }))
+    const countText = parts.length > 0 ? parts.join(t('cleanup.countListSeparator')) : t('cleanup.zeroItemsText')
+    notify(t('cleanup.batchDeleteDoneNotify', { countText, sizeText: summary.sizeText }))
     return {
       success: true,
       deletedRegularCount,
@@ -533,7 +558,7 @@ export async function executeBatchAssetsDeletion(
     }
   } catch (e) {
     error('[cleanup-workflow] 批量删除异常:', e)
-    notify('批量删除失败')
+    notify(t('cleanup.batchDeleteFailedNotify'))
     return {
       success: false,
       deletedRegularCount,
@@ -601,13 +626,13 @@ export async function executeUnifiedCleanup(
       skippedRecentlyReferenced += orphanOriginals.length - stillOrphanOriginals.length
       orphanOriginals = stillOrphanOriginals
       if (skippedRecentlyReferenced > 0) {
-        notify(`实时复核发现 ${skippedRecentlyReferenced} 个候选已重新获得引用，已自动跳过`)
+        notify(t('cleanup.recheckSkippedNotify', { n: skippedRecentlyReferenced }))
       }
     }
   } catch (verifyErr) {
     // 复核查询失败：秉持安全第一，中止本轮清理
     error('[cleanup-workflow] 清理前实时复核失败，为安全起见中止本轮清理:', verifyErr)
-    notify('清理前引用复核失败，已中止本轮清理，请稍后重试')
+    notify(t('cleanup.recheckFailedNotify'))
     return {
       success: false,
       deletedAssetsCount: 0,
@@ -689,7 +714,11 @@ export async function executeUnifiedCleanup(
       }
     }
 
-    notify(`清理完成！已成功删除 ${deletedAssetsCount} 个孤儿资源与 ${deletedOriginalsCount} 个孤立底图，共释放 ${summary.sizeText} 空间。`)
+    notify(t('cleanup.unifiedDoneNotify', {
+      assetCount: deletedAssetsCount,
+      originalCount: deletedOriginalsCount,
+      sizeText: summary.sizeText,
+    }))
     return {
       success: true,
       deletedAssetsCount,
@@ -699,7 +728,7 @@ export async function executeUnifiedCleanup(
     }
   } catch (e) {
     error('[cleanup-workflow] 综合清理异常:', e)
-    notify('清理失败')
+    notify(t('cleanup.cleanupFailedNotify'))
     return {
       success: false,
       deletedAssetsCount,

@@ -1,5 +1,6 @@
 import { Setting } from 'siyuan';
-import { ALL_IMAGE_EDITOR_TOOLS, DEFAULT_IMAGE_EDITOR_TOOLS } from './editor-tools';
+import { t } from '@/i18n';
+import { ALL_IMAGE_EDITOR_TOOLS, DEFAULT_IMAGE_EDITOR_TOOLS, getEditorToolLabel } from './editor-tools';
 import { DEFAULT_HASH_CONCURRENCY, DEFAULT_DECODE_CONCURRENCY } from './deduplicate';
 
 export interface PluginSettingsData {
@@ -14,7 +15,6 @@ export interface PluginSettingsData {
 
 export interface SettingsHostPlugin {
   name: string;
-  i18n: Record<string, string>;
   settings: PluginSettingsData;
   saveData(file: string, data: any): Promise<any>;
 }
@@ -59,13 +59,13 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
 
   // 1. 页签中打开资源管家
   setting.addItem({
-    title: plugin.i18n.openInTabTitle || '页签中打开资源管家',
+    title: t('settings.openInTabTitle'),
     description: '',
     direction: 'row',
     createActionElement: () => {
       return createSettingCardOption({
         checked: plugin.settings.openInTab,
-        description: plugin.i18n.openInTabDesc || '开启时，将资源管理窗口在页签打开，而不是弹窗打开',
+        description: t('settings.openInTabDesc'),
         onChange: (checked) => {
           plugin.settings.openInTab = checked;
           plugin.saveData('config.json', plugin.settings);
@@ -76,13 +76,13 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
 
   // 2. 删除原文件提示
   setting.addItem({
-    title: plugin.i18n.promptOnDeleteOriginalTitle || '删除原文件提示',
+    title: t('settings.promptOnDeleteOriginalTitle'),
     description: '',
     direction: 'row',
     createActionElement: () => {
       return createSettingCardOption({
         checked: plugin.settings.promptOnDeleteOriginal,
-        description: plugin.i18n.promptOnDeleteOriginalDesc || '重命名和修改文件保存后，是否弹窗提示将原文件放入回收站',
+        description: t('settings.promptOnDeleteOriginalDesc'),
         onChange: (checked) => {
           plugin.settings.promptOnDeleteOriginal = checked;
           plugin.saveData('config.json', plugin.settings);
@@ -93,13 +93,13 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
 
   // 3. 开启日志打印
   setting.addItem({
-    title: plugin.i18n.enableLoggingTitle || '开启日志打印',
+    title: t('settings.enableLoggingTitle'),
     description: '',
     direction: 'row',
     createActionElement: () => {
       return createSettingCardOption({
         checked: plugin.settings.enableLogging,
-        description: plugin.i18n.enableLoggingDesc || '是否在控制台打印插件运行日志',
+        description: t('settings.enableLoggingDesc'),
         onChange: (checked) => {
           plugin.settings.enableLogging = checked;
           plugin.saveData('config.json', plugin.settings);
@@ -110,8 +110,8 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
 
   // 4. 删除历史保留上限
   setting.addItem({
-    title: plugin.i18n.deletionHistoryLimitTitle || '删除历史保留上限',
-    description: plugin.i18n.deletionHistoryLimitDesc || '保留最近执行的删除操作批次数（范围 0~100，默认 10，设为 0 则不记录日志）',
+    title: t('settings.deletionHistoryLimitTitle'),
+    description: t('settings.deletionHistoryLimitDesc'),
     direction: 'row',
     createActionElement: () => {
       const input = document.createElement('input');
@@ -137,8 +137,8 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
 
   // 5. 图片编辑器工具栏配置
   setting.addItem({
-    title: plugin.i18n.imageEditorToolsTitle || '图片编辑器工具栏',
-    description: plugin.i18n.imageEditorToolsDesc || '控制在图片编辑器中显示的工具（默认不启用蒙版与滤镜）',
+    title: t('settings.imageEditorToolsTitle'),
+    description: t('settings.imageEditorToolsDesc'),
     direction: 'column',
     createActionElement: () => {
       const container = document.createElement('div');
@@ -163,7 +163,7 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
         iconSpan.innerHTML = tool.icon;
 
         const labelSpan = document.createElement('span');
-        labelSpan.textContent = tool.label;
+        labelSpan.textContent = getEditorToolLabel(tool.key);
 
         checkbox.addEventListener('change', (e) => {
           const checked = (e.target as HTMLInputElement).checked;
@@ -174,7 +174,7 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
             currentTools.delete(tool.key);
           }
           plugin.settings.imageEditorTools = ALL_IMAGE_EDITOR_TOOLS
-            .map((t) => t.key)
+            .map((tool) => tool.key)
             .filter((k) => currentTools.has(k));
           plugin.saveData('config.json', plugin.settings);
         });
@@ -190,8 +190,8 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
 
   // 6. 去重扫描：哈希并发度
   setting.addItem({
-    title: plugin.i18n.dedupHashConcurrencyTitle || '去重扫描：哈希并发度',
-    description: plugin.i18n.dedupHashConcurrencyDesc || '精确哈希阶段的并行文件数（范围 1~16，默认 8）',
+    title: t('settings.dedupHashConcurrencyTitle'),
+    description: t('settings.dedupHashConcurrencyDesc'),
     direction: 'row',
     createActionElement: () => {
       const input = document.createElement('input');
@@ -217,8 +217,8 @@ export function buildPluginSettings(plugin: SettingsHostPlugin): Setting {
 
   // 7. 去重扫描：解码并发度
   setting.addItem({
-    title: plugin.i18n.dedupDecodeConcurrencyTitle || '去重扫描：解码并发度',
-    description: plugin.i18n.dedupDecodeConcurrencyDesc || '图片感知哈希阶段的并行解码数（范围 1~8，默认 3）',
+    title: t('settings.dedupDecodeConcurrencyTitle'),
+    description: t('settings.dedupDecodeConcurrencyDesc'),
     direction: 'row',
     createActionElement: () => {
       const input = document.createElement('input');

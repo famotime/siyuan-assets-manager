@@ -316,8 +316,9 @@ describe('groupReferencesByDoc', () => {
       'utf-8',
     )
 
-    expect(vueContent).toMatch(/被以下文档引用\s*\(\{\{\s*docGroups\(/)
-    expect(vueContent).not.toMatch(/被以下文档引用\s*\(\{\{\s*item\.asset\.references\.length/)
+    // i18n 后标签走 t('dedup.referencedBy', { n })，断言其计数仍来自 docGroups()（排除引用块）
+    expect(vueContent).toMatch(/t\('dedup\.referencedBy',\s*\{\s*n:\s*docGroups\(item\.asset\)\.length\s*\}\)/)
+    expect(vueContent).not.toMatch(/t\('dedup\.referencedBy',\s*\{\s*n:\s*item\.asset\.references\.length/)
   })
 
   it('excludes system protected assets from unreferenced filter and cleanup calculation', () => {

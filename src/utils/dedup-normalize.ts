@@ -12,6 +12,7 @@ import type { IAssetReEditMetadata } from '../types/reedit';
 import { recordDeletionBatch, type IDeletedItemRecord, type DeleteDestination } from './deletion-logger';
 import { captureAssetThumbnail } from './image-editor';
 import { warn, log, error } from './logger';
+import { t } from '@/i18n';
 
 export interface INormalizeStats {
   affectedDocsCount: number;
@@ -67,7 +68,7 @@ export async function normalizeDuplicateGroup(
 
   const canonicalName = group.canonicalAssetName;
   if (!canonicalName) {
-    throw new Error('未指定主保留资源文件');
+    throw new Error(t('normalize.canonicalNotSpecified'));
   }
 
   const canonicalItem = group.items.find(it => it.asset.name === canonicalName);
@@ -166,10 +167,14 @@ export async function normalizeDuplicateGroup(
       const { isClean, remainingBlocks } = await verifyAssetZeroReferences(redundant.name);
       if (!isClean && remainingBlocks.length > 0) {
         throw new Error(
-          `[去重安全拦截] 冗余资源 [${redundant.name}] 尚有 ${remainingBlocks.length} 处文档引用未完成替换，已终止删除该物理文件！受影响块ID: ${remainingBlocks
-            .map((b) => b.id)
-            .slice(0, 3)
-            .join(', ')}`
+          t('normalize.safetyIntercept', {
+            n: remainingBlocks.length,
+            name: redundant.name,
+            blockIds: remainingBlocks
+              .map((b) => b.id)
+              .slice(0, 3)
+              .join(', '),
+          })
         );
       }
 
@@ -179,7 +184,7 @@ export async function normalizeDuplicateGroup(
       } catch {}
 
       if (!(await deleteAsset(redundant.name))) {
-        throw new Error(`删除冗余资源 [${redundant.name}] 失败：文件可能已不存在或不可写`);
+        throw new Error(t('normalize.deleteRedundantFailed', { name: redundant.name }));
       }
       deleted = true;
       stats.deletedFilesCount += 1;

@@ -1,4 +1,5 @@
 import { openTab } from 'siyuan'
+import { t } from '@/i18n'
 import type {
   AssetInfo,
   BlockRef,
@@ -144,11 +145,11 @@ export function extractReferencesFromCanvasData(
           id: `canvas:${normCanvasPath}:${nodeId}`,
           root_id: normCanvasPath,
           box: '',
-          content: `无界画布节点引用 [${canvasName}] (${nodeType})`,
+          content: t('canvas.globalNodeRefContent', { canvasName, nodeType }),
           markdown: `![${assetName}](assets/${assetName})`,
           path: normCanvasPath,
           hpath: canvasName,
-          readablePath: `画布: ${canvasName}`,
+          readablePath: t('canvas.readablePath', { canvasName }),
         })
       }
     }
@@ -386,11 +387,11 @@ export async function scanCanvasAssetsInventory(): Promise<ICanvasInventoryResul
           id: `canvas:${canvasPath}:${refKey}`,
           root_id: canvasPath,
           box: '',
-          content: `无界画布节点引用 [${canvasName}]`,
+          content: t('canvas.nodeRefContent', { canvasName }),
           markdown: `![${refKey}](${refKey})`,
           path: canvasPath,
           hpath: canvasName,
-          readablePath: `画布: ${canvasName}`,
+          readablePath: t('canvas.readablePath', { canvasName }),
         })
         combinedCanvasAssetRefs.set(refKey, existing)
       }
@@ -566,7 +567,7 @@ export async function openCanvasInTab(canvasPath: string, title?: string): Promi
     return false
   }
 
-  const canvasTitle = title || getBaseFileName(normPath) || '画布'
+  const canvasTitle = title || getBaseFileName(normPath) || t('canvas.fallbackTitle')
 
   try {
     // 优先调用无界插件自身提供的 openCanvasTab 实例方法（可兼顾移动端适配与生命周期注册）

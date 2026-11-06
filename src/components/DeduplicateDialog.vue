@@ -8,14 +8,14 @@
             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
             <circle cx="12" cy="12" r="3"/>
           </svg>
-          <h3>去重比对</h3>
+          <h3>{{ t('dedup.title') }}</h3>
           <div class="dedup-tab-group">
             <button
               class="dedup-tab-btn"
               :class="{ 'is-active': activeTab === 'exact' }"
               @click="activeTab = 'exact'"
             >
-              精确相同
+              {{ t('dedup.tabExact') }}
               <span class="dedup-tab-badge">{{ pendingExactGroups.length }}</span>
             </button>
             <button
@@ -23,15 +23,15 @@
               :class="{ 'is-active': activeTab === 'similar' }"
               @click="activeTab = 'similar'"
             >
-              视觉相似
+              {{ t('dedup.tabSimilar') }}
               <span class="dedup-tab-badge">{{ pendingSimilarGroups.length }}</span>
             </button>
           </div>
         </div>
 
         <div class="dedup-header-actions">
-          <span v-if="lastScanTimeText" class="last-scan-badge" :title="`上次分析完成时间: ${lastScanTimeText}`">
-            上次分析: {{ lastScanTimeText }}
+          <span v-if="lastScanTimeText" class="last-scan-badge" :title="t('dedup.lastScanTitleTip', { time: lastScanTimeText })">
+            {{ t('dedup.lastScanBadge', { time: lastScanTimeText }) }}
           </span>
 
           <!-- 大图最大化模式切换开关 -->
@@ -39,30 +39,30 @@
             class="am-btn am-btn--sm"
             :class="maximizeImages ? 'am-btn--primary' : 'am-btn--outline'"
             @click="maximizeImages = !maximizeImages"
-            :title="maximizeImages ? '点击切换回标准视图（显示详细属性与引用文档）' : '点击开启大图模式（去除说明信息，最大化图片比对显示）'"
+            :title="maximizeImages ? t('dedup.maximizeOffTip') : t('dedup.maximizeOnTip')"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
               <path v-if="!maximizeImages" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
               <path v-else d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/>
             </svg>
-            <span>大图</span>
+            <span>{{ t('dedup.largeImageLabel') }}</span>
           </button>
 
           <button
             class="am-btn am-btn--outline am-btn--sm"
             @click="handleManualRefresh"
             :disabled="isScanning || isMerging"
-            title="增量扫描：仅重算新增或已变更的文件"
+            :title="t('dedup.incrementalScanTip')"
           >
             <svg class="icon" :class="{ spinning: isScanning }" width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
               <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
             </svg>
-            <span>扫描</span>
+            <span>{{ t('dedup.scanButton') }}</span>
           </button>
 
           <!-- 相似度阈值滑块 (仅在视觉相似 Tab 显示) -->
-          <div v-if="activeTab === 'similar'" class="similarity-slider-box" title="调节视觉相似度判定阈值">
-            <span class="slider-label">相似度:</span>
+          <div v-if="activeTab === 'similar'" class="similarity-slider-box" :title="t('dedup.similaritySliderTip')">
+            <span class="slider-label">{{ t('dedup.similarityLabel') }}</span>
             <input
               type="range"
               min="80"
@@ -75,7 +75,7 @@
             <span class="slider-val">{{ similarityThreshold }}%</span>
           </div>
 
-          <button class="am-dialog__close" @click="handleClose" aria-label="关闭">
+          <button class="am-dialog__close" @click="handleClose" :aria-label="t('common.close')">
             <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
@@ -90,13 +90,13 @@
           <svg class="icon spinning" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
             <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
           </svg>
-          <span>{{ scanProgress.message || '正在扫描重复资源...' }}</span>
+          <span>{{ scanProgress.message || t('dedup.scanningMessage') }}</span>
           <span class="scan-percent">({{ Math.round(scanProgressPercent) }}%)</span>
         </div>
         <div class="scan-progress-bar-wrap">
           <div class="scan-progress-bar-fill" :style="{ width: `${scanProgressPercent}%` }"></div>
         </div>
-        <button class="am-btn am-btn--ghost am-btn--sm" @click="handleCancelScan">取消扫描</button>
+        <button class="am-btn am-btn--ghost am-btn--sm" @click="handleCancelScan">{{ t('dedup.cancelScan') }}</button>
       </div>
 
       <!-- 弹窗主体 -->
@@ -106,9 +106,9 @@
           <div class="empty-icon">
             <Sparkles :size="36" style="fill: none !important; color: var(--b3-theme-primary);" />
           </div>
-          <h4>未发现{{ activeTab === 'exact' ? '精确相同' : '视觉相似' }}的重复资源</h4>
-          <p>当前没有多余冗余文件需要归一化，您的资源库非常整洁。</p>
-          <button class="am-btn am-btn--primary" @click="handleRebuildIndex">重建指纹索引</button>
+          <h4>{{ activeTab === 'exact' ? t('dedup.emptyExactTitle') : t('dedup.emptySimilarTitle') }}</h4>
+          <p>{{ t('dedup.emptyDesc') }}</p>
+          <button class="am-btn am-btn--primary" @click="handleRebuildIndex">{{ t('dedup.rebuildIndex') }}</button>
         </div>
 
         <!-- 左右分栏视图 -->
@@ -119,7 +119,7 @@
               <input
                 v-model="groupSearchQuery"
                 type="text"
-                placeholder="搜索重复文件名..."
+                :placeholder="t('dedup.searchPlaceholder')"
                 class="am-input dedup-search-input"
               />
             </div>
@@ -151,18 +151,18 @@
                     <span class="group-item-title">{{ group.canonicalAssetName }}</span>
                   </div>
                   <div class="group-item-meta">
-                    <span class="group-tag count-tag">{{ group.items.length }} 个文件</span>
+                    <span class="group-tag count-tag">{{ t('dedup.fileCount', { n: group.items.length }) }}</span>
                     <span
                       class="group-tag sim-tag"
                       :class="group.mode === 'exact' ? 'exact-sim' : 'similar-sim'"
                     >
-                      {{ group.mode === 'exact' ? '100% 相同' : `${Math.round(group.similarity * 100)}% 相似` }}
+                      {{ group.mode === 'exact' ? t('dedup.exactSimTag') : t('dedup.similarSimTag', { n: Math.round(group.similarity * 100) }) }}
                     </span>
                   </div>
                   <div class="group-item-saving">
-                    可释放: <strong>{{ formatAssetSize(group.redundantSize) }}</strong>
-                    <span v-if="group.isProcessed" class="status-badge status-processed">已合并</span>
-                    <span v-else-if="group.isIgnored" class="status-badge status-ignored">已忽略</span>
+                    {{ t('dedup.reclaimableLabel') }} <strong>{{ formatAssetSize(group.redundantSize) }}</strong>
+                    <span v-if="group.isProcessed" class="status-badge status-processed">{{ t('dedup.statusMerged') }}</span>
+                    <span v-else-if="group.isIgnored" class="status-badge status-ignored">{{ t('dedup.statusIgnored') }}</span>
                   </div>
                 </div>
               </div>
@@ -175,13 +175,13 @@
             <div class="detail-action-bar">
               <div class="detail-action-left">
                 <span class="detail-group-badge">
-                  {{ currentSelectedGroup.mode === 'exact' ? '精确重复组' : '疑似相似组' }}
+                  {{ currentSelectedGroup.mode === 'exact' ? t('dedup.exactGroupBadge') : t('dedup.similarGroupBadge') }}
                 </span>
                 <span class="detail-group-sim">
-                  相似度: <strong>{{ currentSelectedGroup.mode === 'exact' ? '100%' : `${Math.round(currentSelectedGroup.similarity * 100)}%` }}</strong>
+                  {{ t('dedup.similarityLabel') }} <strong>{{ currentSelectedGroup.mode === 'exact' ? '100%' : `${Math.round(currentSelectedGroup.similarity * 100)}%` }}</strong>
                 </span>
                 <span class="detail-group-count">
-                  共 {{ currentSelectedGroup.items.length }} 个文件，归一化可释放 {{ formatAssetSize(currentSelectedGroup.redundantSize) }}
+                  {{ t('dedup.groupSummary', { n: currentSelectedGroup.items.length, size: formatAssetSize(currentSelectedGroup.redundantSize) }) }}
                 </span>
               </div>
               <div class="detail-action-right">
@@ -189,29 +189,29 @@
                   v-if="!currentSelectedGroup.isProcessed && !currentSelectedGroup.isIgnored"
                   class="am-btn am-btn--ghost am-btn--sm"
                   @click="handleIgnoreGroup(currentSelectedGroup)"
-                  title="跳过并忽略此组去重"
+                  :title="t('dedup.ignoreGroupTip')"
                 >
-                  忽略此组
+                  {{ t('dedup.ignoreGroup') }}
                 </button>
                 <button
                   v-if="currentSelectedGroup.isIgnored"
                   class="am-btn am-btn--ghost am-btn--sm"
                   @click="handleUnignoreGroup(currentSelectedGroup)"
-                  title="恢复此组为待处理状态"
+                  :title="t('dedup.unignoreTip')"
                 >
-                  取消忽略
+                  {{ t('dedup.unignoreGroup') }}
                 </button>
                 <button
                   v-if="!currentSelectedGroup.isProcessed"
                   class="am-btn am-btn--primary am-btn--sm"
                   @click="handleMergeSingleGroup(currentSelectedGroup)"
-                  title="将本组多余文件引用替换为主文件并删除冗余"
+                  :title="t('dedup.mergeGroupTip')"
                 >
-                  合并当前组
+                  {{ t('dedup.mergeGroup') }}
                 </button>
                 <span v-else class="processed-text">
                   <CheckCircle2 :size="14" style="fill: none !important; margin-right: 4px; display: inline-block; vertical-align: middle;" />
-                  <span>该组已成功归一化合并</span>
+                  <span>{{ t('dedup.groupProcessed') }}</span>
                 </span>
               </div>
             </div>
@@ -237,22 +237,22 @@
                       @change="handleSetCanonical(currentSelectedGroup, item.asset.name)"
                     />
                     <span class="radio-custom"></span>
-                    <strong class="canonical-text">{{ item.isCanonical ? '保留为主文件' : '设为主文件' }}</strong>
+                    <strong class="canonical-text">{{ item.isCanonical ? t('dedup.isCanonical') : t('dedup.setCanonical') }}</strong>
                   </label>
                   <div class="header-right-badges">
                     <span
                       v-if="maximizeImages"
                       class="compact-meta-badge"
-                      :title="`${item.asset.name} (${item.width && item.height ? `${item.width}×${item.height}, ` : ''}${formatAssetSize(item.asset.size)})`"
+                      :title="item.width && item.height ? t('dedup.sizeTooltipWithRes', { name: item.asset.name, res: `${item.width}×${item.height}`, size: formatAssetSize(item.asset.size) }) : t('dedup.sizeTooltip', { name: item.asset.name, size: formatAssetSize(item.asset.size) })"
                     >
                       {{ formatAssetSize(item.asset.size) }}
                     </span>
                     <span
                       v-if="isItemTopRecommendation(currentSelectedGroup, item)"
                       class="recom-badge"
-                      title="根据引用量、是否可二次编辑和分辨率等综合算法推荐"
+                      :title="t('dedup.recommendTip')"
                     >
-                      推荐保留
+                      {{ t('dedup.recommendBadge') }}
                     </span>
                   </div>
                 </div>
@@ -280,57 +280,57 @@
                 <!-- 属性元数据表格 (非大图模式显示) -->
                 <div class="compare-card-meta" v-if="!maximizeImages">
                   <div class="meta-row">
-                    <span class="meta-key">文件名:</span>
+                    <span class="meta-key">{{ t('dedup.metaFileName') }}</span>
                     <span class="meta-val filename-val" :title="item.asset.name">{{ item.asset.name }}</span>
                   </div>
                   <div class="meta-row" v-if="item.width && item.height">
-                    <span class="meta-key">分辨率:</span>
+                    <span class="meta-key">{{ t('dedup.metaResolution') }}</span>
                     <span class="meta-val highlight-val">{{ item.width }} × {{ item.height }}</span>
                   </div>
                   <div class="meta-row">
-                    <span class="meta-key">文件体积:</span>
+                    <span class="meta-key">{{ t('dedup.metaSize') }}</span>
                     <span class="meta-val">{{ formatAssetSize(item.asset.size) }}</span>
                   </div>
                   <div class="meta-row">
-                    <span class="meta-key">引用统计:</span>
+                    <span class="meta-key">{{ t('dedup.metaRefCount') }}</span>
                     <span class="meta-val">
-                      <strong>{{ item.asset.refCount || 0 }}</strong> 处引用 ({{ item.asset.docCount || 0 }} 篇文档)
+                      <strong>{{ item.asset.refCount || 0 }}</strong> {{ t('dedup.refUnit', { n: item.asset.refCount || 0 }) }} ({{ t('dedup.docUnit', { n: item.asset.docCount || 0 }) }})
                     </span>
                   </div>
                   <div class="meta-row" v-if="item.asset.isReEditable">
-                    <span class="meta-key">二次编辑:</span>
-                    <span class="meta-val"><span class="reedit-tag">可二次编辑</span></span>
+                    <span class="meta-key">{{ t('dedup.metaReeditable') }}</span>
+                    <span class="meta-val"><span class="reedit-tag">{{ t('dedup.reeditableTag') }}</span></span>
                   </div>
                   <div class="meta-row">
-                    <span class="meta-key">更新时间:</span>
+                    <span class="meta-key">{{ t('dedup.metaUpdated') }}</span>
                     <span class="meta-val time-val">{{ formatAssetTime(item.asset.updated) }}</span>
                   </div>
                 </div>
 
                 <!-- 文档引用列表折叠 (非大图模式显示) -->
                 <div class="compare-card-refs" v-if="!maximizeImages && docGroups(item.asset).length > 0">
-                  <div class="refs-header">被以下文档引用 ({{ docGroups(item.asset).length }}):</div>
+                  <div class="refs-header">{{ t('dedup.referencedBy', { n: docGroups(item.asset).length }) }}</div>
                   <div class="refs-list">
                     <div
                       v-for="group in docGroups(item.asset).slice(0, 3)"
                       :key="group.rootId"
                       class="ref-item"
-                      :title="`点击在后台打开文档: ${group.first.readablePath || group.first.hpath || group.first.path || group.first.id}`"
+                      :title="t('dedup.openDocTip', { doc: group.first.readablePath || group.first.hpath || group.first.path || group.first.id })"
                       @click="handleOpenDocRef(group.first)"
                     >
                       <span class="ref-path">
                         <FileText :size="12" style="fill: none !important; margin-right: 4px; display: inline-block; vertical-align: middle;" />
                         <span>{{ group.first.readablePath || group.first.hpath || group.first.path || group.first.id }}</span>
                       </span>
-                      <span v-if="group.refs.length > 1" class="ref-count">（{{ group.refs.length }} 处）</span>
+                      <span v-if="group.refs.length > 1" class="ref-count">{{ t('dedup.refCountInDoc', { n: group.refs.length }) }}</span>
                     </div>
                     <div v-if="docGroups(item.asset).length > 3" class="ref-more">
-                      ...等共 {{ docGroups(item.asset).length }} 篇文档
+                      {{ t('dedup.moreDocs', { n: docGroups(item.asset).length }) }}
                     </div>
                   </div>
                 </div>
                 <div v-else-if="!maximizeImages" class="compare-card-refs is-empty">
-                  <span class="orphan-tag">孤儿文件 (无任何文档引用)</span>
+                  <span class="orphan-tag">{{ t('dedup.orphanTag') }}</span>
                 </div>
               </div>
             </div>
@@ -342,7 +342,7 @@
       <div class="am-dialog__footer dedup-footer">
         <div class="footer-stats" v-if="!isScanning && displayGroups.length > 0">
           <span>
-            共发现 <strong>{{ pendingGroups.length }}</strong> 组待处理重复，包含 <strong>{{ totalRedundantCount }}</strong> 个冗余文件，预计可释放 <strong>{{ totalReclaimableSizeText }}</strong> 存储空间。
+            {{ t('dedup.footerFoundPrefix') }}<strong>{{ pendingGroups.length }}</strong>{{ t('dedup.footerGroupsSuffix', { n: pendingGroups.length }) }}<strong>{{ totalRedundantCount }}</strong>{{ t('dedup.footerFilesSuffix', { n: totalRedundantCount }) }}<strong>{{ totalReclaimableSizeText }}</strong>{{ t('dedup.footerSizeSuffix') }}
           </span>
         </div>
         <div class="footer-actions">
@@ -350,37 +350,37 @@
             class="am-btn am-btn--ghost"
             @click="startScan(true)"
             :disabled="isScanning || isMerging"
-            title="增量扫描：仅重算新增或已变更的文件"
+            :title="t('dedup.incrementalScanTip')"
           >
-            重新扫描
+            {{ t('dedup.rescanButton') }}
           </button>
           <button
             class="am-btn am-btn--ghost"
             @click="handleRebuildIndex"
             :disabled="isScanning || isMerging"
-            title="清空指纹缓存并重算全部文件（耗时较长，不会修改任何文件）"
+            :title="t('dedup.rebuildIndexTip')"
           >
-            重建索引
+            {{ t('dedup.rebuildIndexShort') }}
           </button>
           <button
             v-if="pendingGroups.length > 0"
             class="am-btn am-btn--ghost"
             @click="handleIgnoreAll"
             :disabled="isScanning || isMerging"
-            title="忽略所有剩余重复组"
+            :title="t('dedup.ignoreAllTip')"
           >
-            全部忽略
+            {{ t('dedup.ignoreAll') }}
           </button>
           <button
             v-if="pendingGroups.length > 0"
             class="am-btn am-btn--primary"
             @click="handleBatchMerge"
             :disabled="isScanning || isMerging"
-            title="批量一键将所有重复组归一化合并并删除冗余文件"
+            :title="t('dedup.batchMergeTip')"
           >
             <svg v-if="isMerging" class="icon spinning" width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
-            <span v-if="isMerging">正在归一化 ({{ mergeProgress.current }}/{{ mergeProgress.total }})...</span>
-            <span v-else>一键批量归一化 ({{ pendingGroups.length }}组)</span>
+            <span v-if="isMerging">{{ t('dedup.mergingProgress', { current: mergeProgress.current, total: mergeProgress.total }) }}</span>
+            <span v-else>{{ t('dedup.batchMergeButton', { n: pendingGroups.length }) }}</span>
           </button>
         </div>
       </div>
@@ -418,6 +418,7 @@ import { formatAssetSize, formatAssetTime, getAssetBadgeText, groupReferencesByD
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { log, warn, error } from '../utils/logger';
+import { t } from '@/i18n';
 
 const props = defineProps<{
   visible: boolean;
@@ -655,7 +656,7 @@ async function startScan(forceRescan = false, forceRehash = false) {
     );
     if (!persisted) {
       // 只影响扫描速度，不动用户的任何资源文件——文案需与此一致，不夸大后果
-      pushMsg('指纹索引未能保存，下次扫描将重新计算（不影响资源文件）');
+      pushMsg(t('dedup.fingerprintSaveFailed'));
     }
 
     if (!controller.aborted) {
@@ -679,7 +680,7 @@ async function startScan(forceRescan = false, forceRehash = false) {
     }
   } catch (err) {
     error('[DeduplicateDialog] 扫描重复失败:', err);
-    pushMsg('扫描重复文件发生异常');
+    pushMsg(t('dedup.scanErrorMsg'));
   } finally {
     isScanning.value = false;
   }
@@ -698,13 +699,10 @@ async function handleManualRefresh() {
  */
 async function handleRebuildIndex() {
   const ok = await showConfirm({
-    title: '重建指纹索引',
-    message: [
-      '将清空已缓存的全部文件指纹，并重新读取、解码所有资源文件。',
-      '此操作耗时较长（资源量大时可达数分钟），但不会修改或删除任何文件。',
-    ].join('\n'),
-    confirmText: '开始重建',
-    cancelText: '取消',
+    title: t('dedup.rebuildIndex'),
+    message: t('dedup.rebuildConfirmMsg'),
+    confirmText: t('dedup.rebuildConfirmText'),
+    cancelText: t('common.cancel'),
     danger: false,
   });
   if (!ok) return;
@@ -806,17 +804,17 @@ async function handleMergeSingleGroup(group: IDuplicateGroup) {
     const stats = await normalizeDuplicateGroup(group);
     if (stats.failedItemsCount > 0) {
       pushMsg(
-        `合并部分完成：${stats.deletedFilesCount} 个冗余文件已归一化，${stats.failedItemsCount} 个未能完成（详见控制台日志）。已改写部分已记录回退日志，可在删除历史中回退。`
+        t('dedup.mergePartialMsg', { n: stats.deletedFilesCount, failed: stats.failedItemsCount })
       );
     } else {
-      pushMsg(`已完成合并！修改了 ${stats.affectedBlocksCount} 处文档引用，释放 ${formatAssetSize(stats.freedBytes)} 空间。`);
+      pushMsg(t('dedup.mergeDoneMsg', { n: stats.affectedBlocksCount, size: formatAssetSize(stats.freedBytes) }));
     }
     await persistCurrentCache();
     emit('completed');
     selectNextPendingGroup();
   } catch (err) {
     error('[DeduplicateDialog] 单组归一化合并失败:', err);
-    pushMsg('合并失败，请查看控制台日志');
+    pushMsg(t('dedup.mergeErrorMsg'));
   }
 }
 
@@ -843,24 +841,22 @@ async function handleBatchMerge() {
 
   const isSimilarMode = activeTab.value === 'similar';
   const confirmMsg = [
-    `【${isSimilarMode ? '视觉相似图片' : '完全相同资源'} 归一化预检明细】`,
-    `• 处理重复组数: ${groupsToMerge.length} 组`,
-    `• 涉及影响文档: ${allDocIds.size} 篇`,
-    `• 自动调整引用: ${totalRefs} 处`,
-    `• 删除冗余文件: ${totalRedundantCount.value} 个`,
-    `• 预计释放空间: ${totalReclaimableSizeText.value}`,
+    isSimilarMode ? t('dedup.batchCheckTitleSimilar') : t('dedup.batchCheckTitleExact'),
+    t('dedup.batchCheckGroups', { n: groupsToMerge.length }),
+    t('dedup.batchCheckDocs', { n: allDocIds.size }),
+    t('dedup.batchCheckRefs', { n: totalRefs }),
+    t('dedup.batchCheckFiles', { n: totalRedundantCount.value }),
+    t('dedup.batchCheckSpace', { size: totalReclaimableSizeText.value }),
     '',
-    isSimilarMode
-      ? '[风险提醒] 当前为【视觉相似】模式！视觉相似图片虽构图相近但内容可能不完全相同，合并后非主资源将被永久物理删除，请确保已核对右侧比对视图。'
-      : '注意：冗余文件将被物理删除，文档中对应的引用将无缝指向唯一主资源。',
-    '是否确认执行一键批量归一化？',
+    isSimilarMode ? t('dedup.batchWarnSimilar') : t('dedup.batchWarnExact'),
+    t('dedup.batchCheckConfirm'),
   ].join('\n');
 
   const ok = await showConfirm({
-    title: '批量资源去重与归一化确认',
+    title: t('dedup.batchConfirmTitle'),
     message: confirmMsg,
-    confirmText: '立即归一化',
-    cancelText: '取消',
+    confirmText: t('dedup.batchConfirmText'),
+    cancelText: t('common.cancel'),
     danger: true,
   });
 
@@ -877,15 +873,15 @@ async function handleBatchMerge() {
     await persistCurrentCache();
     if (stats.failedItemsCount > 0) {
       pushMsg(
-        `批量归一化部分完成：删除 ${stats.deletedFilesCount} 个冗余文件，${stats.failedItemsCount} 个未能完成（详见控制台日志）。已改写部分已记录回退日志，可在删除历史中回退。`
+        t('dedup.batchPartialMsg', { n: stats.deletedFilesCount, failed: stats.failedItemsCount })
       );
     } else {
-      pushMsg(`批量去重归一化完成！更新了 ${stats.affectedDocsCount} 篇文档中的 ${stats.affectedBlocksCount} 处引用，删除 ${stats.deletedFilesCount} 个冗余文件，成功释放 ${formatAssetSize(stats.freedBytes)} 存储空间。`);
+      pushMsg(t('dedup.batchDoneMsg', { n: stats.deletedFilesCount, docs: stats.affectedDocsCount, refs: stats.affectedBlocksCount, size: formatAssetSize(stats.freedBytes) }));
     }
     emit('completed');
   } catch (err) {
     error('[DeduplicateDialog] 批量归一化失败:', err);
-    pushMsg('批量归一化过程中出现错误，请检查日志');
+    pushMsg(t('dedup.batchErrorMsg'));
   } finally {
     isMerging.value = false;
   }
@@ -912,7 +908,7 @@ async function handleOpenDocRef(ref: BlockRef) {
         },
         keepCursor: true,
       });
-      pushMsg(`已在后台打开文档: ${ref.readablePath || ref.hpath || ref.id}`);
+      pushMsg(t('dedup.docOpenedMsg', { doc: ref.readablePath || ref.hpath || ref.id }));
     }
   } catch (e) {
     warn('[DeduplicateDialog] 打开引用文档失败:', e);

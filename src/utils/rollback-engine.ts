@@ -11,6 +11,7 @@ import {
   type IRollbackReport,
 } from './deletion-logger';
 import { log, warn, error } from './logger';
+import { t } from '@/i18n';
 
 export interface IRollbackExecutionResult {
   success: boolean;
@@ -152,15 +153,15 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
   const batch = history.find((b) => b.id === batchId);
 
   if (!batch) {
-    throw new Error(`找不到批次 [${batchId}]，无法执行回退`);
+    throw new Error(t('rollback.batchNotFound', { batchId }));
   }
 
   if (!batch.canRollback) {
-    throw new Error(`批次 [${batchId}] 的类型为 [${batch.actionType}]，不支持引用语法回退`);
+    throw new Error(t('rollback.batchNotRollbackable', { batchId, actionType: batch.actionType }));
   }
 
   if (batch.isRolledBack) {
-    throw new Error(`批次 [${batchId}] 此前已执行过回退，请勿重复操作`);
+    throw new Error(t('rollback.batchAlreadyRolledBack', { batchId }));
   }
 
   let restoredBlocksCount = 0;

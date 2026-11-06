@@ -1,94 +1,94 @@
-# 全库资源看得清，扫除冗余理得净——思源笔记资源管家功能预览
+# See Every Asset at a Glance, Sweep Away the Redundancy — Assets Manager for SiYuan Note Feature Preview
 
-> 让思源笔记中的资源文件 **看得清、找得到、改得动、理得净**。  
-> 告别乱码文件名、断链失效、重复冗余和图像编辑无法二次修改的烦恼。
+> Make the asset files in your SiYuan Note workspace **clear to see, easy to find, safe to edit, and clean to keep**.
+> Say goodbye to garbled filenames, broken links, duplicate clutter, and images that can never be edited a second time.
 
-## 🧐 你在日常记笔记时，是否也遇到过这些痛点？
+## 🧐 Do these pain points sound familiar in your daily note-taking?
 
-### 资源管理的痛点
+### Asset Management Pain Points
 
-- 🔍 **找不到资源用在哪里**：想清理一个大视频或大 PDF，但不确定它到底关联了哪些文档，缺乏反向追踪引用的能力？
-- 👥 **反复粘贴导致空间暴增**：同一张架构图或插图在多篇笔记里以副本形式粘贴过多次，`assets` 文件夹里堆积了大量内容完全相同或高度相似的重复文件，白白浪费云同步空间？
-- 🧹 **不知道哪些文件可以删**：笔记删改多次后，`assets` 目录膨胀到几个 G，哪些附件还在使用、哪些早已被废弃成“孤儿文件”完全是一笔糊涂账，不敢轻易清理？
-- 🔗 **想改文件名又怕断链**：笔记里的图片和附件全是 `image-2023...` 这种无意义的名字，想整理重命名，却担心改了之后文档里的图片全部裂开变红叉？
-- 🎨 **图像标注改不动**：写教程或备忘时截了图、画了框、标了步骤序号，保存后发现写错了一个字或顺序变了——无法移动之前的箭头或修改文字，只能无奈重新截图重画一遍？
+- 🔍 **Can't tell where an asset is used**: You want to clean up a large video or PDF, but you have no idea which documents reference it — reverse reference tracking simply isn't available?
+- 👥 **Repeated pasting bloats your storage**: The same architecture diagram or illustration gets pasted as copies into multiple notes, piling up identical or near-identical duplicates in the `assets` folder and wasting cloud sync space for nothing?
+- 🧹 **No clue which files can be deleted**: After rounds of editing and deleting notes, the `assets` directory balloons to several gigabytes, and which attachments are still in use versus long abandoned as "orphan files" is a complete mystery — too risky to clean up?
+- 🔗 **Afraid that renaming will break links**: Images and attachments in your notes all carry meaningless names like `image-2023...`; you'd love to organize and rename them, but you dread every image in your documents turning into a broken red cross?
+- 🎨 **Image annotations you can't revise**: While writing a tutorial or memo, you take a screenshot, draw boxes, and add step numbers — then find a typo or the order has changed. You can't move the earlier arrows or fix the text, so you reluctantly re-capture and re-annotate everything?
 
- **「资源管家」正是为你彻底解决上述所有资源管理难题而打造的得力助手。**
+**Assets Manager is the capable assistant built to put all of these asset management problems behind you for good.**
 
 
 
-## 🌟 核心价值与特色功能
+## 🌟 Core Value & Key Features
 
-### 📊 6 大分类看板与高性能浏览体验
+### 📊 6-Category Dashboard & High-Performance Browsing
 
-- **分类统计一目了然**：顶部直观展示 **图片、文档、音频、视频、压缩包、其他** 6 大分类的文件数与体积占比。
-- **海量文件丝滑滚动**：采用高性能虚拟滚动技术，即使笔记库中有数万张图片与附件，也能流畅翻阅、毫秒级响应。
-- **多维筛选与排序**：支持按关键词实时检索、按可二次编辑/原始底图/未引用/大文件（>1MB）属性筛选，支持按大小、名称、引用数双向排序。
-- **快捷悬浮预览**：鼠标划过缩略图即可在界面内自适应弹出高清大图预览，无需频繁点击打开。
+- **At-a-glance category statistics**: The top of the panel shows file counts and size share for the six major categories — **Images, Documents, Audio, Video, Archives, Others**.
+- **Silky-smooth browsing over massive libraries**: High-performance virtual scrolling keeps everything fluid with millisecond-level response, even with tens of thousands of images and attachments in your workspace.
+- **Multi-dimensional filtering & sorting**: Real-time keyword search; filters by re-editable / original base image / unreferenced / large file (>1MB); two-way sorting by size, name, and reference count.
+- **Quick hover preview**: Hover over any thumbnail and a high-resolution preview pops up adaptively right inside the panel — no repeated clicking to open.
 
 ![image](https://raw.githubusercontent.com/famotime/siyuan-assets-manager/master/assets/image.png)
 
-### 🧹 孤儿资源与孤立底图深度清理 —— 安全无忧，明明白白
+### 🧹 Deep Cleanup of Orphan Assets & Stranded Base Images — Safe and Transparent
 
-- **全库引用穿透扫描**：一键精准找出没有任何文档引用的“孤儿资源”，以及历史残留的失效底图。
-- **清理前容量预估**：清晰展示待清理文件总数、预计释放存储容量，支持单项选择或一键批量清理。
-- **空引用块自动打理**：删除资源时自动清理文档中的空块，保持笔记排版干净利落。
-- **引用反向追踪**：想知道某份资料用在哪些笔记里？点击 “打开” 按钮，插件会在后台自动打开所有引用该资源的文档并高亮定位，上下文溯源轻而易举。
+- **Full-workspace reference scan**: One click precisely finds "orphan assets" that no document references, as well as stale base images left behind by history.
+- **Storage estimate before cleanup**: Clearly shows the total number of files to be cleaned and the storage capacity expected to be freed; clean items one by one or in a single batch.
+- **Automatic empty-block cleanup**: When an asset is removed, the plugin automatically cleans up the empty blocks left in your documents, keeping layouts neat and tidy.
+- **Reverse reference tracing**: Want to know which notes use a given resource? Click the "Open" button and the plugin automatically opens every document that references it in the background and highlights the exact location — tracing context is effortless.
 
 ![image](https://raw.githubusercontent.com/famotime/siyuan-assets-manager/master/assets/image-20260913135250-zvvete9.png)
 
-### 🔄 操作审计与智能逆向回退 —— 回收站深度整合，误删误改随时还原
+### 🔄 Operation Audit & Smart Reverse Rollback — Deep Recycle Bin Integration, Restore Anytime
 
-- **全流程操作审计日志**：单文件删除、批量删除、孤儿清理与去重合并均记录详细批次，容量释放与涉及文档一目了然。
-- **操作系统回收站集成**：物理文件删除优先移入操作系统回收站，提供一键直达回收站窗口与快捷复制待放回清单。
-- **智能逆向引用回退**：一键回退去重引用的替换语法，以及恢复被删图片的文档正文、块属性（题头图等）与属性视图（数据库）单元格引用；内置智能内容漂移防御，绝不覆盖后续的新编辑。
+- **Full-pipeline operation audit log**: Single-file deletions, batch deletions, orphan cleanup, and dedup merges are all logged in detailed batches, with freed capacity and affected documents at a glance.
+- **Operating system recycle bin integration**: Physically deleted files are moved to the OS recycle bin first, with one-click access to the recycle bin window and a shortcut to copy the list of files to restore.
+- **Smart reverse reference rollback**: One click rolls back the replacement syntax produced by deduplication, and restores document body, block attribute (e.g. header image), and attribute view (database) cell references for deleted images; built-in smart content-drift protection never overwrites newer edits.
 
-### ⚡ 智能去重与相似图片归一化 —— 一键给笔记库强力瘦身
+### ⚡ Smart Deduplication & Similar-Image Normalization — Slim Down Your Workspace in One Click
 
-- **精准哈希 & 视觉相似度比对**：智能检测笔记中完全重复的文件，以及裁剪/缩放/压缩后的高相似度图片。
-- **直观双栏对比视图**：左右分栏直观比对图片细节、文件尺寸、占用空间及各自的引用文档分布。
-- **一键合并（归一化）** ：保留一份主文件，自动将其他文档中的冗余引用全部重定向到主文件，并安全清理重复文件，瞬间释放珍贵的同步与存储空间。
+- **Precise hashing & visual similarity comparison**: Intelligently detects files that are exact duplicates, as well as highly similar images produced by cropping, resizing, or compression.
+- **Intuitive side-by-side comparison view**: Compare image details, file dimensions, space usage, and the distribution of referencing documents for each side, left versus right.
+- **One-click merge (normalization)**: Keep a single master file; the plugin automatically redirects all redundant references to the master and safely deletes the duplicates, instantly freeing precious sync and storage space.
 
 ![image](https://raw.githubusercontent.com/famotime/siyuan-assets-manager/master/assets/image-20260913135337-6lojnpi.png)
 
 ![image](https://raw.githubusercontent.com/famotime/siyuan-assets-manager/master/assets/image-20260913160829-bxdj478.png)
 
-### 🏷️ 全局智能重命名 —— 告别乱码文件名，链接永不断
+### 🏷️ Global Smart Rename — No More Garbled Filenames, Links Never Break
 
-- **改名自动同步引用**：在资源列表或文档图片右键菜单中直接修改资源名称，插件会自动更新全局所有引用该资源的文档与块，**绝不产生死链**。
-- **智能后缀与合法性保障**：忘记写扩展名自动补齐，修改扩展名主动预警，自动拦截非法字符，省心又安全。
+- **Renames sync references automatically**: Rename an asset directly from the asset list or a document image's context menu, and the plugin updates every document and block referencing it across the workspace — **never producing a dead link**.
+- **Smart extension handling & validation**: Forgot the extension? It's auto-completed. Changing an extension triggers a proactive warning. Illegal characters are blocked automatically — safe and worry-free.
 
 ![image](https://raw.githubusercontent.com/famotime/siyuan-assets-manager/master/assets/image-20260913135445-by3hsdv.png)
 
-### 🎨 「无损二次编辑」—— 全功能图像编辑器，标注随时改
+### 🎨 "Non-Destructive Secondary Editing" — A Full-Featured Image Editor, Annotations Always Editable
 
-- **标注图层智能保留**：在思源内对图片添加的矩形框、箭头、文字说明、连续步骤序号等元素均作为**可编辑矢量图层**存储，随时可以多次编辑。
-- **底图无损还原**：安全归档原始干净底图，再次编辑时**随时选中移动位置、修改文字、调换序号、更换颜色**，底图永远清晰干净，没有残留涂抹痕迹。
-- **文档无感同步**：编辑完成后一键保存，所有引用该图片的笔记页面自动无缝刷新，无需手动重新上传替换。
+- **Smart annotation layer retention**: Rectangles, arrows, text notes, and continuous step numbers added to images inside SiYuan are stored as **editable vector layers**, ready to be edited again and again at any time.
+- **Lossless base image restoration**: The original clean base image is safely archived; when you edit again you can **move elements, revise text, reorder step numbers, and change colors** whenever you like, while the base image stays perfectly clean — no leftover smearing or artifacts.
+- **Seamless document sync**: One click to save after editing, and every note page referencing that image refreshes automatically and seamlessly — no manual re-uploading or replacing.
 
 ![image](https://raw.githubusercontent.com/famotime/siyuan-assets-manager/master/assets/image-20260913140938-agf53yf.png)
 
 ![image](https://raw.githubusercontent.com/famotime/siyuan-assets-manager/master/assets/image-20260913140052-o84pbcp.png)
 
-## 🔒 安全与建议
+## 🔒 Safety & Recommendations
 
-1. **清理操作**：物理删除文件与孤儿清理属于不可逆操作，插件在执行前均提供明确的数量与体积提示及二次确认。建议在进行大规模清理前，确保已做好日常备份或开启思源云端快照。
-2. **文件重命名操作**：重命名时插件会自动校验非法字符，同时自动联动更新全局所有引用该资源的文档块。手动命名资源文件有可能与思源笔记自动命名产生冲突，请谨慎使用该功能。
-3. **去重与合并（归一化）操作**：去重合并会将所有冗余引用重定向到保留的主文件，并删除其余重复文件。建议在双栏比对视图中仔细核对图片细节与文件信息后再执行合并。
-4. **图像二次编辑**：原始底图安全隔离保存在插件存储目录（​`/data/storage/petal/siyuan-assets-manager/originals/`）中，不受思源原生清理影响。若笔记中的图片块已全部删除，可在管理面板中通过“孤立底图清理”安全释放存储空间。
+1. **Cleanup operations**: Physical file deletion and orphan cleanup are irreversible. Before executing them, the plugin always shows clear prompts with counts and sizes and asks for a second confirmation. Before any large-scale cleanup, make sure you have routine backups in place or SiYuan cloud snapshots enabled.
+2. **File rename operations**: When renaming, the plugin automatically validates illegal characters and automatically updates every document block across the workspace that references the asset. Manually naming asset files may conflict with SiYuan's automatic naming — please use this feature with care.
+3. **Deduplication & merge (normalization) operations**: Merging redirects all redundant references to the kept master file and deletes the remaining duplicates. Carefully review image details and file information in the side-by-side comparison view before merging.
+4. **Image secondary editing**: Original base images are safely isolated in the plugin's storage directory (​`/data/storage/petal/siyuan-assets-manager/originals/`) and are not affected by SiYuan's native cleanup. If all image blocks referencing a base image have been deleted, you can safely free the storage via "Stranded base image cleanup" in the management panel.
 
 ‍
 
-## 🙏 感谢
+## 🙏 Acknowledgements
 
-1. [ImgReEditor](https://github.com/Achuan-2/siyuan-plugin-imgReEditor) 插件项目（作者：Achuan-2）：本插件借鉴了图像二次编辑的思路，并配合底图隔离归档，避免了编辑后底图无法还原及历史编辑信息被破坏的问题；
-2. [tui.image-editor](https://github.com/nhn/tui.image-editor/) 项目（作者：NHN Cloud）：本项目图像编辑器基于 tui.image-editor 进行了深度定制与功能增强，包括：
+1. The [ImgReEditor](https://github.com/Achuan-2/siyuan-plugin-imgReEditor) plugin project (author: Achuan-2): This plugin draws on its idea of image secondary editing and, combined with isolated archiving of base images, avoids the problems of unrecoverable base images and destroyed edit history after editing.
+2. The [tui.image-editor](https://github.com/nhn/tui.image-editor/) project (author: NHN Cloud): The image editor in this project is deeply customized and enhanced on top of tui.image-editor, including:
 
-   - 大幅重构交互界面，提供类 Photoshop 的工具栏与配置面板，解决原版工具占据编辑空间、遮挡图像的问题；
-   - 序号工具支持步骤序号连续标注，自动编号；
-   - 马赛克工具支持涂抹覆盖敏感图像区域；
-   - 套索工具支持编辑对象选择和处理；
-   - 橡皮工具支持删除任意涂抹内容；
-   - 还有更多……
+   - A substantially reworked interface with a Photoshop-like toolbar and configuration panel, solving the original's problem of tools occupying editing space and covering the image;
+   - The number tool supports continuous step-number annotation with automatic numbering;
+   - The mosaic tool supports smearing over sensitive image areas;
+   - The lasso tool supports selecting and processing objects;
+   - The eraser tool supports removing any smeared content;
+   - And much more...
 
 ‍

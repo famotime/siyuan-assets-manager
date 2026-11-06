@@ -5,29 +5,29 @@
       <!-- 第一层：品牌、实时指标胶囊与核心操作图标群 -->
       <div class="header__top-row">
         <div class="header__title-group">
-          <h2>资源管家</h2>
+          <h2>{{ t('common.appTitle') }}</h2>
           <div class="header-summary-badge" v-if="assets.length > 0">
-            <span class="summary-count">{{ sortedAssets.length }} / {{ assets.length }} 项</span>
+            <span class="summary-count">{{ t('main.itemCount', { shown: sortedAssets.length, total: assets.length }) }}</span>
             <span class="summary-dot">·</span>
             <span class="summary-size">{{ statFillActive ? '≈ ' : '' }}{{ totalAssetsSizeText }}</span>
           </div>
         </div>
 
         <div class="header__top-actions">
-          <span class="refresh-time" title="资源列表最近一次从思源数据库重新载入的时间">
-            上次刷新：{{ lastRefreshText }}
+          <span class="refresh-time" :title="t('main.lastRefreshTitle')">
+            {{ t('main.lastRefresh', { time: lastRefreshText }) }}
           </span>
 
           <!-- 后台 size 补全进度：显式计数 + 进度条，替代仅凭 ≈ 前缀猜测 -->
           <span
             v-if="statFillActive"
             class="stat-fill-progress"
-            title="正在后台补全文件大小：体积统计将持续逼近真实值，期间界面可正常操作"
+            :title="t('main.statFillTitle')"
           >
             <span class="stat-fill-progress-bar">
               <span class="stat-fill-progress-fill" :style="{ width: statFillPercent + '%' }"></span>
             </span>
-            <span>补全大小 {{ statFillProgressText }}</span>
+            <span>{{ t('main.statFillProgress', { progress: statFillProgressText }) }}</span>
           </span>
 
           <div class="primary-action-icons">
@@ -35,10 +35,10 @@
             <button
               class="am-action-btn am-action-btn--refresh am-action-btn--with-text b3-tooltips b3-tooltips__s"
               @click="handleRefreshClick"
-              aria-label="刷新资源列表"
+              :aria-label="t('main.refreshListAria')"
             >
               <RotateCw :size="14" :class="{ spinning: loading }" style="fill: none !important;" />
-              <span>刷新</span>
+              <span>{{ t('common.refresh') }}</span>
             </button>
 
             <!-- 批量删除 / 去重 -->
@@ -47,18 +47,18 @@
                 class="am-action-btn am-action-btn--batch-delete am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleBatchDelete"
                 :disabled="refsPending"
-                :aria-label="refsPending ? '引用分析进行中，暂不可删除' : `批量删除选中的 ${selectedNames.size} 个文件`"
+                :aria-label="refsPending ? t('main.refsPendingNoDeleteAria') : t('main.batchDeleteAria', { count: selectedNames.size })"
               >
                 <Trash2 :size="14" style="fill: none !important;" />
-                <span>批量删除</span>
+                <span>{{ t('main.batchDeleteBtn') }}</span>
               </button>
               <button
                 class="am-action-btn am-action-btn--cancel am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="clearSelection"
-                aria-label="取消当前多选"
+                :aria-label="t('main.cancelSelectionAria')"
               >
                 <XSquare :size="14" style="fill: none !important;" />
-                <span>取消</span>
+                <span>{{ t('common.cancel') }}</span>
               </button>
             </template>
             <template v-else>
@@ -66,19 +66,19 @@
                 class="am-action-btn am-action-btn--dedup am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleOpenDeduplicate"
                 :disabled="refsPending"
-                aria-label="识别疑似重复资源与视觉相似图片，比对后一键归一化合并"
+                :aria-label="t('main.dedupAria')"
               >
                 <CopyMinus :size="14" style="fill: none !important;" />
-                <span>去重</span>
+                <span>{{ t('main.dedupBtn') }}</span>
               </button>
               <button
                 class="am-action-btn am-action-btn--clean am-action-btn--with-text b3-tooltips b3-tooltips__s"
                 @click="handleUnifiedCleanup"
                 :disabled="refsPending"
-                aria-label="综合清理所有未引用的孤儿资源与孤立底图"
+                :aria-label="t('main.cleanupAria')"
               >
                 <Trash2 :size="14" style="fill: none !important;" />
-                <span>清理</span>
+                <span>{{ t('main.cleanupBtn') }}</span>
               </button>
             </template>
 
@@ -86,10 +86,10 @@
             <button
               class="am-action-btn am-action-btn--history am-action-btn--with-text b3-tooltips b3-tooltips__sw"
               @click="historyDialogVisible = true"
-              aria-label="查看删除操作日志与回退历史"
+              :aria-label="t('main.historyAria')"
             >
               <History :size="14" style="fill: none !important;" />
-              <span>日志</span>
+              <span>{{ t('main.historyBtn') }}</span>
             </button>
           </div>
         </div>
@@ -105,7 +105,7 @@
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
               :class="{ 'is-active': viewMode === 'flat' }"
               @click="setViewMode('flat')"
-              aria-label="平铺列表视图"
+              :aria-label="t('main.viewModeFlat')"
             >
               <LayoutList :size="15" style="fill: none !important;" />
             </button>
@@ -114,7 +114,7 @@
               class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
               :class="{ 'is-active': viewMode === 'doc' }"
               @click="setViewMode('doc')"
-              aria-label="按文档归类视图"
+              :aria-label="t('main.viewModeDoc')"
             >
               <FolderTree :size="15" style="fill: none !important;" />
             </button>
@@ -126,14 +126,14 @@
             <input 
               v-model="searchQuery" 
               type="text" 
-              :placeholder="viewMode === 'doc' ? '搜索资源或文档名称...' : '搜索资源名称...'" 
+              :placeholder="viewMode === 'doc' ? t('main.searchPlaceholderDoc') : t('main.searchPlaceholder')"
               class="am-input search-input"
             />
             <button
               v-if="searchQuery"
               class="search-clear-btn"
               @click="searchQuery = ''"
-              aria-label="清空搜索"
+              :aria-label="t('main.clearSearchAria')"
             >
               <X :size="12" style="fill: none !important;" />
             </button>
@@ -141,28 +141,28 @@
 
           <!-- 属性过滤下拉 -->
           <select v-model="filterType" class="am-input filter-select">
-            <option value="all">全部属性</option>
-            <option value="reeditable">可二次编辑</option>
-            <option value="original">原始底图</option>
-            <option value="unreferenced">未引用 (孤儿/孤立)</option>
-            <option value="missing">丢失资源{{ missingAssetsCount > 0 ? ` (${missingAssetsCount})` : '' }}</option>
-            <option value="canvas">画布专属资源</option>
-            <option value="large">大文件 (>1MB)</option>
+            <option value="all">{{ t('main.filterAll') }}</option>
+            <option value="reeditable">{{ t('main.filterReeditable') }}</option>
+            <option value="original">{{ t('main.filterOriginal') }}</option>
+            <option value="unreferenced">{{ t('main.filterUnreferenced') }}</option>
+            <option value="missing">{{ missingAssetsCount > 0 ? t('main.filterMissingCount', { count: missingAssetsCount }) : t('main.filterMissing') }}</option>
+            <option value="canvas">{{ t('main.filterCanvas') }}</option>
+            <option value="large">{{ t('main.filterLarge') }}</option>
           </select>
         </div>
 
         <!-- 文档归类模式专属控制器：文档排序与全部展开/折叠 -->
         <div class="toolbar-right" v-if="viewMode === 'doc'">
           <select v-model="docSortField" class="am-input doc-sort-select">
-            <option value="totalSize">按文档总大小</option>
-            <option value="assetCount">按文档资源数</option>
-            <option value="name">按文档名称</option>
+            <option value="totalSize">{{ t('main.docSortBySize') }}</option>
+            <option value="assetCount">{{ t('main.docSortByCount') }}</option>
+            <option value="name">{{ t('main.docSortByName') }}</option>
           </select>
           <button
             type="button"
             class="am-btn am-btn--icon b3-tooltips b3-tooltips__s"
             @click="toggleDocSortOrder"
-            :aria-label="docSortOrder === 'desc' ? '文档排序：降序 (点击切换升序)' : '文档排序：升序 (点击切换降序)'"
+            :aria-label="docSortOrder === 'desc' ? t('main.docSortDescAria') : t('main.docSortAscAria')"
           >
             <ArrowDownNarrowWide v-if="docSortOrder === 'desc'" :size="16" style="fill: none !important;" />
             <ArrowUpNarrowWide v-else :size="16" style="fill: none !important;" />
@@ -171,7 +171,7 @@
             type="button"
             class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
             @click="toggleAllDocGroups"
-            :aria-label="isAllGroupsCollapsed ? '一键全部展开所有文档' : '一键全部折叠所有文档'"
+            :aria-label="isAllGroupsCollapsed ? t('main.expandAllDocsAria') : t('main.collapseAllDocsAria')"
           >
             <ChevronsDownUp v-if="!isAllGroupsCollapsed" :size="16" style="fill: none !important;" />
             <ChevronsUpDown v-else :size="16" style="fill: none !important;" />
@@ -189,12 +189,12 @@
         class="category-pill"
         :class="{ 'is-active': activeCategory === card.key }"
         @click="handleCategoryClick(card.key)"
-        :title="activeCategory === card.key && card.key !== 'all' ? `点击取消【${card.label}】筛选，查看全部` : `点击仅查看【${card.label}】资源`"
+        :title="activeCategory === card.key && card.key !== 'all' ? t('main.categoryUnfilterTitle', { label: categoryLabel(card) }) : t('main.categoryFilterTitle', { label: categoryLabel(card) })"
       >
         <span class="pill-icon" :style="{ color: card.color }">
           <component :is="card.icon" :size="14" style="fill: none !important;" />
         </span>
-        <span class="pill-label">{{ card.label }}</span>
+        <span class="pill-label">{{ categoryLabel(card) }}</span>
         <span class="pill-badge">{{ categoryStats[card.key]?.count || 0 }}</span>
         <span class="pill-size">{{ statFillActive ? '≈' : '' }}{{ categoryStats[card.key]?.sizeText || '0 B' }}</span>
       </button>
@@ -206,8 +206,8 @@
       <!-- 引用关系仍在后台分析：先渲染文件列表，但清理/删除类操作在此之前一律禁用 -->
       <div v-if="refsPending && !loading" class="refs-pending-banner">
         <RotateCw :size="13" class="spinning" style="fill: none !important;" />
-        <span>{{ scanPhaseLabel || '正在分析文档引用关系' }}（已耗时 {{ scanElapsedText }}）</span>
-        <span class="refs-pending-hint">完成前清理 / 去重 / 删除暂不可用，列表当前仅含文件信息</span>
+        <span>{{ t('main.refsPendingStatus', { phase: scanPhaseLabel || t('main.analyzingRefs'), time: scanElapsedText }) }}</span>
+        <span class="refs-pending-hint">{{ t('main.refsPendingHint') }}</span>
       </div>
 
       <VirtualAssetList
@@ -257,17 +257,17 @@
       <template v-if="scanError">
         <div class="loading-error">
           <AlertCircle :size="18" style="fill: none !important;" />
-          <span>扫描失败：{{ scanError }}</span>
-          <button class="am-btn am-btn--sm" @click="handleRefreshClick">重试</button>
+          <span>{{ t('main.scanFailedWith', { message: scanError }) }}</span>
+          <button class="am-btn am-btn--sm" @click="handleRefreshClick">{{ t('common.retry') }}</button>
         </div>
       </template>
       <template v-else>
         <div class="loading-progress">
           <RotateCw :size="16" class="spinning" style="fill: none !important;" />
-          <span>{{ scanPhaseLabel || '正在扫描 Siyuan 数据库并构建资源关联表，请稍候...' }}</span>
-          <span v-if="scanElapsed > 0" class="loading-elapsed">已耗时 {{ scanElapsedText }}</span>
+          <span>{{ scanPhaseLabel || t('main.scanningDefault') }}</span>
+          <span v-if="scanElapsed > 0" class="loading-elapsed">{{ t('main.elapsedTime', { time: scanElapsedText }) }}</span>
         </div>
-        <div class="loading-hint">大工作空间（10 万级资源 / 百万级块）全量扫描可能需要数分钟，期间请勿频繁刷新</div>
+        <div class="loading-hint">{{ t('main.loadingHint') }}</div>
       </template>
     </div>
 
@@ -298,7 +298,7 @@
     <!-- 底部悬浮批量操作浮岛 (就近操作，提升大屏长列表人机工效) -->
     <div v-if="selectedNames.size > 0" class="am-batch-floating-dock">
       <div class="am-batch-floating-dock__info">
-        <span>已选 <strong class="am-batch-floating-dock__count">{{ selectedNames.size }}</strong> 项</span>
+        <span>{{ t('main.selectedCountPrefix') }} <strong class="am-batch-floating-dock__count">{{ selectedNames.size }}</strong> {{ t('main.selectedCountSuffix', { n: selectedNames.size }) }}</span>
         <span>({{ selectedSummary.sizeText }})</span>
       </div>
       <div class="am-batch-floating-dock__divider"></div>
@@ -307,19 +307,19 @@
           type="button"
           class="am-btn am-btn--sm am-btn--ghost"
           @click="clearSelection"
-          aria-label="清空当前多选"
+          :aria-label="t('main.clearSelectionAria')"
         >
-          取消选择
+          {{ t('main.cancelSelectionBtn') }}
         </button>
         <button
           type="button"
           class="am-btn am-btn--sm am-btn--danger"
           @click="handleBatchDelete"
           :disabled="refsPending"
-          :aria-label="refsPending ? '引用分析进行中，暂不可删除' : `确认执行批量删除 (${selectedNames.size} 个文件)`"
+          :aria-label="refsPending ? t('main.refsPendingNoDeleteAria') : t('main.batchDeleteConfirmAria', { count: selectedNames.size })"
         >
           <Trash2 :size="13" style="fill: none !important;" />
-          <span>批量删除</span>
+          <span>{{ t('main.batchDeleteBtn') }}</span>
         </button>
       </div>
     </div>
@@ -414,6 +414,7 @@ import {
 } from '../utils/asset-list';
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
+import { t } from '@/i18n';
 import { usePlugin } from '../utils/plugin-context';
 import { error } from '../utils/logger';
 import VirtualAssetList from './VirtualAssetList.vue';
@@ -447,9 +448,9 @@ const statFillActive = ref(false);
 const statFillProgress = ref<{ done: number, total: number } | null>(null);
 const statFillProgressText = computed(() => {
   const p = statFillProgress.value;
-  if (!p || !p.total) return '准备中…';
+  if (!p || !p.total) return t('common.preparing');
   const pct = Math.min(100, Math.floor((p.done / p.total) * 100));
-  return `${p.done.toLocaleString()} / ${p.total.toLocaleString()}（${pct}%）`;
+  return t('main.statFillCounts', { done: p.done.toLocaleString(), total: p.total.toLocaleString(), pct });
 });
 const statFillPercent = computed(() => {
   const p = statFillProgress.value;
@@ -462,8 +463,8 @@ const scanElapsed = ref(0);
 const scanError = ref<string | null>(null);
 const scanElapsedText = computed(() => {
   const s = scanElapsed.value;
-  if (s < 60) return `${s} 秒`;
-  return `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
+  if (s < 60) return t('main.durationSeconds', { n: s });
+  return t('main.durationMinutes', { m: Math.floor(s / 60), s: s % 60 });
 });
 let scanTimer: number | null = null;
 let scanSession = 0;
@@ -527,13 +528,17 @@ function handleOpenDeduplicate() {
 const categoryStats = computed(() => calculateCategoryStats(assets.value));
 
 const categoryCards = computed(() => [
-  { key: 'all' as AssetCategory, label: '全部', icon: Files, color: 'var(--am-cat-all)' },
-  { key: 'image' as AssetCategory, label: '图片', icon: Image, color: 'var(--am-cat-image)' },
-  { key: 'document' as AssetCategory, label: '文档', icon: FileText, color: 'var(--am-cat-doc)' },
-  { key: 'audio' as AssetCategory, label: '音频', icon: Music, color: 'var(--am-cat-audio)' },
-  { key: 'video' as AssetCategory, label: '视频', icon: Video, color: 'var(--am-cat-video)' },
-  { key: 'archive' as AssetCategory, label: '压缩包', icon: Archive, color: 'var(--am-cat-archive)' },
+  { key: 'all' as AssetCategory, labelKey: 'common.all', icon: Files, color: 'var(--am-cat-all)' },
+  { key: 'image' as AssetCategory, labelKey: 'main.categoryImage', icon: Image, color: 'var(--am-cat-image)' },
+  { key: 'document' as AssetCategory, labelKey: 'main.categoryDocument', icon: FileText, color: 'var(--am-cat-doc)' },
+  { key: 'audio' as AssetCategory, labelKey: 'main.categoryAudio', icon: Music, color: 'var(--am-cat-audio)' },
+  { key: 'video' as AssetCategory, labelKey: 'main.categoryVideo', icon: Video, color: 'var(--am-cat-video)' },
+  { key: 'archive' as AssetCategory, labelKey: 'main.categoryArchive', icon: Archive, color: 'var(--am-cat-archive)' },
 ]);
+
+function categoryLabel(card: { labelKey: string }): string {
+  return t(card.labelKey);
+}
 
 function handleCategoryClick(cat: AssetCategory) {
   if (activeCategory.value === cat && cat !== 'all') {
@@ -860,7 +865,7 @@ async function runSnapshotIncrementalLoad(
     lastRefreshedAt.value = Date.now();
     loading.value = false;
     startScanTimer();
-    scanPhaseLabel.value = `数据来自上次扫描（${formatAssetTime(snapshot.savedAt)}），正在增量校验引用与文件变动...`;
+    scanPhaseLabel.value = t('main.snapshotVerifying', { time: formatAssetTime(snapshot.savedAt) });
   } catch (err) {
     error('Failed to render catalog snapshot', err);
     return false;
@@ -877,7 +882,7 @@ async function runSnapshotIncrementalLoad(
     if (session !== scanSession) return true;
 
     if (support.degraded) {
-      scanPhaseLabel.value = '引用数据不完整（属性视图或画布扫描失败）。为安全起见清理 / 删除保持禁用，请点击刷新重试。';
+      scanPhaseLabel.value = t('main.snapshotRefsIncomplete');
       return true;
     }
 
@@ -890,7 +895,7 @@ async function runSnapshotIncrementalLoad(
       return true;
     }
 
-    scanPhaseLabel.value = '正在合并增量变更并构建资源关联表...';
+    scanPhaseLabel.value = t('main.mergingDelta');
     applyCatalogBlockDelta(snapshot.entries, delta);
     const inventory = resolveCatalogInventoryFromSources(
       filesRes.files,
@@ -918,7 +923,7 @@ async function runSnapshotIncrementalLoad(
     if (session !== scanSession) return true;
     // 增量校验失败：保留快照渲染（引用可能过期），维持危险操作禁用
     error('Incremental verification failed', err);
-    scanPhaseLabel.value = '增量校验失败（查询超时或内核错误）。为安全起见清理 / 删除保持禁用，请点击刷新重试。';
+    scanPhaseLabel.value = t('main.snapshotVerifyFailed');
     return true;
   } finally {
     if (session === scanSession) {
@@ -937,7 +942,7 @@ async function runFullScan(session: number, options: { resort?: boolean }) {
   startScanTimer();
   try {
     // 阶段二数据先行启动（与阶段一真正并行）：内核 SQL 在目录枚举的同时即开始执行
-    let refsLabel = '正在查询文档引用关系...';
+    let refsLabel = t('main.queryingRefs');
     const refDataPromise = fetchCatalogReferenceData((phase) => {
       refsLabel = phase.label;
       if (session === scanSession && loading.value) scanPhaseLabel.value = phase.label;
@@ -947,7 +952,7 @@ async function runFullScan(session: number, options: { resort?: boolean }) {
     });
 
     // 阶段一：文件清单（桌面端本地枚举为秒级；浏览器端走内核 readDir，受超时守卫保护）
-    scanPhaseLabel.value = '正在读取资源文件清单...';
+    scanPhaseLabel.value = t('main.readingFiles');
     const filesRes = await fetchCatalogFiles((phase) => {
       if (session === scanSession) scanPhaseLabel.value = phase.label;
     });
@@ -971,18 +976,18 @@ async function runFullScan(session: number, options: { resort?: boolean }) {
 
     if (!refData) {
       // 引用阶段失败：保留已渲染的文件列表并维持危险操作禁用；用户可点刷新整轮重试
-      scanPhaseLabel.value = '文档引用关系查询失败（网络或内核错误）。为安全起见清理 / 删除保持禁用，请点击刷新重试。';
+      scanPhaseLabel.value = t('main.refsQueryFailed');
       return;
     }
 
     if (refData.degraded) {
       // 关键引用源（主 SQL / 属性视图 / 画布）部分失败：数据不完整，
       // 若照常放开清理按钮，被引用资源会被误判为孤儿而遭删除——必须保持禁用。
-      scanPhaseLabel.value = '引用数据不完整（部分查询超时或失败）。为安全起见清理 / 删除保持禁用，请点击刷新重试。';
+      scanPhaseLabel.value = t('main.refsIncomplete');
       return;
     }
 
-    scanPhaseLabel.value = '正在构建资源关联表...';
+    scanPhaseLabel.value = t('main.buildingRelations');
     const inventory = resolveCatalogInventory(filesRes.files, refData);
     // 保留首屏期间后台 stat 已补全的 size/updated
     mergeAssetStatsInto(inventory, assets.value);
@@ -1007,7 +1012,7 @@ async function runFullScan(session: number, options: { resort?: boolean }) {
     if (session !== scanSession) return;
     error('Failed to load assets', err);
     scanError.value = err instanceof Error ? err.message : String(err);
-    scanPhaseLabel.value = `扫描失败：${scanError.value}`;
+    scanPhaseLabel.value = t('main.scanFailedWith', { message: scanError.value });
     refsPending.value = false;
   } finally {
     if (session === scanSession) {
@@ -1077,7 +1082,7 @@ async function runBackgroundStatFillInner(list: AssetInfo[], session: number) {
   }
   if (result.skipped) {
     // 浏览器模式下内核 /assets/* 不支持 HEAD，size 保持未知；不视为错误
-    warnScanNote('当前环境不支持远程文件大小查询，文件大小将在桌面端打开时补全');
+    warnScanNote(t('main.headUnsupportedNote'));
   }
 }
 
@@ -1376,9 +1381,9 @@ async function handleOpenSingleDoc(rootId: string, firstBlockId?: string) {
     }
     const ok = await openCanvasInTab(canvasPath);
     if (ok) {
-      pushMsg("已在后台打开无界画布");
+      pushMsg(t('main.canvasOpened'));
     } else {
-      pushMsg("未检测到正在运行的无界 (siyuan-canvas) 插件，请先安装或启用该插件");
+      pushMsg(t('main.canvasPluginMissing'));
     }
     return;
   }
@@ -1393,10 +1398,10 @@ async function handleOpenSingleDoc(rootId: string, firstBlockId?: string) {
       },
       keepCursor: true
     });
-    pushMsg("已在后台打开文档");
+    pushMsg(t('main.docOpened'));
   } catch (e) {
     error("Failed to open document", e);
-    pushMsg("打开文档失败");
+    pushMsg(t('main.openDocFailed'));
   }
 }
 
@@ -1412,7 +1417,7 @@ function handleSortChange(field: AssetSortField) {
 async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
   const groups = groupReferencesByDoc(asset.references);
   if (groups.length === 0) {
-    pushMsg("该资源未被任何文档引用");
+    pushMsg(t('main.notReferenced'));
     return;
   }
 
@@ -1425,9 +1430,9 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
       const canvasTitle = group.first.readablePath || group.first.hpath || asset.name;
       const ok = await openCanvasInTab(canvasPath, canvasTitle);
       if (ok) {
-        pushMsg(`已在后台打开无界画布 [${canvasTitle}]`);
+        pushMsg(t('main.canvasOpenedWithTitle', { title: canvasTitle }));
       } else {
-        pushMsg("未检测到正在运行的无界 (siyuan-canvas) 插件，请先安装或启用该插件");
+        pushMsg(t('main.canvasPluginMissing'));
       }
     } else {
       await handleOpenSingleDoc(group.rootId, group.first.id);
@@ -1439,8 +1444,8 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
   const menu = new Menu('asset-references-picker');
   for (const group of groups) {
     const isCanvas = group.first.id.startsWith('canvas:') || group.first.path.endsWith('.canvas') || group.rootId.endsWith('.canvas');
-    const labelTitle = group.first.readablePath || group.first.hpath || group.rootId || '未命名';
-    const displayLabel = isCanvas ? `[画布] ${labelTitle}` : `[文档] ${labelTitle}`;
+    const labelTitle = group.first.readablePath || group.first.hpath || group.rootId || t('main.untitled');
+    const displayLabel = isCanvas ? t('main.canvasLabel', { title: labelTitle }) : t('main.docLabel', { title: labelTitle });
 
     menu.addItem({
       icon: isCanvas ? 'iconCanvas' : 'iconFile',
@@ -1450,9 +1455,9 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
           const canvasPath = group.first.path || (group.rootId.endsWith('.canvas') ? group.rootId : (group.first.id.split(':')[1] || ''));
           const ok = await openCanvasInTab(canvasPath, labelTitle);
           if (ok) {
-            pushMsg(`已在后台打开无界画布 [${labelTitle}]`);
+            pushMsg(t('main.canvasOpenedWithTitle', { title: labelTitle }));
           } else {
-            pushMsg("未检测到正在运行的无界 (siyuan-canvas) 插件，请先安装或启用该插件");
+            pushMsg(t('main.canvasPluginMissing'));
           }
         } else {
           await handleOpenSingleDoc(group.rootId, group.first.id);
@@ -1526,7 +1531,7 @@ async function handleUnifiedCleanup() {
   if (refsPending.value) return;
   const summary = calculateTotalCleanup(assets.value);
   if (summary.totalCount === 0) {
-    pushMsg("当前没有可清理的孤儿资源或孤立底图，存储空间很干净。");
+    pushMsg(t('main.cleanNothingMsg'));
     return;
   }
 

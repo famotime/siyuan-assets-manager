@@ -13,7 +13,7 @@
     @mouseleave="$emit('mouseleave')"
   >
     <!-- 图片预览 -->
-    <img v-if="previewType === 'image'" :src="previewUrl" alt="预览图" />
+    <img v-if="previewType === 'image'" :src="previewUrl" :alt="t('preview.imageAlt')" />
 
     <!-- 视频预览 (带半透明悬浮控制栏与居中播放指示) -->
     <div
@@ -36,7 +36,7 @@
       ></video>
 
       <!-- 暂停时居中半透明微质感播放图标 -->
-      <div v-if="!isVideoPlaying" class="video-center-play-badge" title="点击播放">
+      <div v-if="!isVideoPlaying" class="video-center-play-badge" :title="t('preview.clickToPlay')">
         <Play :size="28" class="play-icon-offset" />
       </div>
 
@@ -47,7 +47,7 @@
           class="video-ctrl-btn play-pause-btn"
           :class="{ 'is-playing': isVideoPlaying }"
           @click.stop="toggleVideoPlay"
-          :title="isVideoPlaying ? '暂停' : '播放'"
+          :title="isVideoPlaying ? t('preview.pause') : t('preview.play')"
         >
           <Pause v-if="isVideoPlaying" :size="14" />
           <Play v-else :size="14" class="play-icon-offset" />
@@ -75,7 +75,7 @@
           class="video-ctrl-btn mute-btn"
           :class="{ 'is-muted': videoMuted }"
           @click.stop="toggleVideoMute"
-          :title="videoMuted ? '取消静音 (恢复声音)' : '静音'"
+          :title="videoMuted ? t('preview.unmute') : t('preview.mute')"
         >
           <VolumeX v-if="videoMuted" :size="14" />
           <Volume2 v-else :size="14" />
@@ -91,7 +91,7 @@
           class="audio-play-btn"
           :class="{ 'is-playing': isAudioPlaying }"
           @click.stop="toggleAudioPlay"
-          :title="isAudioPlaying ? '暂停试听' : '点击试听'"
+          :title="isAudioPlaying ? t('preview.pausePreview') : t('preview.playPreview')"
         >
           <Pause v-if="isAudioPlaying" :size="16" />
           <Play v-else :size="16" class="play-icon-offset" />
@@ -103,14 +103,14 @@
           </div>
           <div class="audio-meta">
             <span class="audio-timer">{{ formatMediaTime(audioCurrentTime) }} / {{ formatMediaTime(audioDuration) }}</span>
-            <span v-if="audioMuted" class="audio-muted-badge">已静音</span>
+            <span v-if="audioMuted" class="audio-muted-badge">{{ t('preview.muted') }}</span>
             <span
               v-else-if="audioBlocked && !isAudioPlaying"
               class="audio-hint-badge"
               @click.stop="toggleAudioPlay"
-              title="受浏览器策略限制需点击一次后播放"
-            >点击播放</span>
-            <span v-else-if="audioLoadError" class="audio-error-badge">加载失败</span>
+              :title="t('preview.browserPolicyHint')"
+            >{{ t('preview.clickToPlay') }}</span>
+            <span v-else-if="audioLoadError" class="audio-error-badge">{{ t('preview.loadFailed') }}</span>
           </div>
         </div>
 
@@ -118,7 +118,7 @@
           class="audio-mute-btn"
           :class="{ 'is-muted': audioMuted }"
           @click.stop="toggleAudioMute"
-          :title="audioMuted ? '取消静音 (恢复声音)' : '静音'"
+          :title="audioMuted ? t('preview.unmute') : t('preview.mute')"
         >
           <VolumeX v-if="audioMuted" :size="16" />
           <Volume2 v-else :size="16" />
@@ -130,7 +130,7 @@
         class="audio-waveform-bars"
         :class="{ 'is-playing': isAudioPlaying, 'is-muted': audioMuted }"
         @click.stop="toggleAudioPlay"
-        :title="isAudioPlaying ? '点击暂停' : '点击播放试听'"
+        :title="isAudioPlaying ? t('preview.clickToPause') : t('preview.clickToPlayPreview')"
       >
         <span class="bar bar-1"></span>
         <span class="bar bar-2"></span>
@@ -163,6 +163,7 @@
 import { ref, computed, onUnmounted, watch } from 'vue';
 import { Volume2, VolumeX, Play, Pause } from 'lucide-vue-next';
 import { splitFileName } from '../utils/asset-list';
+import { t } from '../i18n';
 
 const props = defineProps<{
   previewUrl: string;

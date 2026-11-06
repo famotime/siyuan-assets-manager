@@ -1,7 +1,7 @@
 <template>
   <div class="doc-group-list-wrapper">
     <div v-if="groups.length === 0" class="doc-empty-placeholder">
-      暂无匹配的文档或资源
+      {{ t('group.emptyPlaceholder') }}
     </div>
 
     <!--
@@ -25,7 +25,7 @@
             <div
               class="doc-group-header"
               @click="toggleGroup(row.data.group.id)"
-              :title="row.data.collapsed ? '点击展开文档资源' : '点击折叠文档资源'"
+              :title="row.data.collapsed ? t('group.expandTooltip') : t('group.collapseTooltip')"
             >
               <div class="doc-header-left">
                 <span class="expand-icon-wrapper" :class="{ 'is-expanded': !row.data.collapsed }">
@@ -39,7 +39,7 @@
                     :checked="isDocAllSelected(row.data.group)"
                     :indeterminate.prop="isDocSomeSelected(row.data.group)"
                     @change="handleDocCheckboxChange($event, row.data.group)"
-                    title="全选/取消全选此文档中的所有资源"
+                    :title="t('group.selectAllTooltip')"
                   />
                 </div>
 
@@ -51,9 +51,9 @@
                 <div class="doc-title-info">
                   <div class="doc-title-row">
                     <span class="doc-title-text">{{ row.data.group.title || row.data.group.readablePath || row.data.group.id }}</span>
-                    <span v-if="row.data.group.isUnreferenced" class="doc-unref-badge">孤立/未引用</span>
-                    <span v-else-if="row.data.group.matchedByDocName && searchQuery" class="doc-match-badge">文档匹配</span>
-                    <span v-if="row.data.group.hasMissingAssets" class="doc-missing-badge" title="该文档中存在引用但找不到物理文件的资源">包含丢失 ({{ row.data.group.missingAssetCount }})</span>
+                    <span v-if="row.data.group.isUnreferenced" class="doc-unref-badge">{{ t('group.unrefBadge') }}</span>
+                    <span v-else-if="row.data.group.matchedByDocName && searchQuery" class="doc-match-badge">{{ t('group.matchBadge') }}</span>
+                    <span v-if="row.data.group.hasMissingAssets" class="doc-missing-badge" :title="t('group.missingBadgeTitle')">{{ t('group.missingBadge', { count: row.data.group.missingAssetCount }) }}</span>
                   </div>
                   <div class="doc-path-row" :title="row.data.group.readablePath || row.data.group.title || row.data.group.id">
                     {{ row.data.group.readablePath || row.data.group.title || row.data.group.id }}
@@ -63,7 +63,7 @@
 
               <div class="doc-header-right" @click.stop>
                 <div class="doc-stats-badges">
-                  <span class="stat-badge count-badge">{{ row.data.group.assetCount }} 个资源</span>
+                  <span class="stat-badge count-badge">{{ t('group.assetCountBadge', { count: row.data.group.assetCount, n: row.data.group.assetCount }) }}</span>
                   <span class="stat-badge size-badge">{{ formatSize(row.data.group.totalSize) }}</span>
                 </div>
 
@@ -71,7 +71,7 @@
                   v-if="!row.data.group.isUnreferenced"
                   class="am-btn am-btn--icon doc-open-btn"
                   @click.stop="$emit('open-doc-id', row.data.group.id, row.data.group.firstBlockId)"
-                  :title="row.data.group.id.startsWith('canvas:') || row.data.group.id.endsWith('.canvas') ? '在后台打开此无界画布' : '在思源中打开此文档'"
+                  :title="row.data.group.id.startsWith('canvas:') || row.data.group.id.endsWith('.canvas') ? t('group.openCanvasTitle') : t('group.openDocTitle')"
                 >
                   <ExternalLink :size="15" />
                 </button>
@@ -89,26 +89,26 @@
             <div class="col-checkbox"></div>
             <div class="col-preview"></div>
             <div class="col-name sortable" :class="{ active: sortField === 'name' }" @click="handleSort('name')">
-              文件名
+              {{ t('group.colFileName') }}
               <ArrowUp v-if="sortField === 'name' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
               <ArrowDown v-else-if="sortField === 'name' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
             </div>
             <div class="col-ext sortable" :class="{ active: sortField === 'ext' }" @click="handleSort('ext')">
-              后缀名
+              {{ t('group.colExt') }}
               <ArrowUp v-if="sortField === 'ext' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
               <ArrowDown v-else-if="sortField === 'ext' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
             </div>
             <div class="col-size sortable" :class="{ active: sortField === 'size' }" @click="handleSort('size')">
-              大小
+              {{ t('group.colSize') }}
               <ArrowUp v-if="sortField === 'size' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
               <ArrowDown v-else-if="sortField === 'size' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
             </div>
             <div class="col-updated sortable" :class="{ active: sortField === 'updated' }" @click="handleSort('updated')">
-              更新时间
+              {{ t('group.colUpdated') }}
               <ArrowUp v-if="sortField === 'updated' && sortOrder === 'asc'" :size="12" class="sort-icon" style="fill: none !important;" />
               <ArrowDown v-else-if="sortField === 'updated' && sortOrder === 'desc'" :size="12" class="sort-icon" style="fill: none !important;" />
             </div>
-            <div class="col-actions">操作</div>
+            <div class="col-actions">{{ t('group.colActions') }}</div>
           </div>
 
           <!-- 单条资源行 -->
@@ -136,16 +136,16 @@
             <div class="col-preview">
               <div
                 class="asset-preview"
-                :title="row.data.asset.isMissing ? `[丢失资源] 物理文件已不存在，引用处数: ${row.data.asset.references?.length || row.data.asset.refCount || 0}` : undefined"
+                :title="row.data.asset.isMissing ? t('group.missingRefTitle', { count: row.data.asset.references?.length || row.data.asset.refCount || 0 }) : undefined"
                 @mouseenter="!row.data.asset.isMissing && $emit('show-preview', { event: $event, asset: row.data.asset, previewSrc: getThumbnailSrc(row.data.asset) })"
                 @mousemove="!row.data.asset.isMissing && $emit('update-preview', { event: $event })"
                 @mouseleave="!row.data.asset.isMissing && $emit('hide-preview')"
               >
                 <template v-if="row.data.asset.isMissing">
-                  <div class="file-icon file-icon--missing" title="物理文件已丢失">
+                  <div class="file-icon file-icon--missing" :title="t('group.missingFileTitle')">
                     <ImageOff :size="16" style="color: var(--b3-theme-error); fill: none !important;" />
                   </div>
-                  <span class="preview-badge preview-badge--missing" title="物理文件在磁盘中不存在">丢失</span>
+                  <span class="preview-badge preview-badge--missing" :title="t('group.missingDiskTitle')">{{ t('group.lostBadge') }}</span>
                 </template>
                 <template v-else-if="isImage(row.data.asset.name) || row.data.asset.isOriginal">
                   <img
@@ -158,13 +158,13 @@
                   <span
                     v-if="row.data.asset.isReEditable"
                     class="preview-badge preview-badge--reedit"
-                    title="包含矢量二次编辑数据"
-                  >可编辑</span>
+                    :title="t('group.reeditBadgeTitle')"
+                  >{{ t('group.reeditableBadge') }}</span>
                   <span
                     v-else-if="row.data.asset.isOriginal"
                     class="preview-badge preview-badge--original"
-                    title="隔离存储的干净原始底图"
-                  >底图</span>
+                    :title="t('group.originalBadgeTitle')"
+                  >{{ t('group.originalBadge') }}</span>
                 </template>
                 <div v-else class="file-icon">{{ getAssetBadgeText(row.data.asset.name) }}</div>
               </div>
@@ -172,7 +172,7 @@
 
             <div
               class="col-name asset-name"
-              :title="row.data.asset.isMissing ? `[丢失资源] 物理文件已不存在，引用处数: ${row.data.asset.references?.length || row.data.asset.refCount || 0}` : undefined"
+              :title="row.data.asset.isMissing ? t('group.missingRefTitle', { count: row.data.asset.references?.length || row.data.asset.refCount || 0 }) : undefined"
               @mouseenter="!row.data.asset.isMissing && $emit('show-preview', { event: $event, asset: row.data.asset, previewSrc: getThumbnailSrc(row.data.asset) })"
               @mousemove="!row.data.asset.isMissing && $emit('update-preview', { event: $event })"
               @mouseleave="!row.data.asset.isMissing && $emit('hide-preview')"
@@ -182,7 +182,7 @@
               <span
                 v-if="row.data.asset.isMissing"
                 class="asset-badge-icon-wrapper"
-                title="在 /data/assets 中未找到物理文件"
+                :title="t('group.missingPathTitle')"
               >
                 <AlertTriangle :size="14" class="asset-badge-icon asset-badge-icon--missing" style="fill: none !important;" />
               </span>
@@ -190,22 +190,22 @@
               <span
                 v-else-if="row.data.asset.docCount > 1"
                 class="multi-ref-badge"
-                :title="`该资源被 ${row.data.asset.docCount} 篇不同的文档共同引用`"
+                :title="t('group.multiRefTooltip', { count: row.data.asset.docCount })"
               >
-                多篇引用 ({{ row.data.asset.docCount }})
+                {{ t('group.multiRefBadge', { count: row.data.asset.docCount }) }}
               </span>
 
               <span
                 v-if="row.data.asset.isReEditable"
                 class="asset-badge-icon-wrapper"
-                title="包含矢量二次编辑数据"
+                :title="t('group.reeditBadgeTitle')"
               >
                 <Palette :size="15" class="asset-badge-icon asset-badge-icon--reedit" style="fill: none !important;" />
               </span>
               <span
                 v-else-if="row.data.asset.isOriginal"
                 class="asset-badge-icon-wrapper"
-                title="隔离存储的干净原始底图"
+                :title="t('group.originalBadgeTitle')"
               >
                 <Layers :size="15" class="asset-badge-icon asset-badge-icon--original" style="fill: none !important;" />
               </span>
@@ -216,7 +216,7 @@
             </div>
 
             <div class="col-size asset-size" :class="{ 'asset-size--missing': row.data.asset.isMissing }">
-              {{ row.data.asset.isMissing ? '文件丢失' : formatSize(row.data.asset.size) }}
+              {{ row.data.asset.isMissing ? t('group.missingSize') : formatSize(row.data.asset.size) }}
             </div>
 
             <div class="col-updated asset-updated">
@@ -228,7 +228,7 @@
                 v-if="!refsPending && row.data.asset.docCount > 0"
                 class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('open-docs', row.data.asset, $event)"
-                aria-label="在后台打开并定位引用此资源的文档"
+                :aria-label="t('group.openDocsAria')"
               >
                 <ExternalLink :size="15" style="fill: none !important;" />
               </button>
@@ -236,7 +236,7 @@
                 v-if="!refsPending && !row.data.asset.isMissing && (isImage(row.data.asset.name) || row.data.asset.isOriginal) && !row.data.asset.isCanvasAsset"
                 class="am-btn am-btn--icon am-btn--icon-primary b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('edit', row.data.asset)"
-                aria-label="二次编辑与矢量标注"
+                :aria-label="t('group.editAria')"
               >
                 <Pencil :size="15" style="fill: none !important;" />
               </button>
@@ -244,7 +244,7 @@
                 v-if="!refsPending && !row.data.asset.isOriginal && !row.data.asset.isMissing && !row.data.asset.isCanvasAsset"
                 class="am-btn am-btn--icon b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('rename', row.data.asset)"
-                aria-label="重命名此资源并自动更新引用"
+                :aria-label="t('group.renameAria')"
               >
                 <TextCursorInput :size="15" style="fill: none !important;" />
               </button>
@@ -252,7 +252,7 @@
                 v-if="!refsPending && (!row.data.asset.isCanvasAsset || row.data.asset.docCount === 0)"
                 class="am-btn am-btn--icon am-btn--icon-danger b3-tooltips b3-tooltips__sw"
                 @click.stop="$emit('delete', row.data.asset)"
-                :aria-label="row.data.asset.isMissing ? '清理此丢失资源的文档引用' : row.data.asset.isOriginal ? '删除此原始底图' : '删除此资源及文档引用'"
+                :aria-label="row.data.asset.isMissing ? t('group.deleteMissingAria') : row.data.asset.isOriginal ? t('group.deleteOriginalAria') : t('group.deleteAria')"
               >
                 <Trash2 :size="15" style="fill: none !important;" />
               </button>
@@ -303,6 +303,7 @@ import {
 import { buildDocRows } from '../utils/doc-group-rows';
 import { readOriginalImage } from '../utils/file-system';
 import { defaultStorage } from '../utils/storage';
+import { t } from '../i18n';
 
 const props = defineProps<{
   groups: DocAssetGroup[];

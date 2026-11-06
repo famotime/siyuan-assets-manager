@@ -2,7 +2,7 @@
   <ConfirmDialog />
   <div class="am-dialog-overlay" v-if="visible" @click.self="closeManager">
     <div class="am-dialog manager-dialog">
-      <button class="am-dialog__close b3-tooltips b3-tooltips__sw" style="position: absolute; top: 16px; right: 16px; z-index: 10;" @click="closeManager" aria-label="关闭窗口 (Esc)">
+      <button class="am-dialog__close b3-tooltips b3-tooltips__sw" style="position: absolute; top: 16px; right: 16px; z-index: 10;" @click="closeManager" :aria-label="t('app.closeWindowEsc')">
         <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="fill: none !important;">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -26,9 +26,9 @@
       <div class="am-dialog__header">
         <div style="display: flex; align-items: center; gap: 8px;">
           <FileEdit :size="18" style="fill: none !important; color: var(--b3-theme-primary);" />
-          <h3 style="margin: 0;">重命名资源</h3>
+          <h3 style="margin: 0;">{{ t('app.renameAssetTitle') }}</h3>
         </div>
-        <button class="am-dialog__close b3-tooltips b3-tooltips__sw" @click="closeGlobalRenameDialog" aria-label="关闭窗口 (Esc)">
+        <button class="am-dialog__close b3-tooltips b3-tooltips__sw" @click="closeGlobalRenameDialog" :aria-label="t('app.closeWindowEsc')">
           <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="fill: none !important;">
             <line x1="18" y1="6" x2="6" y2="18"/>
             <line x1="6" y1="6" x2="18" y2="18"/>
@@ -37,17 +37,17 @@
       </div>
       <div class="am-dialog__body">
         <div style="margin-bottom: 12px; color: var(--b3-theme-on-surface-light); word-break: break-all; font-size: 13px;">
-          原文件名: <strong>{{ globalRenameAsset.name }}</strong>
+          {{ t('app.originalFileName') }} <strong>{{ globalRenameAsset.name }}</strong>
         </div>
         <div class="form-item">
-          <label style="display: block; margin-bottom: 8px; font-weight: bold; font-size: 13px;">新文件名:</label>
+          <label style="display: block; margin-bottom: 8px; font-weight: bold; font-size: 13px;">{{ t('app.newFileName') }}</label>
           <div class="am-input-group">
             <input 
               ref="renameInputRef"
               v-model="globalRenameBaseName" 
               type="text" 
               class="am-input" 
-              placeholder="请输入新文件名"
+              :placeholder="t('app.newFileNamePlaceholder')"
               autofocus
               @keyup.enter="submitGlobalRename"
             />
@@ -56,13 +56,13 @@
         </div>
       </div>
       <div class="am-dialog__footer">
-        <button class="am-btn am-btn--ghost b3-tooltips b3-tooltips__n" @click="closeGlobalRenameDialog" aria-label="取消重命名 (Esc)" style="display: inline-flex; align-items: center; gap: 4px;">
+        <button class="am-btn am-btn--ghost b3-tooltips b3-tooltips__n" @click="closeGlobalRenameDialog" :aria-label="t('app.cancelRenameEsc')" style="display: inline-flex; align-items: center; gap: 4px;">
           <X :size="14" style="fill: none !important;" />
-          <span>取消</span>
+          <span>{{ t('common.cancel') }}</span>
         </button>
-        <button class="am-btn am-btn--primary b3-tooltips b3-tooltips__n" @click="submitGlobalRename" aria-label="确认修改文件名并同步更新引用" style="display: inline-flex; align-items: center; gap: 4px;">
+        <button class="am-btn am-btn--primary b3-tooltips b3-tooltips__n" @click="submitGlobalRename" :aria-label="t('app.confirmRenameAria')" style="display: inline-flex; align-items: center; gap: 4px;">
           <Check :size="14" style="fill: none !important;" />
-          <span>确认修改</span>
+          <span>{{ t('app.confirmChange') }}</span>
         </button>
       </div>
     </div>
@@ -74,6 +74,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { openTab } from 'siyuan';
 import { FileEdit, X, Check } from 'lucide-vue-next';
 import { usePlugin } from '@/main';
+import { t } from '@/i18n';
 import { ASSETS_MANAGER_TAB_TYPE } from './index';
 import AssetsManager from './components/AssetsManager.vue';
 import ImageEditorDialog from './components/ImageEditorDialog.vue';
@@ -136,7 +137,7 @@ const handleToggleAssetsManager = () => {
       app: pluginInstance.app,
       custom: {
         icon: 'iconAssetsManager',
-        title: pluginInstance.i18n?.addTopBarIcon || '资源管家',
+        title: t('common.appTitle'),
         id: pluginInstance.name + ASSETS_MANAGER_TAB_TYPE,
       },
     });
@@ -150,7 +151,7 @@ onMounted(() => {
   if (typeof plugin?.addTopBar === 'function') {
     plugin.addTopBar({
       icon: 'iconAssetsManager',
-      title: (plugin as any)?.i18n?.addTopBarIcon || '资源管家',
+      title: t('common.appTitle'),
       callback: () => {
         handleToggleAssetsManager();
       },
@@ -179,7 +180,7 @@ onMounted(() => {
       globalRenameVisible.value = true;
       return;
     }
-    pushMsg("正在获取资源引用，请稍候...", 2000);
+    pushMsg(t('app.fetchingRefs'), 2000);
     try {
       const assetInfo = await getAssetInfoByName(assetOrName);
       if (assetInfo) {
@@ -189,11 +190,11 @@ onMounted(() => {
         globalRenameExt.value = ext;
         globalRenameVisible.value = true;
       } else {
-        pushMsg("获取资源失败", 3000);
+        pushMsg(t('app.getAssetFailed'), 3000);
       }
     } catch (e) {
       error(e);
-      pushMsg("获取资源引用失败", 3000);
+      pushMsg(t('app.getAssetRefsFailed'), 3000);
     }
   };
 });
@@ -219,16 +220,16 @@ async function handleGlobalSaveEdited(payload: {
       promptOnDeleteOriginal: Boolean(pluginInstance?.settings?.promptOnDeleteOriginal),
       onConfirmDelete: async (oldName, newName) => {
         return await showConfirm({
-          title: '删除原文件',
-          message: `图片已保存为 ${newName} 且引用已更新。\n是否将旧图片 ${oldName} 放入回收站？`,
-          confirmText: '放入回收站',
+          title: t('app.deleteOriginalTitle'),
+          message: t('app.deleteOriginalImageMsg', { newName, oldName }),
+          confirmText: t('app.moveToTrash'),
           danger: true,
         });
       },
     });
 
     if (result.success) {
-      pushMsg("编辑已成功保存并同步到所有引用文档！");
+      pushMsg(t('app.editSavedSynced'));
 
       // 实时主动刷新当前视口中对应块的图片 DOM，破除 Chromium 内存位图缓存与视觉滞后
       try {
@@ -272,7 +273,7 @@ async function handleGlobalSaveEdited(payload: {
     }
   } catch (e) {
     error("Failed to save edited image:", e);
-    pushMsg("保存编辑失败");
+    pushMsg(t('app.saveEditFailed'));
   }
 }
 
@@ -291,7 +292,7 @@ async function submitGlobalRename() {
 
   const trimmedBase = globalRenameBaseName.value.trim();
   if (!trimmedBase) {
-    pushMsg("文件名不能为空");
+    pushMsg(t('app.fileNameEmpty'));
     return;
   }
 
@@ -305,17 +306,17 @@ async function submitGlobalRename() {
       promptOnDeleteOriginal: Boolean(pluginInstance?.settings?.promptOnDeleteOriginal),
       onConfirmExtChange: async (oldExt, newExt) => {
         return await showConfirm({
-          title: '修改文件后缀名',
-          message: `检测到您修改了文件后缀，确定要从 ${oldExt} 修改为 ${newExt} 吗？`,
-          confirmText: '确认修改',
+          title: t('app.changeExtTitle'),
+          message: t('app.changeExtMsg', { oldExt, newExt }),
+          confirmText: t('app.confirmChange'),
           danger: true,
         });
       },
       onConfirmDelete: async (oldName, newName) => {
         return await showConfirm({
-          title: '删除原文件',
-          message: `文件已重命名为 ${newName}。\n是否将原文件 ${oldName} 放入回收站？`,
-          confirmText: '放入回收站',
+          title: t('app.deleteOriginalTitle'),
+          message: t('app.deleteOriginalFileMsg', { newName, oldName }),
+          confirmText: t('app.moveToTrash'),
           danger: true,
         });
       },
@@ -323,11 +324,11 @@ async function submitGlobalRename() {
 
     if (!result.ok) {
       if (result.reason === 'empty') {
-        pushMsg("文件名不能为空");
+        pushMsg(t('app.fileNameEmpty'));
       } else if (result.reason === 'invalidChars') {
-        pushMsg("文件名不能包含字符: \\ / : * ? \" < > |");
+        pushMsg(t('app.fileNameInvalidChars'));
       } else if (result.reason === 'fileSystemError') {
-        pushMsg("重命名物理文件失败");
+        pushMsg(t('app.renamePhysicalFailed'));
       }
       return;
     }
@@ -339,9 +340,9 @@ async function submitGlobalRename() {
     }
 
     if ((result.updatedBlockCount || 0) > 0) {
-      pushMsg(`重命名成功！已自动更新 ${result.updatedBlockCount} 个文档引用`);
+      pushMsg(t('app.renameSuccessWithCount', { count: result.updatedBlockCount, n: result.updatedBlockCount }));
     } else {
-      pushMsg("重命名成功！");
+      pushMsg(t('app.renameSuccess'));
     }
 
     window.dispatchEvent(new CustomEvent('assets-manager-refresh', {
@@ -360,7 +361,7 @@ async function submitGlobalRename() {
     }));
   } catch (e) {
     error("Failed to rename asset", e);
-    pushMsg("重命名操作失败");
+    pushMsg(t('app.renameFailed'));
   }
 }
 </script>

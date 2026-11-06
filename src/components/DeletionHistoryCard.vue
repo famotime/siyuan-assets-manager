@@ -22,15 +22,15 @@
         <span class="badge badge-dest" :class="batch.destination === 'os-trash' ? 'is-trash' : 'is-permanent'">
           <Archive v-if="batch.destination === 'os-trash'" :size="11" class="badge-icon" />
           <AlertTriangle v-else :size="11" class="badge-icon" />
-          {{ batch.destination === 'os-trash' ? '操作系统回收站' : '物理硬删' }}
+          {{ batch.destination === 'os-trash' ? t('card.destOsTrash') : t('card.destPermanent') }}
         </span>
 
         <!-- 状态徽章 -->
         <span v-if="batch.isRolledBack" class="badge badge-status is-rolled">
-          <Check :size="11" class="badge-icon" /> 已回退引用
+          <Check :size="11" class="badge-icon" /> {{ t('card.rolledBackBadge') }}
         </span>
         <span v-else-if="batch.canRollback" class="badge badge-status is-can-rollback">
-          可回退
+          {{ t('card.canRollback') }}
         </span>
 
         <span class="card-time">{{ formatTime(batch.timestamp) }}</span>
@@ -38,7 +38,7 @@
 
       <div class="card-header-right">
         <span class="card-stat">
-          <strong>{{ batch.items.length }}</strong> 个文件 · 释放 <strong>{{ formatSize(batch.freedBytes) }}</strong>
+          <strong>{{ batch.items.length }}</strong> {{ t('card.statFileUnit', { n: batch.items.length }) }} · {{ t('card.statFreed') }} <strong>{{ formatSize(batch.freedBytes) }}</strong>
         </span>
 
         <!-- 回退主按钮（显眼图标 + 文字 + Tooltips） -->
@@ -46,10 +46,10 @@
           v-if="batch.canRollback && !batch.isRolledBack"
           class="am-action-btn am-action-btn--rollback am-action-btn--with-text btn-rollback b3-tooltips b3-tooltips__sw"
           @click.stop="$emit('rollback', batch)"
-          aria-label="逆向回退文档正文与属性视图中的图片引用"
+          :aria-label="t('card.rollbackBtnAria')"
         >
           <RotateCcw :size="14" style="fill: none !important;" />
-          <span>回退</span>
+          <span>{{ t('card.rollback') }}</span>
         </button>
       </div>
     </div>
@@ -58,13 +58,13 @@
     <div v-if="isExpanded" class="card-body">
       <!-- 快捷工具栏（复制文件名清单） -->
       <div class="card-toolbar">
-        <span class="card-detail-hint">被删文件明细（共 {{ batch.items.length }} 项，支持鼠标悬浮预览图片）：</span>
+        <span class="card-detail-hint">{{ t('card.detailHint', { count: batch.items.length, n: batch.items.length }) }}</span>
         <div class="card-toolbar-actions">
           <button
             class="am-action-btn am-action-btn--copy b3-tooltips b3-tooltips__w"
             @click="copyBatchFilePaths"
-            aria-label="复制文件名清单"
-            title="一键复制本批次所有文件名到剪贴板，方便在操作系统回收站中检索"
+            :aria-label="t('card.copyFileListAria')"
+            :title="t('card.copyFileListTitle')"
           >
             <Copy :size="14" style="fill: none !important;" />
           </button>
@@ -76,11 +76,11 @@
         <table class="files-table">
           <thead>
             <tr>
-              <th>文件名</th>
-              <th style="width: 100px;">大小</th>
-              <th v-if="batch.actionType === 'deduplicate'">合并替换为主保留项</th>
-              <th v-if="batch.actionType === 'deduplicate'" style="width: 120px;">受影响引用</th>
-              <th v-else style="width: 170px;">关联文档</th>
+              <th>{{ t('card.colFileName') }}</th>
+              <th style="width: 100px;">{{ t('card.colSize') }}</th>
+              <th v-if="batch.actionType === 'deduplicate'">{{ t('card.colMergedInto') }}</th>
+              <th v-if="batch.actionType === 'deduplicate'" style="width: 120px;">{{ t('card.colAffectedRefs') }}</th>
+              <th v-else style="width: 170px;">{{ t('card.colRelatedDoc') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -94,14 +94,14 @@
                 @mouseleave="$emit('hide-preview')"
               >
                 <span class="file-name-inner">
-                  <Image v-if="item.thumbnail" :size="13" class="file-thumb-icon" title="悬浮查看被删图片预览" />
+                  <Image v-if="item.thumbnail" :size="13" class="file-thumb-icon" :title="t('card.thumbHoverTitle')" />
                   <span class="file-name-text">{{ item.fileName }}</span>
                   <span
                     v-if="item.partialFailure"
                     class="badge badge-status is-partial-failure"
-                    :title="item.failureReason || '该条目归一化未完全成功，已保留回退记录'"
+                    :title="item.failureReason || t('card.partialFailureTitle')"
                   >
-                    未完成
+                    {{ t('card.partialFailureBadge') }}
                   </span>
                 </span>
               </td>
@@ -120,9 +120,9 @@
                   :title="getItemDocTooltip(item)"
                 >
                   <FileText :size="11" />
-                  <span>{{ item.affectedBlocks.length }} 处引用</span>
+                  <span>{{ t('card.refCount', { count: item.affectedBlocks.length, n: item.affectedBlocks.length }) }}</span>
                 </button>
-                <span v-else class="text-muted">无引用</span>
+                <span v-else class="text-muted">{{ t('card.noRefs') }}</span>
               </td>
               <td v-else class="doc-link-cell">
                 <button
@@ -134,7 +134,7 @@
                   <FileText :size="12" class="doc-icon" style="fill: none !important;" />
                   <span class="doc-title-text">{{ getItemDocDisplayTitle(item) }}</span>
                 </button>
-                <span v-else class="text-muted">无引用</span>
+                <span v-else class="text-muted">{{ t('card.noRefs') }}</span>
               </td>
             </tr>
           </tbody>
@@ -145,36 +145,36 @@
       <div v-if="batch.isRolledBack && batch.rollbackReport" class="rollback-report-box">
         <div class="report-header">
           <CheckCircle2 :size="14" class="report-icon" />
-          <span>已于 {{ formatTime(batch.rolledBackAt || 0) }} 执行逆向回退：</span>
+          <span>{{ t('card.rollbackReportHeader', { time: formatTime(batch.rolledBackAt || 0) }) }}</span>
         </div>
         <div class="report-stats">
-          <span>成功还原: <strong>{{ batch.rollbackReport.restoredBlocksCount }}</strong> 处块引用</span>
+          <span>{{ t('card.reportRestored') }} <strong>{{ batch.rollbackReport.restoredBlocksCount }}</strong> {{ t('card.reportBlockRefUnit', { n: batch.rollbackReport.restoredBlocksCount }) }}</span>
           <span v-if="batch.rollbackReport.skippedBlocksCount > 0" class="text-warning">
-            · 跳过漂移块: <strong>{{ batch.rollbackReport.skippedBlocksCount }}</strong> 处（块已修改或删除）
+            · {{ t('card.reportSkipped') }} <strong>{{ batch.rollbackReport.skippedBlocksCount }}</strong> {{ t('card.reportSkippedUnit', { n: batch.rollbackReport.skippedBlocksCount }) }}
           </span>
           <span v-if="batch.rollbackReport.failedBlocksCount > 0" class="text-danger">
-            · 失败: <strong>{{ batch.rollbackReport.failedBlocksCount }}</strong> 处
+            · {{ t('card.reportFailed') }} <strong>{{ batch.rollbackReport.failedBlocksCount }}</strong> {{ t('card.reportUnit', { n: batch.rollbackReport.failedBlocksCount }) }}
           </span>
           <span v-if="(batch.rollbackReport.degradedPositionCount || 0) > 0" class="text-warning">
-            · {{ t('rollbackDegradedPosition', '位置降级') }}:
+            · {{ t('rollback.degradedPosition') }}:
             <strong>{{ batch.rollbackReport.degradedPositionCount }}</strong>
-            处（{{ t('rollbackDegradedPositionHint', '原相邻块已变化，已按近似位置还原') }}）
+            {{ t('card.reportDegradedUnit', { n: batch.rollbackReport.degradedPositionCount, hint: t('rollback.degradedPositionHint') }) }}
           </span>
           <span v-if="(batch.rollbackReport.exactRestoredCount || 0) > 0" class="text-muted">
-            · 精确还原 <strong>{{ batch.rollbackReport.exactRestoredCount }}</strong> 块（按合并前快照整段还原）
+            · {{ t('card.reportExactRestored') }} <strong>{{ batch.rollbackReport.exactRestoredCount }}</strong> {{ t('card.reportExactUnit', { n: batch.rollbackReport.exactRestoredCount }) }}
           </span>
           <span v-if="(batch.rollbackReport.approximateRestoredCount || 0) > 0" class="text-warning">
-            · {{ t('rollbackApproximate', '近似还原') }}
+            · {{ t('rollback.approximate') }}
             <strong>{{ batch.rollbackReport.approximateRestoredCount }}</strong>
-            处（值已被改动，按原引用处数限量还原）
+            {{ t('card.reportApproxUnit', { n: batch.rollbackReport.approximateRestoredCount }) }}
           </span>
           <span v-if="(batch.rollbackReport.restoredIalCount || 0) > 0" class="text-muted">
-            · 块属性引用（题头图等）<strong>{{ batch.rollbackReport.restoredIalCount }}</strong> 处
+            · {{ t('card.reportIal') }}<strong>{{ batch.rollbackReport.restoredIalCount }}</strong> {{ t('card.reportUnit', { n: batch.rollbackReport.restoredIalCount }) }}
           </span>
           <span v-if="(batch.rollbackReport.restoredViewCellsCount || 0) > 0" class="text-muted">
-            · 数据库单元格 <strong>{{ batch.rollbackReport.restoredViewCellsCount }}</strong> 处
+            · {{ t('card.reportDbCells') }} <strong>{{ batch.rollbackReport.restoredViewCellsCount }}</strong> {{ t('card.reportUnit', { n: batch.rollbackReport.restoredViewCellsCount }) }}
             <template v-if="(batch.rollbackReport.skippedViewCellsCount || 0) > 0">
-              （跳过 {{ batch.rollbackReport.skippedViewCellsCount }} 处已改动/已删除的单元格）
+              {{ t('card.reportDbSkipped', { skipped: batch.rollbackReport.skippedViewCellsCount, n: batch.rollbackReport.skippedViewCellsCount }) }}
             </template>
           </span>
         </div>
@@ -198,7 +198,7 @@ import {
 import type { IDeletionBatch, IDeletedItemRecord, DeletionActionType } from '../utils/deletion-logger';
 import { formatAssetSize } from '../utils/asset-list';
 import { showMessage } from 'siyuan';
-import { usePlugin } from '../utils/plugin-context';
+import { t } from '../i18n';
 
 const props = defineProps<{
   batch: IDeletionBatch;
@@ -226,25 +226,20 @@ function formatSize(bytes: number): string {
   return formatAssetSize(bytes);
 }
 
-function t(key: string, fallback: string): string {
-  const i18n = (usePlugin() as any)?.i18n;
-  return (i18n && i18n[key]) || fallback;
-}
-
 function getActionBadgeText(type: DeletionActionType): string {
   switch (type) {
     case 'deduplicate':
-      return '图片去重合并';
+      return t('card.actionDeduplicate');
     case 'orphan-cleanup':
-      return '孤儿资源清理';
+      return t('card.actionOrphanCleanup');
     case 'orphan-original-cleanup':
-      return '孤立底图清理';
+      return t('card.actionOrphanOriginalCleanup');
     case 'single-delete':
-      return '单文件删除';
+      return t('card.actionSingleDelete');
     case 'batch-delete':
-      return '批量选中删除';
+      return t('card.actionBatchDelete');
     default:
-      return '删除操作';
+      return t('card.actionDefault');
   }
 }
 
@@ -263,7 +258,7 @@ function getActionBadgeClass(type: DeletionActionType): string {
 function copyBatchFilePaths() {
   const text = props.batch.items.map((i) => i.fileName).join('\n');
   navigator.clipboard.writeText(text).then(() => {
-    showMessage(`已复制 ${props.batch.items.length} 个文件名到剪贴板`);
+    showMessage(t('card.copiedFileNames', { count: props.batch.items.length, n: props.batch.items.length }));
   });
 }
 
@@ -283,7 +278,7 @@ function hasItemDoc(item: IDeletedItemRecord): boolean {
 
 function getItemDocDisplayTitle(item: IDeletedItemRecord): string {
   const docIds = getItemDocIds(item);
-  if (docIds.length === 0) return '无引用';
+  if (docIds.length === 0) return t('card.noRefs');
   const firstId = docIds[0];
   const info = props.docInfoMap.get(firstId);
   const firstTitle = info?.title || firstId;
@@ -291,26 +286,26 @@ function getItemDocDisplayTitle(item: IDeletedItemRecord): string {
   if (docIds.length === 1) {
     return firstTitle;
   }
-  return `${firstTitle} 等 ${docIds.length} 篇`;
+  return t('card.docTitleMore', { title: firstTitle, count: docIds.length });
 }
 
 function getItemDocTooltip(item: IDeletedItemRecord): string {
   const docIds = getItemDocIds(item);
-  if (docIds.length === 0) return '该条目未被任何文档引用';
+  if (docIds.length === 0) return t('card.itemNoDocTooltip');
 
   if (docIds.length === 1) {
     const info = props.docInfoMap.get(docIds[0]);
     if (info?.hpath) {
-      return `跳转到文档：${info.hpath}`;
+      return t('card.jumpToDoc', { target: info.hpath });
     }
-    return `跳转到文档：${info?.title || docIds[0]}`;
+    return t('card.jumpToDoc', { target: info?.title || docIds[0] });
   }
 
   const titles = docIds.map((id) => {
     const info = props.docInfoMap.get(id);
     return info?.hpath || info?.title || id;
   });
-  return `关联 ${docIds.length} 篇文档，点击跳转打开：\n${titles.join('\n')}`;
+  return t('card.relatedDocsTooltip', { count: docIds.length, n: docIds.length, titles: titles.join('\n') });
 }
 </script>
 

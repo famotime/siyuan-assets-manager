@@ -4,6 +4,7 @@ import type {
   BlockRef,
   OrphanOriginalInfo,
 } from './siyuan-db'
+import { t } from '@/i18n'
 import {
   readDirGuarded,
   sql,
@@ -244,10 +245,10 @@ export function resolveCatalogPipelineFromEntries(
             id: 'av-fallback-containment',
             root_id: 'av-fallback-containment',
             box: '',
-            content: '属性视图底层数据包含保底引用',
+            content: t('catalog.avFallbackRefContent'),
             markdown: '',
             path: '',
-            readablePath: '属性视图（保底保护）',
+            readablePath: t('catalog.avFallbackReadablePath'),
           })
         }
       }
@@ -289,10 +290,10 @@ export function resolveCatalogPipelineFromEntries(
           id: 'ai-agent-session',
           root_id: 'ai-agent-session',
           box: '',
-          content: '思源 AI Agent 会话上下文引用',
+          content: t('catalog.aiAgentRefContent'),
           markdown: '',
           path: '',
-          readablePath: '思源 AI 对话',
+          readablePath: t('catalog.aiAgentReadablePath'),
         })
       }
     }
@@ -510,7 +511,7 @@ export interface CatalogFilesResult {
  * 桌面端优先本地 readdir（绕过内核 readDir 按路径互斥锁），否则回退带超时守卫的内核接口。
  */
 export async function fetchCatalogFiles(onPhase?: ScanPhaseReporter): Promise<CatalogFilesResult> {
-  onPhase?.({ stage: 'files', label: '正在读取资源文件清单...' })
+  onPhase?.({ stage: 'files', label: t('catalog.phaseFiles') })
 
   const adapter = defaultStorage.adapter as any
   if (typeof adapter.listDirEntries === 'function') {
@@ -686,7 +687,7 @@ export async function fetchAllReferencingBlockEntries(): Promise<{ entries: PreE
  * 与阶段一并行启动时可让内核 SQL 在首屏渲染期间后台执行。
  */
 export async function fetchCatalogReferenceData(onPhase?: ScanPhaseReporter): Promise<CatalogReferenceData> {
-  onPhase?.({ stage: 'refs', label: '正在查询文档引用关系（大工作空间约需数分钟）...' })
+  onPhase?.({ stage: 'refs', label: t('catalog.phaseRefs') })
 
   const [support, blockResult] = await Promise.all([
     fetchCatalogSupportData(),
@@ -822,7 +823,7 @@ export function resolveCatalogInventory(
   refData: CatalogReferenceData,
   onPhase?: ScanPhaseReporter,
 ): CatalogInventory {
-  onPhase?.({ stage: 'resolve', label: '正在构建资源关联表...' })
+  onPhase?.({ stage: 'resolve', label: t('catalog.phaseResolve') })
   return resolveCatalogPipelineFromEntries(
     files,
     refData.entries,
