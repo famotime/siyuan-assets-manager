@@ -6,8 +6,9 @@ import {
   extractAssetNamesFromMarkdown,
 } from "./asset-markdown";
 import type { IAssetReEditMetadata } from "../types/reedit";
+import { mapWithConcurrency } from "./concurrency";
 import { serializeReEditMetadata, deserializeReEditMetadata, decodeHtmlEntities } from "./reedit-data";
-import { replaceAssetInAttributeViews } from "./attribute-view";
+import { replaceAssetInAttributeViews, removeAssetFromAttributeViews } from "./attribute-view";
 import { log, warn, error } from "./logger";
 
 /** 思源图像块二次编辑自定义属性名称 */
@@ -225,8 +226,121 @@ export async function replaceAssetInBlocks(
   }
 }
 
+/** 块 ID 存在性核查的单批数量（与 asset-catalog 的存在性核查保持一致，ID 均为内核安全字符集） */
+const BLOCK_EXISTENCE_CHUNK = 900
+
 /**
- * 从文档块中彻底移除指定资产的引用。如果移除后该块变为空白，则删除该块。
+ * 批量核查块 ID 在内核 blocks 表中的存在性，返回实际存在的 id 集合。
+ * 用于跳转前校验：引用是扫描时刻的缓存，块可能已被删除或属于伪引用，
+ * openTab 本身不校验目标存在性，直接打开会得到"已在后台打开"的假成功提示。
+ */
+export async function filterExistingBlockIds(ids: Array<string | undefined | null>): Promise<Set<string>> {
+  const candidates = Array.from(new Set((ids || []).filter((id): id is string => Boolean(id))))
+  const found = new Set<string>()
+  if (candidates.length === 0) return found
+
+  const chunks: string[][] = []
+  for (let i = 0; i < candidates.length; i += BLOCK_EXISTENCE_CHUNK) {
+    chunks.push(candidates.slice(i, i + BLOCK_EXISTENCE_CHUNK))
+  }
+  await mapWithConcurrency(chunks, 4, async (chunk) => {
+    const quoted = chunk.map((id) => `'${id}'`).join(',')
+    try {
+      const rows = await sql(`SELECT id FROM blocks WHERE id IN (${quoted})`)
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (row && row.id) found.add(String(row.id))
+      }
+    } catch (err) {
+      warn(`[siyuan-block] 核查块存在性失败（按不存在处理）:`, err)
+    }
+  })
+  return found
+}
+
+/**
+ * 判断引用是否为"非普通文档块"的伪引用（画布 / 独立数据库占位）。
+ * 这类 id 不存在于 blocks 表，无法按块清理：画布引用由确认弹窗如实提示，
+ * 独立数据库引用由 removeAssetFromAttributeViews 清理。
+ */
+function isPseudoReference(ref: BlockRef): boolean {
+  if (!ref || !ref.id) return false
+  if (ref.id.startsWith('canvas:')) return true
+  return ref.id.startsWith('av-') && ref.id === ref.root_id
+}
+
+/**
+ * 采集删除前各引用块上携带该资源引用的属性（IAL）快照，供删除回退整值还原。
+ * 仅记录会被 removeAssetFromBlocks 清理的属性，其余属性不进快照。
+ */
+export async function captureAssetAttrSnapshots(
+  references: BlockRef[],
+  assetName: string
+): Promise<Record<string, Record<string, string>>> {
+  const snapshots: Record<string, Record<string, string>> = {};
+  const encodedName = encodeURIComponent(assetName);
+  const hasAssetIn = (text: string) =>
+    text.includes(`assets/${assetName}`) || (encodedName !== assetName && text.includes(`assets/${encodedName}`));
+
+  for (const ref of references || []) {
+    if (!ref?.id || isPseudoReference(ref)) continue;
+    try {
+      const attrs = await getBlockAttrs(ref.id);
+      if (!attrs || typeof attrs !== 'object') continue;
+      const hit: Record<string, string> = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        if (typeof v === 'string' && hasAssetIn(v)) {
+          hit[k] = v;
+        }
+      }
+      if (Object.keys(hit).length > 0) {
+        snapshots[ref.id] = hit;
+      }
+    } catch (e) {
+      warn(`[siyuan-block] 采集块 ${ref.id} 属性快照失败:`, e);
+    }
+  }
+
+  return snapshots;
+}
+
+/**
+ * 清理单个块属性（IAL）中残留的资源引用（题头图、custom-data-assets 等自定义属性）。
+ * 属性值清理后为空串时，内核 setBlockAttrs 会直接删除该属性（见 kernel/model/blockial.go setNodeAttrsData）。
+ */
+async function removeAssetFromBlockAttrs(blockId: string, assetName: string): Promise<void> {
+  if (!blockId) return
+  try {
+    const attrs = await getBlockAttrs(blockId);
+    if (!attrs || typeof attrs !== 'object') return;
+
+    const encodedName = encodeURIComponent(assetName);
+    const hasAssetIn = (text: string) =>
+      text.includes(`assets/${assetName}`) || (encodedName !== assetName && text.includes(`assets/${encodedName}`));
+
+    const updatedAttrs: { [key: string]: string } = {};
+    for (const [k, v] of Object.entries(attrs)) {
+      if (typeof v !== 'string' || !hasAssetIn(v)) continue;
+      updatedAttrs[k] = removeAssetFromMarkdown(v, assetName).trim();
+    }
+
+    if (Object.keys(updatedAttrs).length > 0) {
+      const setRes = await setBlockAttrs(blockId, updatedAttrs);
+      if (setRes === null) {
+        throw new Error(`[siyuan-block] 清理块属性失败: setBlockAttrs 返回异常 (块ID: ${blockId})`);
+      }
+      log(`[siyuan-block] 成功清理块 ${blockId} 属性中的资源引用: ${assetName}`);
+    }
+  } catch (attrErr) {
+    warn(`[siyuan-block] 清理块 ${blockId} 属性中的资源引用失败:`, attrErr);
+  }
+}
+
+/**
+ * 从所有引用位置彻底移除指定资产的引用：
+ * 1. 文档块正文 Markdown（含 SQL 未命中时的 kramdown 实时兜底）；
+ * 2. 块属性 IAL（题头图 / custom-data-assets 等，正文替换覆盖不到的位置）；
+ * 3. 属性视图（数据库）文件中的资源单元格。
+ * 如果块移除引用后变为空白，则删除该块。画布伪引用不在此处理（由确认弹窗提示手动清理）。
  * @param references 涉及该资源的所有 Block 引用信息
  * @param assetName 被删除的资源名称
  */
@@ -234,31 +348,61 @@ export async function removeAssetFromBlocks(
   references: BlockRef[],
   assetName: string
 ): Promise<void> {
-  for (const ref of references) {
-    const blocks = await sql(`SELECT markdown FROM blocks WHERE id = '${ref.id}'`);
-    if (blocks && blocks.length > 0) {
-      const currentMarkdown = blocks[0].markdown || "";
-      const encodedName = encodeURIComponent(assetName);
-      const hasAsset = currentMarkdown.includes(`assets/${assetName}`) || (encodedName !== assetName && currentMarkdown.includes(`assets/${encodedName}`));
-      if (hasAsset) {
-        const newMarkdown = removeAssetFromMarkdown(currentMarkdown, assetName);
-        
-        // 若该块上绑定了此二次编辑图片的元数据，同步清除块属性
-        try {
-          const meta = await getImageBlockReEditData(ref.id);
-          if (meta && meta.renderedAssetName === assetName) {
-            await removeImageBlockReEditData(ref.id);
-          }
-        } catch (e) {}
+  const encodedName = encodeURIComponent(assetName);
+  const hasAssetIn = (text: string) =>
+    text.includes(`assets/${assetName}`) || (encodedName !== assetName && text.includes(`assets/${encodedName}`));
 
-        // 清理前后的空格，若为空白块则直接删除
-        if (newMarkdown.trim() === "") {
-          await deleteBlock(ref.id);
-        } else {
-          await updateBlock("markdown", newMarkdown, ref.id);
+  for (const ref of references) {
+    // 伪引用（画布 / 独立数据库）不在 blocks 表中，按块清理必然空转，直接跳过
+    if (isPseudoReference(ref)) continue;
+
+    const blocks = await sql(`SELECT id, markdown, ial FROM blocks WHERE id = '${ref.id}'`);
+    let currentMarkdown = blocks && blocks.length > 0 ? (blocks[0].markdown || "") : "";
+
+    // 保底机制（与 replaceAssetInBlocks 一致）：SQLite 未命中或未见旧资源名时，
+    // 穿透调用内核实时内存 AST 接口，防止内核异步索引时延导致漏清
+    if (!currentMarkdown || !hasAssetIn(currentMarkdown)) {
+      try {
+        const kramdownRes = await getBlockKramdown(ref.id);
+        if (kramdownRes?.kramdown && hasAssetIn(kramdownRes.kramdown)) {
+          currentMarkdown = kramdownRes.kramdown;
         }
+      } catch (kramErr) {
+        warn(`[siyuan-block] 获取块 ${ref.id} 实时 kramdown 失败:`, kramErr);
       }
     }
+
+    if (currentMarkdown && hasAssetIn(currentMarkdown)) {
+      const newMarkdown = removeAssetFromMarkdown(currentMarkdown, assetName);
+
+      // 若该块上绑定了此二次编辑图片的元数据，同步清除块属性
+      try {
+        const meta = await getImageBlockReEditData(ref.id);
+        if (meta && meta.renderedAssetName === assetName) {
+          await removeImageBlockReEditData(ref.id);
+        }
+      } catch (e) {}
+
+      // 清理前后的空格，若为空白块则直接删除
+      if (newMarkdown.trim() === "") {
+        await deleteBlock(ref.id);
+      } else {
+        await updateBlock("markdown", newMarkdown, ref.id);
+      }
+    }
+
+    // 块属性 IAL 中的引用（正文列不含路径时唯一的存在形式）
+    const currentIal = blocks && blocks.length > 0 ? (blocks[0].ial || "") : "";
+    if (hasAssetIn(currentIal) || currentMarkdown) {
+      await removeAssetFromBlockAttrs(ref.id, assetName);
+    }
+  }
+
+  // 属性视图（数据库）单元格中的引用
+  try {
+    await removeAssetFromAttributeViews(assetName);
+  } catch (avErr) {
+    warn(`[siyuan-block] 清理属性视图中的资源引用失败:`, avErr);
   }
 
   // 主动触发思源内核同步落库

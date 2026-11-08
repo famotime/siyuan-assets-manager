@@ -313,6 +313,23 @@ export function countReferencedDocs(references: BlockRef[] = []): number {
   return docIds.size
 }
 
+/**
+ * 是否为无界画布引用（root_id 是 .canvas 画布路径，或 id 带 canvas: 前缀）
+ */
+export function isCanvasRef(ref: BlockRef): boolean {
+  if (!ref) return false
+  return ref.id?.startsWith('canvas:') || (ref.root_id?.endsWith('.canvas') ?? false)
+}
+
+/**
+ * 是否为独立数据库伪引用（attribute-view.ts 为未嵌入文档的数据库生成的 av-<avId> 占位 id）。
+ * 这类 id 不存在于 blocks 表，无法作为文档打开，只能展示来源名称。
+ */
+export function isStandaloneDatabaseRef(ref: BlockRef): boolean {
+  if (!ref) return false
+  return Boolean(ref.id) && ref.id.startsWith('av-') && ref.id === ref.root_id
+}
+
 export function updateAssetDocCounts(assets: Iterable<AssetInfo>): void {
   for (const asset of assets) {
     asset.docCount = countReferencedDocs(asset.references)

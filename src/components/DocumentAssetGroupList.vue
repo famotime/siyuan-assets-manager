@@ -70,7 +70,7 @@
                 <button
                   v-if="!row.data.group.isUnreferenced"
                   class="am-btn am-btn--icon doc-open-btn"
-                  @click.stop="$emit('open-doc-id', row.data.group.id, row.data.group.firstBlockId)"
+                  @click.stop="$emit('open-doc-id', row.data.group.id, row.data.group.firstBlockId, row.data.group.readablePath || row.data.group.title)"
                   :title="row.data.group.id.startsWith('canvas:') || row.data.group.id.endsWith('.canvas') ? t('group.openCanvasTitle') : t('group.openDocTitle')"
                 >
                   <ExternalLink :size="15" />
@@ -338,7 +338,7 @@ const { list, containerProps, wrapperProps } = useVirtualList(rows, {
 
 const emit = defineEmits<{
   (e: 'open-docs', asset: AssetInfo, event?: MouseEvent): void;
-  (e: 'open-doc-id', rootId: string, firstBlockId?: string): void;
+  (e: 'open-doc-id', rootId: string, firstBlockId?: string, sourceLabel?: string): void;
   (e: 'edit', asset: AssetInfo): void;
   (e: 'rename', asset: AssetInfo): void;
   (e: 'delete', asset: AssetInfo): void;

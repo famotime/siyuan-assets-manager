@@ -108,6 +108,18 @@ describe('asset markdown helpers', () => {
     expect(removeAssetFromMarkdown('<img src="assets/pic.png" />', 'pic.png')).toBe('')
   })
 
+  it('removes the whole PDF annotation token referencing the asset without touching others', () => {
+    const markdown = [
+      'before <<assets/doc.pdf#annotations="abc" "锚文本">> after',
+      'keep <<assets/other.pdf#x "保留">>',
+    ].join('\n')
+    const result = removeAssetFromMarkdown(markdown, 'doc.pdf')
+    expect(result).toBe([
+      'before  after',
+      'keep <<assets/other.pdf#x "保留">>',
+    ].join('\n'))
+  })
+
   it('keeps the element when only data-src points at the removed asset', () => {
     // data-src 只是思源记录的原始文件名，删掉它不应该连整个播放器一起移除
     const markdown = '<video src="assets/movie.mp4" data-src="assets/orig.mp4"></video>'

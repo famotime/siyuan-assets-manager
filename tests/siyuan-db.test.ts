@@ -28,6 +28,8 @@ import {
   cleanupOrphanOriginals,
   formatReadableDocPath,
   countReferencedDocs,
+  isCanvasRef,
+  isStandaloneDatabaseRef,
 } from '../src/utils/siyuan-db'
 import { filterAssets, calculateTotalCleanup } from '../src/utils/asset-list'
 import { invalidateCatalogCache } from '../src/utils/asset-catalog'
@@ -131,6 +133,29 @@ describe('siyuan asset database helpers', () => {
     expect(countReferencedDocs([ref('b-1', 'doc-1'), ref('b-2', 'doc-1')])).toBe(1)
     expect(countReferencedDocs([ref('b-1', 'doc-1'), ref('b-2', 'doc-2')])).toBe(2)
     expect(countReferencedDocs([])).toBe(0)
+  })
+
+  it('classifies canvas and standalone-database pseudo references', () => {
+    const ref = (id: string, rootId: string, path = '/doc.sy') => ({
+      id,
+      root_id: rootId,
+      box: '',
+      content: '',
+      markdown: '',
+      path,
+    })
+
+    // 画布引用：id 带 canvas: 前缀，或 root_id 为 .canvas 画布路径
+    expect(isCanvasRef(ref('canvas:/data/storage/petal/siyuan-canvas/a.canvas:node-1', '/data/storage/petal/siyuan-canvas/a.canvas'))).toBe(true)
+    expect(isCanvasRef(ref('blk-1', '/data/storage/petal/siyuan-canvas/b.canvas'))).toBe(true)
+    expect(isCanvasRef(ref('blk-1', 'doc-1'))).toBe(false)
+
+    // 独立数据库伪引用：av- 占位 id 且 id === root_id，无法作为文档打开
+    expect(isStandaloneDatabaseRef(ref('av-20240101120000-abcdef', 'av-20240101120000-abcdef'))).toBe(true)
+    // 嵌入文档的数据库引用：真实块 id 与 root_id，可正常跳转
+    expect(isStandaloneDatabaseRef(ref('av-block-1', 'doc-1'))).toBe(false)
+    expect(isStandaloneDatabaseRef(ref('blk-1', 'doc-1'))).toBe(false)
+    expect(isStandaloneDatabaseRef(ref('', ''))).toBe(false)
   })
 
   it('formats readable doc path starting from notebook name', () => {

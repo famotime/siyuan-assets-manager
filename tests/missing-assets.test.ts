@@ -44,6 +44,11 @@ vi.mock('../src/utils/siyuan-db', async () => {
 
 vi.mock('../src/utils/siyuan-block', () => ({
   removeAssetFromBlocks: vi.fn(async () => {}),
+  captureAssetAttrSnapshots: vi.fn(async () => ({})),
+}));
+
+vi.mock('../src/utils/attribute-view', () => ({
+  captureAttributeViewAssetCells: vi.fn(async () => new Map()),
 }));
 
 vi.mock('../src/utils/deletion-logger', () => ({

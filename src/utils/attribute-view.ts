@@ -1,7 +1,7 @@
 import { t } from '@/i18n';
 import { sql } from '../api';
 import { defaultStorage, blobToText } from './storage';
-import { extractAssetNamesFromMarkdown, escapeRegExp } from './asset-markdown';
+import { extractAssetNamesFromMarkdown, escapeRegExp, removeAssetFromMarkdown } from './asset-markdown';
 import { restoreAssetReference } from './inverse-reference';
 import { type BlockRef, formatReadableDocPath } from './siyuan-db';
 import { log, warn, error } from './logger';
@@ -345,6 +345,110 @@ export async function replaceAssetInAttributeViews(oldAssetName: string, newAsse
 }
 
 /**
+ * 从所有属性视图 JSON 文件中移除指定资产的引用（删除资源场景，与重命名的
+ * replaceAssetInAttributeViews 对偶）。
+ *
+ * - 文本/URL 单元格：仅抹除资源引用片段，保留其余内容；
+ * - mAsset 资源项：整项内容就是资源引用，清理后为空则移除该项。
+ *
+ * @returns 成功更新的属性视图文件数量
+ */
+export async function removeAssetFromAttributeViews(assetName: string): Promise<number> {
+  if (!assetName) {
+    return 0;
+  }
+
+  let updatedCount = 0;
+
+  try {
+    const entries = await defaultStorage.list(ATTRIBUTE_VIEW_STORAGE_DIR);
+    const jsonFiles = entries.filter((e) => !e.isDir && e.name.endsWith('.json'));
+
+    let encodedName = '';
+    try {
+      encodedName = encodeURIComponent(assetName);
+    } catch (e) {}
+    const hasAssetIn = (text: string) =>
+      text.includes(`assets/${assetName}`) || (encodedName !== assetName && text.includes(`assets/${encodedName}`));
+
+    for (const file of jsonFiles) {
+      const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${file.name}`;
+      const blob = await defaultStorage.read(filePath);
+      if (!blob) continue;
+
+      const text = await blobToText(blob);
+      if (!text) continue;
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
+        warn(`[attribute-view] 数据库文件 ${file.name} 解析失败，跳过资源引用移除:`, parseErr);
+        continue;
+      }
+      if (!Array.isArray(parsed?.keyValues)) continue;
+
+      let fileChanged = false;
+
+      for (const keyValue of parsed.keyValues) {
+        if (!Array.isArray(keyValue?.values)) continue;
+
+        for (const value of keyValue.values) {
+          if (!value) continue;
+
+          if (typeof value.content === 'string' && value.content && hasAssetIn(value.content)) {
+            const cleaned = removeAssetFromMarkdown(value.content, assetName);
+            if (cleaned !== value.content) {
+              value.content = cleaned;
+              fileChanged = true;
+            }
+          }
+
+          if (value.url && typeof value.url.content === 'string' && value.url.content && hasAssetIn(value.url.content)) {
+            const cleaned = removeAssetFromMarkdown(value.url.content, assetName);
+            if (cleaned !== value.url.content) {
+              value.url.content = cleaned;
+              fileChanged = true;
+            }
+          }
+
+          if (Array.isArray(value.mAsset)) {
+            const keptItems: any[] = [];
+            for (const item of value.mAsset) {
+              if (item && typeof item.content === 'string' && item.content && hasAssetIn(item.content)) {
+                const cleaned = removeAssetFromMarkdown(item.content, assetName).trim();
+                if (cleaned) {
+                  item.content = cleaned;
+                  keptItems.push(item);
+                }
+                // 清理后为空：该资源项整体移除
+                fileChanged = true;
+              } else {
+                keptItems.push(item);
+              }
+            }
+            if (keptItems.length !== value.mAsset.length) {
+              value.mAsset = keptItems;
+            }
+          }
+        }
+      }
+
+      if (fileChanged) {
+        const nextText = serializeLikeOriginal(parsed, text);
+        await defaultStorage.write(filePath, new Blob([nextText], { type: 'application/json' }));
+        updatedCount++;
+        log(`[attribute-view] 已从数据库文件移除资源引用: ${file.name} (${assetName})`);
+      }
+    }
+  } catch (err) {
+    error('[attribute-view] 移除数据库资源引用失败:', err);
+  }
+
+  return updatedCount;
+}
+
+/**
  * 数据库中被合并改写过的单元格快照。
  *
  * 去重合并是"多对一"变换，按名字对整份 JSON 做全局反替换会把所有单元格
@@ -360,8 +464,12 @@ export interface IAffectedViewCell {
   rowId: string;
   /** 该行文本字段 `content` 的合并前快照 */
   originalContent?: string;
+  /** 该行 URL 字段 `url.content` 的删除前快照 */
+  originalUrlContent?: string;
   /** 该行资源字段 `mAsset[].content` 的合并前快照（按下标对应） */
   originalAssetContents?: string[];
+  /** 该行资源字段 `mAsset` 的删除前完整快照（含 type/name/content，供删除回退整组还原） */
+  originalMAssetItems?: Array<{ type?: string; name?: string; content: string }>;
 }
 
 export interface IViewCellRestoreStats {
@@ -457,8 +565,12 @@ export async function captureAttributeViewAssetCells(
               keyId: String(keyId),
               rowId: String(rowId),
               originalContent: typeof value.content === 'string' ? value.content : undefined,
+              originalUrlContent: value.url && typeof value.url.content === 'string' ? value.url.content : undefined,
               originalAssetContents: Array.isArray(value.mAsset)
                 ? value.mAsset.map((item: any) => (typeof item?.content === 'string' ? item.content : ''))
+                : undefined,
+              originalMAssetItems: Array.isArray(value.mAsset)
+                ? JSON.parse(JSON.stringify(value.mAsset))
                 : undefined,
             });
           }
@@ -604,4 +716,117 @@ function countRestorableFields(cells: IAffectedViewCell[]): number {
     if (Array.isArray(cell.originalAssetContents)) count += cell.originalAssetContents.length;
   }
   return count;
+}
+
+export interface IDeletionViewCellRestoreStats {
+  restoredCount: number;
+  skippedCount: number;
+}
+
+/**
+ * 删除资源后按单元格快照整值还原数据库引用（删除回退专用）。
+ *
+ * 与去重回退的 restoreAttributeViewAssetCells 不同：删除场景 resource 名不变，
+ * 语义是"恢复到删除前"，因此对快照覆盖的字段做整值还原——
+ * 当前值与快照一致（未清理过）则跳过，不一致则整字段写回快照。
+ */
+export async function restoreAttributeViewCellsAfterDeletion(
+  cells: IAffectedViewCell[]
+): Promise<IDeletionViewCellRestoreStats> {
+  const stats: IDeletionViewCellRestoreStats = { restoredCount: 0, skippedCount: 0 };
+  if (!Array.isArray(cells) || cells.length === 0) return stats;
+
+  const cellsByView = new Map<string, IAffectedViewCell[]>();
+  for (const cell of cells) {
+    if (!cell?.viewId || !cell.keyId || !cell.rowId) continue;
+    let list = cellsByView.get(cell.viewId);
+    if (!list) {
+      list = [];
+      cellsByView.set(cell.viewId, list);
+    }
+    list.push(cell);
+  }
+
+  for (const [viewId, viewCells] of cellsByView) {
+    const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${viewId}.json`;
+    try {
+      const blob = await defaultStorage.read(filePath);
+      if (!blob) {
+        stats.skippedCount += viewCells.length;
+        continue;
+      }
+      const text = await blobToText(blob);
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
+        warn(`[attribute-view] 数据库文件 ${viewId}.json 解析失败，跳过删除回退:`, parseErr);
+        stats.skippedCount += viewCells.length;
+        continue;
+      }
+      if (!Array.isArray(parsed?.keyValues)) {
+        stats.skippedCount += viewCells.length;
+        continue;
+      }
+
+      let fileChanged = false;
+
+      for (const cell of viewCells) {
+        const keyValue = parsed.keyValues.find((kv: any) => String(kv?.key?.id) === cell.keyId);
+        const value = Array.isArray(keyValue?.values)
+          ? keyValue.values.find((v: any) => String(v?.blockID || v?.itemID || v?.id) === cell.rowId)
+          : null;
+
+        if (!value) {
+          stats.skippedCount++;
+          continue;
+        }
+
+        let cellRestored = false;
+
+        if (typeof cell.originalContent === 'string' && value.content !== cell.originalContent) {
+          value.content = cell.originalContent;
+          fileChanged = true;
+          cellRestored = true;
+        }
+
+        if (
+          typeof cell.originalUrlContent === 'string'
+          && value.url
+          && typeof value.url.content === 'string'
+          && value.url.content !== cell.originalUrlContent
+        ) {
+          value.url.content = cell.originalUrlContent;
+          fileChanged = true;
+          cellRestored = true;
+        }
+
+        if (
+          Array.isArray(cell.originalMAssetItems)
+          && JSON.stringify(value.mAsset ?? null) !== JSON.stringify(cell.originalMAssetItems)
+        ) {
+          value.mAsset = JSON.parse(JSON.stringify(cell.originalMAssetItems));
+          fileChanged = true;
+          cellRestored = true;
+        }
+
+        if (cellRestored) {
+          stats.restoredCount++;
+        } else {
+          stats.skippedCount++;
+        }
+      }
+
+      if (fileChanged) {
+        const nextText = serializeLikeOriginal(parsed, text);
+        await defaultStorage.write(filePath, new Blob([nextText], { type: 'application/json' }));
+        log(`[attribute-view] 已按单元格快照整值还原数据库文件: ${viewId}.json`);
+      }
+    } catch (err) {
+      error(`[attribute-view] 删除回退还原数据库文件 ${viewId}.json 失败:`, err);
+      stats.skippedCount += viewCells.length;
+    }
+  }
+
+  return stats;
 }

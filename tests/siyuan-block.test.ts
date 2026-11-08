@@ -190,6 +190,65 @@ describe('siyuan block asset updates', () => {
     expect(updateBlockMock).not.toHaveBeenCalled()
   })
 
+  it('cleans asset references from block attributes (IAL) via setBlockAttrs', async () => {
+    sqlMock.mockResolvedValue([
+      { markdown: '正文无引用', ial: '{: custom-data-assets="assets/old.png assets/keep.png" id="x"}' },
+    ])
+    getBlockAttrsMock.mockResolvedValue({
+      id: 'x',
+      'custom-data-assets': 'assets/old.png assets/keep.png',
+    })
+    setBlockAttrsMock.mockResolvedValue({} as any)
+
+    await removeAssetFromBlocks([ref('block-1')], 'old.png')
+
+    expect(setBlockAttrsMock).toHaveBeenCalledWith('block-1', {
+      'custom-data-assets': 'assets/keep.png',
+    })
+    expect(updateBlockMock).not.toHaveBeenCalled()
+  })
+
+  it('writes an empty attribute value (kernel deletes the attribute) when cleaning empties it', async () => {
+    sqlMock.mockResolvedValue([
+      { markdown: '', ial: '{: custom-data-assets="assets/old.png"}' },
+    ])
+    getBlockAttrsMock.mockResolvedValue({ 'custom-data-assets': 'assets/old.png' })
+    setBlockAttrsMock.mockResolvedValue({} as any)
+
+    await removeAssetFromBlocks([ref('block-1')], 'old.png')
+
+    expect(setBlockAttrsMock).toHaveBeenCalledWith('block-1', { 'custom-data-assets': '' })
+    expect(deleteBlockMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to live kramdown and deletes the block when SQL row is missing', async () => {
+    sqlMock.mockResolvedValue([])
+    getBlockKramdownMock.mockResolvedValue({ kramdown: '![img](assets/old.png)' } as any)
+
+    await removeAssetFromBlocks([ref('block-1')], 'old.png')
+
+    expect(getBlockKramdownMock).toHaveBeenCalledWith('block-1')
+    expect(deleteBlockMock).toHaveBeenCalledWith('block-1')
+  })
+
+  it('skips pseudo references (canvas / standalone database) instead of querying blocks', async () => {
+    const canvasRef: BlockRef = {
+      ...ref('canvas:/data/storage/petal/siyuan-canvas/a.canvas:n1'),
+      root_id: '/data/storage/petal/siyuan-canvas/a.canvas',
+      path: '/data/storage/petal/siyuan-canvas/a.canvas',
+    }
+    const avRef: BlockRef = {
+      ...ref('av-20240101120000-abcdef'),
+      root_id: 'av-20240101120000-abcdef',
+    }
+
+    await removeAssetFromBlocks([canvasRef, avRef], 'old.png')
+
+    expect(sqlMock).not.toHaveBeenCalled()
+    expect(updateBlockMock).not.toHaveBeenCalled()
+    expect(deleteBlockMock).not.toHaveBeenCalled()
+  })
+
   it('reads and writes custom-asset-reedit block attributes', async () => {
     const meta: IAssetReEditMetadata = {
       version: 1,

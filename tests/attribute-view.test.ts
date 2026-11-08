@@ -14,8 +14,10 @@ import {
   extractAssetsFromAttributeViewJson,
   resolveAttributeViewReferences,
   replaceAssetInAttributeViews,
+  removeAssetFromAttributeViews,
   captureAttributeViewAssetCells,
   restoreAttributeViewAssetCells,
+  restoreAttributeViewCellsAfterDeletion,
   ATTRIBUTE_VIEW_STORAGE_DIR,
 } from '../src/utils/attribute-view';
 import { defaultStorage, blobToText } from '../src/utils/storage';
@@ -372,6 +374,163 @@ describe('attribute-view helper module', () => {
       const captured = await captureAttributeViewAssetCells(['dup.png']);
 
       expect(captured.size).toBe(0);
+    });
+  });
+
+  describe('removeAssetFromAttributeViews', () => {
+    it('strips text/url references, drops matched mAsset items, and keeps other assets intact', async () => {
+      const initialJson = JSON.stringify({
+        id: 'av-del-db',
+        keyValues: [
+          {
+            key: { id: 'key-cover', name: '封面', type: 'mAsset' },
+            values: [
+              {
+                blockID: 'row-1',
+                content: '看看这张 assets/old_name.png 很不错',
+                url: { content: 'assets/old_name.png' },
+                mAsset: [
+                  { type: 'fileAsset', name: 'old_name.png', content: 'assets/old_name.png' },
+                  { type: 'fileAsset', name: 'keep.png', content: 'assets/keep.png' },
+                ],
+              },
+              {
+                blockID: 'row-2',
+                content: 'assets/keep.png 不受影响',
+              },
+            ],
+          },
+        ],
+      });
+
+      vi.spyOn(defaultStorage, 'list').mockResolvedValue([
+        { name: 'av-del-db.json', isDir: false, size: 100, updated: 100 },
+      ]);
+      vi.spyOn(defaultStorage, 'read').mockResolvedValue(
+        new Blob([initialJson], { type: 'application/json' })
+      );
+      const writeSpy = vi.spyOn(defaultStorage, 'write').mockResolvedValue(undefined);
+
+      const count = await removeAssetFromAttributeViews('old_name.png');
+      expect(count).toBe(1);
+
+      const writtenText = await blobToText(writeSpy.mock.calls[0][1]);
+      expect(writtenText).not.toContain('old_name.png');
+      expect(writtenText).toContain('assets/keep.png');
+      const parsed = JSON.parse(writtenText);
+      const row = parsed.keyValues[0].values[0];
+      expect(row.content).toBe('看看这张  很不错');
+      expect(row.url.content).toBe('');
+      expect(row.mAsset).toHaveLength(1);
+      expect(row.mAsset[0].content).toBe('assets/keep.png');
+    });
+
+    it('skips writing when no cell references the asset', async () => {
+      const initialJson = JSON.stringify({
+        id: 'av-del-db',
+        keyValues: [{ values: [{ blockID: 'row-1', content: 'assets/keep.png' }] }],
+      });
+      vi.spyOn(defaultStorage, 'list').mockResolvedValue([
+        { name: 'av-del-db.json', isDir: false, size: 100, updated: 100 },
+      ]);
+      vi.spyOn(defaultStorage, 'read').mockResolvedValue(
+        new Blob([initialJson], { type: 'application/json' })
+      );
+      const writeSpy = vi.spyOn(defaultStorage, 'write').mockResolvedValue(undefined);
+
+      const count = await removeAssetFromAttributeViews('old_name.png');
+      expect(count).toBe(0);
+      expect(writeSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deletion rollback (restoreAttributeViewCellsAfterDeletion)', () => {
+    const buildAvJson = (values: any[]) =>
+      JSON.stringify({
+        spec: 1,
+        id: 'av-del-db',
+        name: '素材库',
+        keyValues: [
+          { key: { id: 'key-cover', name: '封面', type: 'mAsset' }, values },
+        ],
+      });
+
+    const mockAvFile = (json: string) => {
+      vi.spyOn(defaultStorage, 'list').mockResolvedValue([
+        { name: 'av-del-db.json', isDir: false, size: 100, updated: 100 },
+      ]);
+      vi.spyOn(defaultStorage, 'read').mockResolvedValue(new Blob([json], { type: 'application/json' }));
+      return vi.spyOn(defaultStorage, 'write').mockResolvedValue(undefined);
+    };
+
+    it('captures full mAsset items and url content for deletion rollback', async () => {
+      mockAvFile(buildAvJson([
+        {
+          blockID: 'row-1',
+          content: 'assets/dup.png',
+          url: { content: 'https://example.com/assets/dup.png' },
+          mAsset: [{ type: 'fileAsset', name: 'dup.png', content: 'assets/dup.png' }],
+        },
+      ]));
+
+      const captured = await captureAttributeViewAssetCells(['dup.png']);
+      const cell = captured.get('dup.png')![0];
+      expect(cell.originalUrlContent).toBe('https://example.com/assets/dup.png');
+      expect(cell.originalMAssetItems).toEqual([
+        { type: 'fileAsset', name: 'dup.png', content: 'assets/dup.png' },
+      ]);
+    });
+
+    it('restores the whole cell to the pre-deletion snapshot after references were cleaned', async () => {
+      const cleanedJson = buildAvJson([
+        {
+          blockID: 'row-1',
+          content: '',
+          url: { content: '' },
+          mAsset: [],
+        },
+      ]);
+      const writeSpy = mockAvFile(cleanedJson);
+
+      const stats = await restoreAttributeViewCellsAfterDeletion([
+        {
+          viewId: 'av-del-db',
+          keyId: 'key-cover',
+          rowId: 'row-1',
+          originalContent: 'assets/dup.png',
+          originalUrlContent: 'https://example.com/assets/dup.png',
+          originalMAssetItems: [{ type: 'fileAsset', name: 'dup.png', content: 'assets/dup.png' }],
+        },
+      ]);
+
+      expect(stats.restoredCount).toBe(1);
+      expect(stats.skippedCount).toBe(0);
+      const writtenText = await blobToText(writeSpy.mock.calls[0][1]);
+      const parsed = JSON.parse(writtenText);
+      const row = parsed.keyValues[0].values[0];
+      expect(row.content).toBe('assets/dup.png');
+      expect(row.url.content).toBe('https://example.com/assets/dup.png');
+      expect(row.mAsset).toEqual([{ type: 'fileAsset', name: 'dup.png', content: 'assets/dup.png' }]);
+    });
+
+    it('counts an untouched cell as skipped instead of writing', async () => {
+      const untouchedJson = buildAvJson([
+        { blockID: 'row-1', content: 'assets/dup.png' },
+      ]);
+      const writeSpy = mockAvFile(untouchedJson);
+
+      const stats = await restoreAttributeViewCellsAfterDeletion([
+        {
+          viewId: 'av-del-db',
+          keyId: 'key-cover',
+          rowId: 'row-1',
+          originalContent: 'assets/dup.png',
+        },
+      ]);
+
+      expect(stats.restoredCount).toBe(0);
+      expect(stats.skippedCount).toBe(1);
+      expect(writeSpy).not.toHaveBeenCalled();
     });
   });
 });

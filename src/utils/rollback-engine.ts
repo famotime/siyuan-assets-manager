@@ -1,6 +1,6 @@
 import { sql, updateBlock, insertBlock, getBlockAttrs, setBlockAttrs } from '../api';
 import { replaceAssetInMarkdown, countAssetOccurrences, safeEncodeURIComponent } from './asset-markdown';
-import { replaceAssetInAttributeViews, restoreAttributeViewAssetCells } from './attribute-view';
+import { replaceAssetInAttributeViews, restoreAttributeViewAssetCells, restoreAttributeViewCellsAfterDeletion } from './attribute-view';
 import { restoreAssetReference } from './inverse-reference';
 import { createChildBlocksCache, planInsertAnchors } from './rollback-anchor';
 import { defaultStorage } from './storage';
@@ -347,6 +347,41 @@ export async function rollbackBatch(batchId: string): Promise<IRollbackExecution
           error(`[rollback-engine] 恢复删除块 [${ref.id}] 图片引用失败:`, blockErr);
           failedBlocksCount++;
         }
+      }
+
+      // 2.1 恢复块属性（IAL，题头图 / custom-data-assets 等）中已被清理的资源引用
+      const ialSnapshots = item.originalIalSnapshots || {};
+      for (const [blockId, snapshot] of Object.entries(ialSnapshots)) {
+        try {
+          const attrs = await getBlockAttrs(blockId);
+          if (!attrs || typeof attrs !== 'object') {
+            skippedBlocksCount++;
+            continue;
+          }
+          const restoredAttrs: Record<string, string> = {};
+          for (const [k, v] of Object.entries(snapshot)) {
+            if (typeof v === 'string' && attrs[k] !== v) {
+              restoredAttrs[k] = v;
+            }
+          }
+          if (Object.keys(restoredAttrs).length > 0) {
+            await setBlockAttrs(blockId, restoredAttrs);
+            restoredIalCount += Object.keys(restoredAttrs).length;
+          } else {
+            skippedBlocksCount++;
+          }
+        } catch (ialErr) {
+          error(`[rollback-engine] 恢复块 [${blockId}] 属性引用失败:`, ialErr);
+          failedBlocksCount++;
+        }
+      }
+
+      // 2.2 恢复数据库（属性视图）单元格中已被清理的资源引用
+      const deletionAffectedViews = item.affectedViews || [];
+      if (deletionAffectedViews.length > 0) {
+        const viewStats = await restoreAttributeViewCellsAfterDeletion(deletionAffectedViews);
+        restoredViewCellsCount += viewStats.restoredCount;
+        skippedViewCellsCount += viewStats.skippedCount;
       }
     }
   }

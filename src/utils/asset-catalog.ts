@@ -571,11 +571,55 @@ export interface CatalogSupportData {
   degraded: boolean
 }
 
-/** PDF 标注索引表行 → 预提取条目（file_path 即 markdown 语义） */
+/**
+ * PDF 标注索引表行 → 预提取条目（file_path 即 markdown 语义）。
+ * file_annotation_refs 表自带 root_id/box/path/content 列（见内核 sql/database.go 建表），
+ * 必须一并取出：丢失 root_id 会让 docCount 恒为 1 且跳转定位失效（历史上只查了 block_id）。
+ */
 function annotationRowsToEntries(rows: any[]): PreExtractedBlockEntry[] {
-  return (Array.isArray(rows) ? rows : []).map((r: any) =>
-    toPreExtractedEntry({ id: r.id, markdown: r.markdown || '' }),
-  )
+  return (Array.isArray(rows) ? rows : [])
+    .filter((r: any) => r && r.block_id)
+    .map((r: any) =>
+      toPreExtractedEntry({
+        id: r.block_id,
+        root_id: r.root_id || '',
+        box: r.box || '',
+        content: r.content || '',
+        path: r.path || '',
+        markdown: r.file_path || '',
+      }),
+    )
+}
+
+/**
+ * 标注条目只有内核表中的 path（文档块路径），没有 hpath；
+ * 分批反查 blocks 表补齐人类可读路径，让按文档分组能显示文档标题而非空串。
+ */
+async function enrichAnnotationDocPaths(entries: PreExtractedBlockEntry[]): Promise<void> {
+  const rootIds = Array.from(new Set(entries.map((e) => e.root_id).filter(Boolean)))
+  if (rootIds.length === 0) return
+
+  const hpathById = new Map<string, string>()
+  const chunks: string[][] = []
+  for (let i = 0; i < rootIds.length; i += EXISTENCE_CHECK_CHUNK) {
+    chunks.push(rootIds.slice(i, i + EXISTENCE_CHECK_CHUNK))
+  }
+  await mapWithConcurrency(chunks, 4, async (chunk) => {
+    const quoted = chunk.map((id) => `'${id}'`).join(',')
+    try {
+      const rows = await sqlGuarded(`SELECT id, hpath FROM blocks WHERE id IN (${quoted})`)
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (row && row.id && row.hpath) hpathById.set(String(row.id), String(row.hpath))
+      }
+    } catch (err) {
+      warn('[asset-catalog] 补齐 PDF 标注引用的文档路径失败:', err)
+    }
+  })
+  if (hpathById.size === 0) return
+  for (const entry of entries) {
+    const hpath = hpathById.get(entry.root_id)
+    if (hpath) entry.hpath = hpath
+  }
 }
 
 /** SQL 原始行 → 预提取条目（content 列已裁剪，展示文本由 markdown 摘要兜底） */
@@ -603,7 +647,7 @@ export async function fetchCatalogSupportData(): Promise<CatalogSupportDataWithA
   let canvasInventory: Awaited<ReturnType<typeof scanCanvasAssetsInventory>> | null = null
   const notebookMap = await getNotebookMap().catch(() => new Map<string, string>())
   const [annotationRefRows, reEditBlocks, originalFiles, sidecarMetadataList, agentAssets] = await Promise.all([
-    sql(`SELECT block_id as id, file_path as markdown FROM file_annotation_refs LIMIT 100000`).catch(() => []),
+    sql(`SELECT block_id, root_id, box, path, content, file_path FROM file_annotation_refs LIMIT 100000`).catch(() => []),
     queryAllReEditableBlocks().catch(() => []),
     listOriginalImages().catch(() => []),
     listAllAssetMetadataFiles().catch(() => []),
@@ -647,6 +691,9 @@ export async function fetchCatalogSupportData(): Promise<CatalogSupportDataWithA
     }
   }
 
+  const annotationEntries = annotationRowsToEntries(annotationRefRows)
+  await enrichAnnotationDocPaths(annotationEntries)
+
   return {
     reEditBlocks,
     originalFiles,
@@ -656,7 +703,7 @@ export async function fetchCatalogSupportData(): Promise<CatalogSupportDataWithA
     canvasInventory,
     notebookMap,
     degraded,
-    annotationEntries: annotationRowsToEntries(annotationRefRows),
+    annotationEntries,
   }
 }
 

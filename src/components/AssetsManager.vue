@@ -353,7 +353,8 @@ import {
   Search,
   X,
 } from 'lucide-vue-next';
-import { countReferencedDocs, getNotebookMap, type AssetInfo } from '../utils/siyuan-db';
+import { countReferencedDocs, getNotebookMap, isCanvasRef, isStandaloneDatabaseRef, type AssetInfo } from '../utils/siyuan-db';
+import { filterExistingBlockIds } from '../utils/siyuan-block';
 import {
   applyCatalogBlockDelta,
   emptyReferenceData,
@@ -409,6 +410,7 @@ import {
   type AssetSortField,
   type AssetSortOrder,
   type DocAssetGroup,
+  type DocReferenceGroup,
   type DocSortField,
   type DocSortOrder,
 } from '../utils/asset-list';
@@ -1371,7 +1373,7 @@ const docModeStats = computed(() => {
   };
 });
 
-async function handleOpenSingleDoc(rootId: string, firstBlockId?: string) {
+async function handleOpenSingleDoc(rootId: string, firstBlockId?: string, sourceLabel?: string) {
   const isCanvas = rootId.endsWith('.canvas') || (Boolean(firstBlockId) && firstBlockId!.startsWith('canvas:'));
   if (isCanvas) {
     let canvasPath = rootId;
@@ -1385,6 +1387,16 @@ async function handleOpenSingleDoc(rootId: string, firstBlockId?: string) {
     } else {
       pushMsg(t('main.canvasPluginMissing'));
     }
+    return;
+  }
+
+  // 跳转前校验：引用块是扫描时刻的缓存，可能已被删除；
+  // openTab 对失效 id 不会抛错，直接打开只会得到"已在后台打开"的假成功提示
+  const targetId = firstBlockId || rootId;
+  const existingIds = await filterExistingBlockIds([targetId, rootId]);
+  if (!existingIds.has(targetId) && !existingIds.has(rootId)) {
+    const source = sourceLabel || rootId || t('main.untitled');
+    pushMsg(t('main.refBlockMissing', { source }));
     return;
   }
 
@@ -1414,6 +1426,15 @@ function handleSortChange(field: AssetSortField) {
   }
 }
 
+/** 引用分组的展示名（文档标题 / 数据库名 / 画布名，兜底 rootId） */
+function docGroupLabel(group: DocReferenceGroup): string {
+  return group.first.readablePath || group.first.hpath || group.rootId || t('main.untitled');
+}
+
+function isCanvasGroup(group: DocReferenceGroup): boolean {
+  return isCanvasRef(group.first);
+}
+
 async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
   const groups = groupReferencesByDoc(asset.references);
   if (groups.length === 0) {
@@ -1424,8 +1445,8 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
   // 1. 若仅有 1 个引用目标，直接在后台打开
   if (groups.length === 1) {
     const group = groups[0];
-    const isCanvas = group.first.id.startsWith('canvas:') || group.first.path.endsWith('.canvas') || group.rootId.endsWith('.canvas');
-    if (isCanvas) {
+    const labelTitle = docGroupLabel(group);
+    if (isCanvasGroup(group)) {
       const canvasPath = group.first.path || (group.rootId.endsWith('.canvas') ? group.rootId : (group.first.id.split(':')[1] || ''));
       const canvasTitle = group.first.readablePath || group.first.hpath || asset.name;
       const ok = await openCanvasInTab(canvasPath, canvasTitle);
@@ -1434,34 +1455,62 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
       } else {
         pushMsg(t('main.canvasPluginMissing'));
       }
-    } else {
-      await handleOpenSingleDoc(group.rootId, group.first.id);
+      return;
     }
+    // 独立数据库伪引用：av-<avId> 不是真实块 id，永远打不开，直接告知来源
+    if (isStandaloneDatabaseRef(group.first)) {
+      pushMsg(t('main.refVirtualSource', { source: labelTitle }));
+      return;
+    }
+    await handleOpenSingleDoc(group.rootId, group.first.id, labelTitle);
     return;
   }
 
-  // 2. 多个引用目标（多个画布，或画布 + 普通文档），弹出轻量选择菜单供用户点击指定目标
+  // 2. 多个引用目标（多个画布，或画布 + 普通文档），弹出轻量选择菜单供用户点击指定目标。
+  //    普通文档组先批量核查块存在性：失效引用在菜单中标注"已失效"，点击给出明确原因而非假成功。
+  const docGroups = groups.filter((g) => !isCanvasGroup(g) && !isStandaloneDatabaseRef(g.first));
+  const existingIds = docGroups.length > 0
+    ? await filterExistingBlockIds(docGroups.flatMap((g) => [g.first.id, g.rootId]))
+    : new Set<string>();
+
   const menu = new Menu('asset-references-picker');
   for (const group of groups) {
-    const isCanvas = group.first.id.startsWith('canvas:') || group.first.path.endsWith('.canvas') || group.rootId.endsWith('.canvas');
-    const labelTitle = group.first.readablePath || group.first.hpath || group.rootId || t('main.untitled');
-    const displayLabel = isCanvas ? t('main.canvasLabel', { title: labelTitle }) : t('main.docLabel', { title: labelTitle });
-
-    menu.addItem({
-      icon: isCanvas ? 'iconCanvas' : 'iconFile',
-      label: displayLabel,
-      click: async () => {
-        if (isCanvas) {
-          const canvasPath = group.first.path || (group.rootId.endsWith('.canvas') ? group.rootId : (group.first.id.split(':')[1] || ''));
+    const labelTitle = docGroupLabel(group);
+    if (isCanvasGroup(group)) {
+      const canvasPath = group.first.path || (group.rootId.endsWith('.canvas') ? group.rootId : (group.first.id.split(':')[1] || ''));
+      const displayLabel = t('main.canvasLabel', { title: labelTitle });
+      menu.addItem({
+        icon: 'iconCanvas',
+        label: displayLabel,
+        click: async () => {
           const ok = await openCanvasInTab(canvasPath, labelTitle);
           if (ok) {
             pushMsg(t('main.canvasOpenedWithTitle', { title: labelTitle }));
           } else {
             pushMsg(t('main.canvasPluginMissing'));
           }
-        } else {
-          await handleOpenSingleDoc(group.rootId, group.first.id);
+        },
+      });
+      continue;
+    }
+
+    const isDead = isStandaloneDatabaseRef(group.first)
+      || (!existingIds.has(group.first.id) && !existingIds.has(group.rootId));
+    const displayLabel = t('main.docLabel', { title: labelTitle }) + (isDead ? t('main.refDeadSuffix') : '');
+
+    menu.addItem({
+      icon: 'iconFile',
+      label: displayLabel,
+      click: async () => {
+        if (isStandaloneDatabaseRef(group.first)) {
+          pushMsg(t('main.refVirtualSource', { source: labelTitle }));
+          return;
         }
+        if (isDead) {
+          pushMsg(t('main.refBlockMissing', { source: labelTitle }));
+          return;
+        }
+        await handleOpenSingleDoc(group.rootId, group.first.id, labelTitle);
       },
     });
   }

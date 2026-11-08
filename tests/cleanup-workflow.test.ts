@@ -38,11 +38,17 @@ vi.mock('../src/utils/file-system', () => ({
 vi.mock('../src/utils/siyuan-db', () => ({
   deleteAssetFile: vi.fn(async () => {}),
   countReferencedDocs: vi.fn(() => 1),
+  isCanvasRef: vi.fn(() => false),
 }));
 
 vi.mock('../src/utils/siyuan-block', () => ({
   removeAssetFromBlocks: vi.fn(async () => {}),
   batchQueryAssetsReferenceCounts: vi.fn(async () => new Map()),
+  captureAssetAttrSnapshots: vi.fn(async () => ({})),
+}));
+
+vi.mock('../src/utils/attribute-view', () => ({
+  captureAttributeViewAssetCells: vi.fn(async () => new Map()),
 }));
 
 vi.mock('../src/utils/deletion-logger', () => ({

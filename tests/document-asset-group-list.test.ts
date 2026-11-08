@@ -172,11 +172,11 @@ describe('DocumentAssetGroupList component', () => {
     expect(unrefCard.textContent).toContain('未被任何文档引用');
     expect(unrefCard.textContent).toContain('孤立/未引用');
 
-    // 点击在思源中打开按钮
+    // 点击在思源中打开按钮（第三个参数为来源标签，供跳转失败时提示具体文档）
     const openBtn = vueCard.querySelector('.doc-open-btn') as HTMLButtonElement;
     expect(openBtn).not.toBeNull();
     openBtn.click();
-    expect(openDocIdHandler).toHaveBeenCalledWith('doc-vue', 'blk-1');
+    expect(openDocIdHandler).toHaveBeenCalledWith('doc-vue', 'blk-1', expect.any(String));
 
     // 折叠状态由父组件经 collapsedDocIds 驱动，子组件点击仅上报意图而不自行改写状态
     const header = vueCard.querySelector('.doc-group-header') as HTMLDivElement;

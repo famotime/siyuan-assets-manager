@@ -26,11 +26,13 @@ import {
   captureBlockAnchors,
   createChildBlocksCache,
 } from './rollback-anchor'
-import { batchQueryAssetsReferenceCounts, removeAssetFromBlocks } from './siyuan-block'
+import { batchQueryAssetsReferenceCounts, captureAssetAttrSnapshots, removeAssetFromBlocks } from './siyuan-block'
 import {
 
   deleteAssetFile,
+  isCanvasRef,
 } from './siyuan-db'
+import { captureAttributeViewAssetCells } from './attribute-view'
 import { listAllAssetMetadataFiles } from './file-system'
 import { normalizeOriginalStoragePath } from './storage'
 
@@ -101,6 +103,11 @@ export function buildSingleDeleteConfirmMessage(asset: AssetInfo): IConfirmDialo
       name: asset.name,
       refCount,
     })
+    // 画布引用无法自动清理，必须如实告知清理后条目仍会出现
+    const canvasRefCount = (asset.references || []).filter((r) => isCanvasRef(r)).length
+    if (canvasRefCount > 0) {
+      confirmMsg += '\n\n' + t('cleanup.missingCanvasRefWarn', { n: canvasRefCount })
+    }
     if (asset.docCount > 1) {
       confirmMsg = t('cleanup.missingMultiDocWarning', {
         docCount: asset.docCount,
@@ -191,6 +198,15 @@ export function buildBatchDeleteConfirmMessage(summary: IBatchDeleteSummary): IC
 
   if (summary.missingCount && summary.missingCount > 0) {
     messageLines.push(t('cleanup.batchLineMissing', { n: summary.missingCount }))
+    // 画布引用无法自动清理，必须如实告知清理后条目仍会出现
+    const canvasRefCount = (summary.missingAssets || []).reduce(
+      (sum, a) => sum + (a.references || []).filter((r) => isCanvasRef(r)).length,
+      0,
+    )
+    if (canvasRefCount > 0) {
+      messageLines.push('')
+      messageLines.push(t('cleanup.missingCanvasRefWarn', { n: canvasRefCount }))
+    }
   }
 
   messageLines.push(t('cleanup.lineSizeEstimate', { sizeText: summary.sizeText }))
@@ -345,6 +361,14 @@ export async function executeSingleAssetDeletion(
 
     const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, createChildBlocksCache())
 
+    // 删除前快照：块属性（IAL）与数据库单元格中的引用也会被清理，必须可回退
+    const ialSnapshots = asset.isCanvasAsset
+      ? {}
+      : await captureAssetAttrSnapshots(asset.references || [], asset.name)
+    const affectedViewCells = asset.isCanvasAsset
+      ? new Map<string, []>()
+      : await captureAttributeViewAssetCells([asset.name])
+
     if (asset.isCanvasAsset) {
       await deleteCanvasAssetFile(asset, isTrashSupported())
     } else if (!asset.isMissing) {
@@ -365,6 +389,8 @@ export async function executeSingleAssetDeletion(
 
     const destination: DeleteDestination = isTrashSupported() ? 'os-trash' : 'permanent'
     const hasRefs = Boolean(asset.references && asset.references.length > 0 && !asset.isCanvasAsset)
+    const itemIalSnapshots = Object.keys(ialSnapshots).length > 0 ? ialSnapshots : undefined
+    const itemAffectedViews = affectedViewCells.get(asset.name) || []
     try {
       await recordDeletionBatch({
         actionType: 'single-delete',
@@ -381,6 +407,8 @@ export async function executeSingleAssetDeletion(
                 root_id: r.root_id,
               })),
           originalMarkdownSnippets: Object.keys(snippets).length > 0 ? snippets : undefined,
+          originalIalSnapshots: itemIalSnapshots,
+          affectedViews: itemAffectedViews.length > 0 ? itemAffectedViews : undefined,
         }],
         freedBytes: asset.size || 0,
         canRollback: hasRefs,
@@ -469,6 +497,14 @@ export async function executeBatchAssetsDeletion(
 
         const affectedBlockRecords = await captureBlockAnchors(blocksToCapture, anchorCache)
 
+        // 删除前快照：块属性（IAL）与数据库单元格中的引用也会被清理，必须可回退
+        const ialSnapshots = asset.isCanvasAsset
+          ? {}
+          : await captureAssetAttrSnapshots(asset.references || [], asset.name)
+        const affectedViewCells = asset.isCanvasAsset
+          ? new Map<string, []>()
+          : await captureAttributeViewAssetCells([asset.name])
+
         if (asset.isCanvasAsset) {
           await deleteCanvasAssetFile(asset, isTrashSupported())
         } else if (!asset.isMissing) {
@@ -483,6 +519,8 @@ export async function executeBatchAssetsDeletion(
           deletedRegularCount++
           freedBytes += asset.size || 0
         }
+        const itemIalSnapshots = Object.keys(ialSnapshots).length > 0 ? ialSnapshots : undefined
+        const itemAffectedViews = affectedViewCells.get(asset.name) || []
         deletedRecords.push({
           fileName: asset.name,
           originalRelativePath: asset.isCanvasAsset ? (asset.canvasAssetStoragePath || asset.name) : `data/assets/${asset.name}`,
@@ -495,6 +533,8 @@ export async function executeBatchAssetsDeletion(
                 root_id: r.root_id,
               })),
           originalMarkdownSnippets: Object.keys(snippets).length > 0 ? snippets : undefined,
+          originalIalSnapshots: itemIalSnapshots,
+          affectedViews: itemAffectedViews.length > 0 ? itemAffectedViews : undefined,
         })
       } catch (err) {
         error(`[cleanup-workflow] 批量删除普通资源失败: ${asset.name}`, err)

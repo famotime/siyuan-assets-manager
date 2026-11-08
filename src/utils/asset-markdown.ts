@@ -378,6 +378,10 @@ function removeAssetFromMarkdownSingle(markdown: string, assetName: string): str
   )
   const htmlVoidRegex = new RegExp(`<[a-zA-Z][\\w-]*\\b[^>]*?${htmlSrcAttr}[^>]*/?>`, 'g')
 
+  // 思源 PDF 标注引用形如 <<assets/doc.pdf#annotations=xx "锚文本">>，
+  // 资源被删除后整个标注 token 失效，需整段移除，而不是只抹路径留下 <<#...>> 残渣
+  const annotTokenRegex = new RegExp(`<<[^>]*assets/${escapedName}[^>]*>>`, 'g')
+
   const imgRegex = new RegExp(`!\\[.*?\\]\\(assets/${escapedName}\\)(\\{.*?\\})?`, 'g')
   const linkRegex = new RegExp(`\\[.*?\\]\\(assets/${escapedName}\\)(\\{.*?\\})?`, 'g')
   const pathRegex = new RegExp(`assets/${escapedName}`, 'g')
@@ -385,6 +389,7 @@ function removeAssetFromMarkdownSingle(markdown: string, assetName: string): str
   return markdown
     .replace(htmlPairedRegex, '')
     .replace(htmlVoidRegex, '')
+    .replace(annotTokenRegex, '')
     .replace(imgRegex, '')
     .replace(linkRegex, '')
     .replace(pathRegex, '')

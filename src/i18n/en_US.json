@@ -172,13 +172,17 @@
   "cleanup.deleteFailedNotify": "Deletion failed",
   "cleanup.deleteOriginalFailedNotify": "Failed to delete original image",
   "cleanup.lineSizeEstimate": "• Estimated total space to free: {sizeText}",
+  "cleanup.missingCanvasRefWarn": {
+    "one": "Note: {n} of the references comes from a canvas file, which the plugin cannot clean automatically. The entry may still appear in the missing list after cleanup; remove it in the canvas manually.",
+    "other": "Note: {n} of the references come from canvas files, which the plugin cannot clean automatically. The entry may still appear in the missing list after cleanup; remove them in the canvas manually."
+  },
   "cleanup.missingConfirmText": "Clean Up References",
   "cleanup.missingConfirmTitle": "Confirm cleanup of missing asset references",
   "cleanup.missingMultiDocWarning": "[Multi-doc reference warning] This missing asset is referenced by {docCount} different documents!\n\n{message}",
   "cleanup.missingRefsClearedNotify": "Document references to missing asset {name} have been cleaned up",
   "cleanup.missingResourceConfirm": {
-    "one": "Asset file {name} no longer exists on disk (missing asset).\nClean up all document block references to this file ({refCount} reference)?\n\n(The operation will be logged and can be rolled back at any time)",
-    "other": "Asset file {name} no longer exists on disk (missing asset).\nClean up all document block references to this file ({refCount} references)?\n\n(The operation will be logged and can be rolled back at any time)"
+    "one": "Asset file {name} no longer exists on disk (missing asset).\nClean up all references to this file ({refCount} reference, including document blocks, block attributes, and database cells)?\n\n(The operation will be logged and can be rolled back at any time)",
+    "other": "Asset file {name} no longer exists on disk (missing asset).\nClean up all references to this file ({refCount} references, including document blocks, block attributes, and database cells)?\n\n(The operation will be logged and can be rolled back at any time)"
   },
   "cleanup.noTrashCanvasWarning": "[WARNING] The current environment does not support the OS recycle bin; this operation will permanently delete the physical file!",
   "cleanup.noTrashOriginalWarning": "[WARNING] The current environment does not support the OS recycle bin; this operation will permanently delete the original image file!",
@@ -588,6 +592,9 @@
   "main.notReferenced": "This asset is not referenced by any document",
   "main.openDocFailed": "Failed to open the document",
   "main.queryingRefs": "Querying document references...",
+  "main.refBlockMissing": "The referencing block no longer exists; cannot locate the document (it may have been deleted or moved): {source}",
+  "main.refDeadSuffix": " (no longer exists)",
+  "main.refVirtualSource": "This reference comes from {source} and cannot be opened as a document",
   "main.readingFiles": "Reading the asset file list...",
   "main.refreshListAria": "Refresh asset list",
   "main.refsIncomplete": "Reference data is incomplete (some queries timed out or failed). For safety, cleanup and deletion remain disabled; click refresh to retry.",
