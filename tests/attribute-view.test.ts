@@ -18,6 +18,7 @@ import {
   captureAttributeViewAssetCells,
   restoreAttributeViewAssetCells,
   restoreAttributeViewCellsAfterDeletion,
+  queryAllAttributeViewBlocks,
   ATTRIBUTE_VIEW_STORAGE_DIR,
 } from '../src/utils/attribute-view';
 import { defaultStorage, blobToText } from '../src/utils/storage';
@@ -531,6 +532,29 @@ describe('attribute-view helper module', () => {
       expect(stats.restoredCount).toBe(0);
       expect(stats.skippedCount).toBe(1);
       expect(writeSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('queryAllAttributeViewBlocks', () => {
+    it('returns av blocks on SQL success and degrades to empty array on failure', async () => {
+      sqlMock.mockResolvedValueOnce([
+        { id: 'b1', type: 'av', markdown: '<div data-type="NodeAttributeView" data-av-id="av-1"></div>' },
+        { id: 'b2', type: 'p' },
+      ]);
+      const blocks = await queryAllAttributeViewBlocks();
+      expect(blocks).toHaveLength(2);
+
+      sqlMock.mockRejectedValueOnce(new Error('sql down'));
+      const warnSpy = vi.spyOn(await import('../src/utils/logger'), 'warn').mockImplementation(() => {});
+      const degraded = await queryAllAttributeViewBlocks();
+      expect(degraded).toEqual([]);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('returns empty array when SQL result is not an array', async () => {
+      sqlMock.mockResolvedValueOnce(null);
+      expect(await queryAllAttributeViewBlocks()).toEqual([]);
     });
   });
 });

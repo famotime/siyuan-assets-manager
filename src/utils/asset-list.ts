@@ -2,7 +2,7 @@ import type {
   AssetInfo,
   BlockRef,
   OrphanOriginalInfo,
-} from './siyuan-db'
+} from './asset-model'
 import { t } from '@/i18n'
 
 export type AssetAttributeFilter = 'all' | 'reeditable' | 'original' | 'unreferenced' | 'large' | 'missing' | 'canvas'

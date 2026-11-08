@@ -328,8 +328,8 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, triggerRef, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
-import { openTab, Menu } from 'siyuan';
-import { openCanvasInTab } from '../utils/canvas-asset';
+import { Menu } from 'siyuan';
+import { openBlockRefInTab } from '../utils/doc-jump';
 import {
   Files,
   Image,
@@ -353,7 +353,11 @@ import {
   Search,
   X,
 } from 'lucide-vue-next';
-import { countReferencedDocs, getNotebookMap, isCanvasRef, isStandaloneDatabaseRef, type AssetInfo } from '../utils/siyuan-db';
+import { getNotebookMap, isCanvasRef, isStandaloneDatabaseRef, type AssetInfo } from '../utils/siyuan-db';
+import {
+  applyTargetedAssetUpdate as applyTargetedAssetUpdateToList,
+  type AssetTargetedUpdateDetail,
+} from '../utils/asset-targeted-update';
 import { filterExistingBlockIds } from '../utils/siyuan-block';
 import {
   applyCatalogBlockDelta,
@@ -380,7 +384,7 @@ import {
   saveCatalogStatCache,
   type CatalogSnapshot,
 } from '../utils/catalog-snapshot';
-import { normalizeOriginalStoragePath, readOriginalImage } from '../utils/file-system';
+import { readOriginalImage } from '../utils/file-system';
 import { defaultStorage } from '../utils/storage';
 import {
   buildSingleDeleteConfirmMessage,
@@ -417,7 +421,6 @@ import {
 import { showConfirm } from '../utils/confirm';
 import { pushMsg } from '../api';
 import { t } from '@/i18n';
-import { usePlugin } from '../utils/plugin-context';
 import { error } from '../utils/logger';
 import VirtualAssetList from './VirtualAssetList.vue';
 import DocumentAssetGroupList from './DocumentAssetGroupList.vue';
@@ -1093,164 +1096,23 @@ function warnScanNote(message: string) {
   scanPhaseLabel.value = message;
 }
 
-export interface AssetTargetedUpdateDetail {
-  action: 'rename' | 'edit';
-  oldName: string;
-  newName: string;
-  references?: any[];
-  updated?: number;
-  size?: number;
-  isReEditable?: boolean;
-  reEditBlockId?: string;
-  originalStoragePath?: string;
-  deletedOld?: boolean;
-}
+export type { AssetTargetedUpdateDetail };
 
+/**
+ * 定向更新编排壳：列表与选中集的就地变换在 asset-targeted-update.ts 纯函数中完成，
+ * 这里只负责组件侧副作用（目录缓存失效、两个列表的缩略图失效）与响应式回写。
+ */
 function applyTargetedAssetUpdate(detail: AssetTargetedUpdateDetail) {
   // 任何定向写入都意味着缓存库存已过期
   invalidateCatalogCache();
-  const {
-    action,
-    oldName,
-    newName,
-    references = [],
-    updated = Date.now(),
-    size,
-    isReEditable,
-    reEditBlockId,
-    originalStoragePath,
-    deletedOld = true,
-  } = detail;
-
-  // 释放并失效旧的缩略图缓存
-  virtualListRef.value?.invalidateAssetThumbnail?.(oldName);
-  virtualListRef.value?.invalidateAssetThumbnail?.(newName);
-  docListRef.value?.invalidateAssetThumbnail?.(oldName);
-  docListRef.value?.invalidateAssetThumbnail?.(newName);
-
-  const docCount = countReferencedDocs(references);
-  const list = [...assets.value];
-  const oldIndex = list.findIndex(a => a.name === oldName);
-
-  if (action === 'rename') {
-    if (oldIndex !== -1) {
-      const oldItem = list[oldIndex];
-      const updatedItem: AssetInfo = {
-        ...oldItem,
-        name: newName,
-        updated,
-        references,
-        refCount: references.length,
-        docCount,
-        ...(size !== undefined && size > 0 ? { size } : {}),
-        ...(isReEditable !== undefined ? { isReEditable } : {}),
-        ...(reEditBlockId !== undefined ? { reEditBlockId } : {}),
-        ...(originalStoragePath !== undefined ? { originalStoragePath } : {}),
-      };
-      list[oldIndex] = updatedItem;
-    } else {
-      list.unshift({
-        name: newName,
-        size: size || 0,
-        updated,
-        isDir: false,
-        references,
-        refCount: references.length,
-        docCount,
-        isReEditable: Boolean(isReEditable),
-        reEditBlockId,
-        originalStoragePath,
-        isOriginal: false,
-      });
-    }
-
-    if (selectedNames.value.has(oldName)) {
-      const nextSet = new Set(selectedNames.value);
-      nextSet.delete(oldName);
-      nextSet.add(newName);
-      selectedNames.value = nextSet;
-    }
-
-    // 同步更新关联的原始底图引用状态
-    const finalOrigPath = updatedItem.originalStoragePath;
-    if (finalOrigPath) {
-      const normOrig = normalizeOriginalStoragePath(finalOrigPath);
-      const origIndex = list.findIndex(
-        (a) => a.isOriginal && normalizeOriginalStoragePath(a.originalStoragePath || a.name) === normOrig
-      );
-      if (origIndex !== -1) {
-        list[origIndex] = {
-          ...list[origIndex],
-          references: [...references],
-          refCount: references.length,
-          docCount,
-        };
-      }
-    }
-
-    assets.value = list;
-    return;
-  }
-
-  if (action === 'edit') {
-    const newItem: AssetInfo = {
-      name: newName,
-      size: size || (oldIndex !== -1 ? list[oldIndex].size : 0),
-      updated,
-      isDir: false,
-      references,
-      refCount: references.length,
-      docCount,
-      isReEditable: isReEditable !== undefined ? isReEditable : true,
-      reEditBlockId,
-      originalStoragePath: originalStoragePath || (oldIndex !== -1 ? list[oldIndex].originalStoragePath : undefined),
-      isOriginal: false,
-    };
-
-    if (oldIndex !== -1) {
-      if (deletedOld) {
-        // 就地替换：在原有列表位置直接更新为新编辑图片，零跳动零闪烁
-        list[oldIndex] = newItem;
-      } else {
-        // 未删除旧文件时：旧文件的文档引用已转移给新图片，旧文件转为未引用
-        list[oldIndex] = {
-          ...list[oldIndex],
-          references: [],
-          refCount: 0,
-          docCount: 0,
-        };
-        list.splice(oldIndex, 0, newItem);
-      }
-    } else {
-      list.unshift(newItem);
-    }
-
-    if (deletedOld && selectedNames.value.has(oldName)) {
-      const nextSet = new Set(selectedNames.value);
-      nextSet.delete(oldName);
-      nextSet.add(newName);
-      selectedNames.value = nextSet;
-    }
-
-    // 同步更新关联的原始底图引用状态
-    const finalOrigPath = newItem.originalStoragePath;
-    if (finalOrigPath) {
-      const normOrig = normalizeOriginalStoragePath(finalOrigPath);
-      const origIndex = list.findIndex(
-        (a) => a.isOriginal && normalizeOriginalStoragePath(a.originalStoragePath || a.name) === normOrig
-      );
-      if (origIndex !== -1) {
-        list[origIndex] = {
-          ...list[origIndex],
-          references: [...references],
-          refCount: references.length,
-          docCount,
-        };
-      }
-    }
-
-    assets.value = list;
-  }
+  const result = applyTargetedAssetUpdateToList(assets.value, selectedNames.value, detail, {
+    onInvalidateThumbnail: (name) => {
+      virtualListRef.value?.invalidateAssetThumbnail?.(name);
+      docListRef.value?.invalidateAssetThumbnail?.(name);
+    },
+  });
+  assets.value = result.list;
+  selectedNames.value = result.selectedNames;
 }
 
 const handleGlobalRefresh = (event?: Event) => {
@@ -1373,48 +1235,23 @@ const docModeStats = computed(() => {
   };
 });
 
+/** 单文档跳转（画布判定 / 伪引用提示 / 失效预检 / openTab 契约统一在 doc-jump 内核） */
 async function handleOpenSingleDoc(rootId: string, firstBlockId?: string, sourceLabel?: string) {
-  const isCanvas = rootId.endsWith('.canvas') || (Boolean(firstBlockId) && firstBlockId!.startsWith('canvas:'));
-  if (isCanvas) {
-    let canvasPath = rootId;
-    if (!canvasPath.endsWith('.canvas') && firstBlockId?.startsWith('canvas:')) {
-      const parts = firstBlockId.split(':');
-      if (parts[1]) canvasPath = parts[1];
-    }
-    const ok = await openCanvasInTab(canvasPath);
-    if (ok) {
-      pushMsg(t('main.canvasOpened'));
-    } else {
-      pushMsg(t('main.canvasPluginMissing'));
-    }
-    return;
-  }
-
-  // 跳转前校验：引用块是扫描时刻的缓存，可能已被删除；
-  // openTab 对失效 id 不会抛错，直接打开只会得到"已在后台打开"的假成功提示
-  const targetId = firstBlockId || rootId;
-  const existingIds = await filterExistingBlockIds([targetId, rootId]);
-  if (!existingIds.has(targetId) && !existingIds.has(rootId)) {
-    const source = sourceLabel || rootId || t('main.untitled');
-    pushMsg(t('main.refBlockMissing', { source }));
-    return;
-  }
-
-  const plugin = usePlugin();
-  try {
-    await openTab({
-      app: plugin.app,
-      doc: {
-        id: firstBlockId || rootId,
-        action: ["cb-get-hl", "cb-get-focus", "cb-get-context"]
-      },
-      keepCursor: true
-    });
-    pushMsg(t('main.docOpened'));
-  } catch (e) {
-    error("Failed to open document", e);
-    pushMsg(t('main.openDocFailed'));
-  }
+  await openBlockRefInTab(
+    { id: firstBlockId || rootId, root_id: rootId, box: '', content: '', markdown: '', path: '' },
+    {
+      notify: pushMsg,
+      docOpenedText: t('main.docOpened'),
+      canvasOpenedText: () => t('main.canvasOpened'),
+      canvasPluginMissingText: t('main.canvasPluginMissing'),
+      refVirtualSourceText: (source) => t('main.refVirtualSource', { source }),
+      refBlockMissingText: (source) => t('main.refBlockMissing', { source }),
+      openDocFailedText: t('main.openDocFailed'),
+      validityIds: [firstBlockId || rootId, rootId],
+      missingSource: sourceLabel || rootId || t('main.untitled'),
+      onOpenError: (e) => error('Failed to open document', e),
+    },
+  );
 }
 
 function handleSortChange(field: AssetSortField) {
@@ -1435,6 +1272,20 @@ function isCanvasGroup(group: DocReferenceGroup): boolean {
   return isCanvasRef(group.first);
 }
 
+/** 引用菜单与单目标跳转共用的文案配置（画布成功文案带标题） */
+function buildDocJumpOptions() {
+  return {
+    notify: pushMsg,
+    docOpenedText: t('main.docOpened'),
+    canvasOpenedText: (title: string) => t('main.canvasOpenedWithTitle', { title }),
+    canvasPluginMissingText: t('main.canvasPluginMissing'),
+    refVirtualSourceText: (source: string) => t('main.refVirtualSource', { source }),
+    refBlockMissingText: (source: string) => t('main.refBlockMissing', { source }),
+    openDocFailedText: t('main.openDocFailed'),
+    onOpenError: (e: unknown) => error('Failed to open document', e),
+  };
+}
+
 async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
   const groups = groupReferencesByDoc(asset.references);
   if (groups.length === 0) {
@@ -1446,20 +1297,16 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
   if (groups.length === 1) {
     const group = groups[0];
     const labelTitle = docGroupLabel(group);
-    if (isCanvasGroup(group)) {
-      const canvasPath = group.first.path || (group.rootId.endsWith('.canvas') ? group.rootId : (group.first.id.split(':')[1] || ''));
-      const canvasTitle = group.first.readablePath || group.first.hpath || asset.name;
-      const ok = await openCanvasInTab(canvasPath, canvasTitle);
-      if (ok) {
-        pushMsg(t('main.canvasOpenedWithTitle', { title: canvasTitle }));
-      } else {
-        pushMsg(t('main.canvasPluginMissing'));
-      }
-      return;
-    }
     // 独立数据库伪引用：av-<avId> 不是真实块 id，永远打不开，直接告知来源
     if (isStandaloneDatabaseRef(group.first)) {
       pushMsg(t('main.refVirtualSource', { source: labelTitle }));
+      return;
+    }
+    if (isCanvasGroup(group)) {
+      await openBlockRefInTab(group.first, {
+        ...buildDocJumpOptions(),
+        canvasTitle: group.first.readablePath || group.first.hpath || asset.name,
+      });
       return;
     }
     await handleOpenSingleDoc(group.rootId, group.first.id, labelTitle);
@@ -1477,18 +1324,15 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
   for (const group of groups) {
     const labelTitle = docGroupLabel(group);
     if (isCanvasGroup(group)) {
-      const canvasPath = group.first.path || (group.rootId.endsWith('.canvas') ? group.rootId : (group.first.id.split(':')[1] || ''));
       const displayLabel = t('main.canvasLabel', { title: labelTitle });
       menu.addItem({
         icon: 'iconCanvas',
         label: displayLabel,
         click: async () => {
-          const ok = await openCanvasInTab(canvasPath, labelTitle);
-          if (ok) {
-            pushMsg(t('main.canvasOpenedWithTitle', { title: labelTitle }));
-          } else {
-            pushMsg(t('main.canvasPluginMissing'));
-          }
+          await openBlockRefInTab(group.first, {
+            ...buildDocJumpOptions(),
+            canvasTitle: labelTitle,
+          });
         },
       });
       continue;
@@ -1502,15 +1346,11 @@ async function handleOpenDocs(asset: AssetInfo, event?: MouseEvent) {
       icon: 'iconFile',
       label: displayLabel,
       click: async () => {
-        if (isStandaloneDatabaseRef(group.first)) {
-          pushMsg(t('main.refVirtualSource', { source: labelTitle }));
-          return;
-        }
-        if (isDead) {
-          pushMsg(t('main.refBlockMissing', { source: labelTitle }));
-          return;
-        }
-        await handleOpenSingleDoc(group.rootId, group.first.id, labelTitle);
+        await openBlockRefInTab(group.first, {
+          ...buildDocJumpOptions(),
+          validityIds: [group.first.id, group.rootId],
+          missingSource: labelTitle,
+        });
       },
     });
   }

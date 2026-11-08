@@ -209,8 +209,8 @@ import { ExternalLink, Pencil, TextCursorInput, Trash2, Layers, Palette, ArrowUp
 import { ref, toRefs, computed, onUnmounted } from 'vue';
 import type { AssetInfo } from '../utils/siyuan-db';
 import { formatAssetSize, formatAssetTime, getAssetBadgeText, isImageAsset, splitFileName, type AssetSortField, type AssetSortOrder } from '../utils/asset-list';
-import { readOriginalImage } from '../utils/file-system';
-import { defaultStorage } from '../utils/storage';
+import { applyRowClickSelection, toggleAssetSelection } from '../utils/asset-selection';
+import { createThumbnailCache } from '../utils/asset-thumbnail';
 import { t } from '../i18n';
 
 const props = defineProps<{
@@ -263,53 +263,21 @@ function handleHeaderCheckboxChange(event: Event) {
 }
 
 function handleRowClick(event: MouseEvent, asset: AssetInfo, index: number) {
-  const nextSet = new Set(selectedNames.value);
-
-  if (event.shiftKey) {
-    // Shift 键连续多选
-    const anchor = lastSelectedIndex.value >= 0 ? lastSelectedIndex.value : index;
-    const start = Math.min(anchor, index);
-    const end = Math.max(anchor, index);
-
-    // 如果未同时按 Ctrl/Cmd，则以本次范围为唯一选中集合
-    if (!event.ctrlKey && !event.metaKey) {
-      nextSet.clear();
-    }
-
-    for (let i = start; i <= end; i++) {
-      const item = assets.value[i];
-      if (item) {
-        nextSet.add(item.name);
-      }
-    }
-    emit('update:selectedNames', nextSet);
-  } else if (event.ctrlKey || event.metaKey) {
-    // Ctrl / Cmd 键多选反转
-    if (nextSet.has(asset.name)) {
-      nextSet.delete(asset.name);
-    } else {
-      nextSet.add(asset.name);
-    }
-    lastSelectedIndex.value = index;
-    emit('update:selectedNames', nextSet);
-  } else {
-    // 普通点击整行切换单选
-    nextSet.clear();
-    nextSet.add(asset.name);
-    lastSelectedIndex.value = index;
-    emit('update:selectedNames', nextSet);
-  }
+  const { selectedNames: nextSet, lastIndex: nextIndex } = applyRowClickSelection(
+    selectedNames.value,
+    lastSelectedIndex.value,
+    event,
+    asset.name,
+    assets.value,
+    index,
+  );
+  lastSelectedIndex.value = nextIndex;
+  emit('update:selectedNames', nextSet);
 }
 
 function handleRowCheckboxChange(event: Event, asset: AssetInfo, index: number) {
-  const nextSet = new Set(selectedNames.value);
-  if (nextSet.has(asset.name)) {
-    nextSet.delete(asset.name);
-  } else {
-    nextSet.add(asset.name);
-  }
   lastSelectedIndex.value = index;
-  emit('update:selectedNames', nextSet);
+  emit('update:selectedNames', toggleAssetSelection(selectedNames.value, asset.name));
 }
 
 function handleSort(field: AssetSortField) {
@@ -320,69 +288,12 @@ const formatSize = formatAssetSize;
 const formatTime = formatAssetTime;
 const isImage = isImageAsset;
 
-// 原始底图 ObjectURL 缓存管理
-const originalBlobUrlMap = ref<Record<string, string>>({});
-const loadingOriginals = new Set<string>();
-
-async function loadOriginalBlobUrl(asset: AssetInfo) {
-  if (!asset.isOriginal || originalBlobUrlMap.value[asset.name] || loadingOriginals.has(asset.name)) {
-    return;
-  }
-  loadingOriginals.add(asset.name);
-  try {
-    const blob = await readOriginalImage(asset.originalStoragePath || asset.name);
-    if (blob) {
-      originalBlobUrlMap.value[asset.name] = URL.createObjectURL(blob);
-    }
-  } catch (e) {
-    // 降级处理
-  } finally {
-    loadingOriginals.delete(asset.name);
-  }
-}
-
-async function loadCanvasAssetBlobUrl(asset: AssetInfo) {
-  if (!asset.isCanvasAsset || originalBlobUrlMap.value[asset.name] || loadingOriginals.has(asset.name)) {
-    return;
-  }
-  loadingOriginals.add(asset.name);
-  try {
-    const blob = await defaultStorage.read(asset.canvasAssetStoragePath || asset.name);
-    if (blob) {
-      originalBlobUrlMap.value[asset.name] = URL.createObjectURL(blob);
-    }
-  } catch (e) {
-  } finally {
-    loadingOriginals.delete(asset.name);
-  }
-}
-
-function getThumbnailSrc(asset: AssetInfo): string {
-  if (asset.isOriginal) {
-    if (originalBlobUrlMap.value[asset.name]) {
-      return originalBlobUrlMap.value[asset.name];
-    }
-    loadOriginalBlobUrl(asset);
-    return '';
-  }
-  if (asset.isCanvasAsset) {
-    if (originalBlobUrlMap.value[asset.name]) {
-      return originalBlobUrlMap.value[asset.name];
-    }
-    loadCanvasAssetBlobUrl(asset);
-    return '';
-  }
-  const versionQuery = asset.updated ? `?t=${asset.updated}` : '';
-  return `/assets/${asset.name}${versionQuery}`;
-}
+// 原始底图/画布资产 ObjectURL 缓存，实现收敛于 asset-thumbnail.ts
+const thumbnailCache = createThumbnailCache();
+const getThumbnailSrc = thumbnailCache.getThumbnailSrc;
 
 function invalidateAssetThumbnail(assetName: string) {
-  if (originalBlobUrlMap.value[assetName]) {
-    try {
-      URL.revokeObjectURL(originalBlobUrlMap.value[assetName]);
-    } catch (e) {}
-    delete originalBlobUrlMap.value[assetName];
-  }
+  thumbnailCache.invalidate(assetName);
 }
 
 defineExpose({
@@ -390,11 +301,7 @@ defineExpose({
 });
 
 onUnmounted(() => {
-  for (const url of Object.values(originalBlobUrlMap.value)) {
-    try {
-      URL.revokeObjectURL(url);
-    } catch (e) {}
-  }
+  thumbnailCache.dispose();
 });
 </script>
 

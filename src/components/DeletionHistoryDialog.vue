@@ -261,6 +261,7 @@ import { showMessage, openTab } from 'siyuan';
 import { openOSRecycleBin } from '../utils/file-system';
 import { usePlugin } from '../utils/plugin-context';
 import { sql } from '../api';
+import { buildOpenTabOptions } from '../utils/doc-jump';
 import { warn } from '../utils/logger';
 
 const props = defineProps<{
@@ -647,14 +648,7 @@ async function openDocumentByIds(docIds: string[]) {
         }
       } catch {}
 
-      await openTab({
-        app: plugin.app,
-        doc: {
-          id: targetId,
-          action: ['cb-get-hl', 'cb-get-focus', 'cb-get-context'],
-        },
-        keepCursor: true,
-      });
+      await openTab(buildOpenTabOptions(plugin.app, targetId));
 
       openedTitles.push(docTitle);
     }

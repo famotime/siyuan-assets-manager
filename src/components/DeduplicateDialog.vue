@@ -390,18 +390,16 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
-import { openTab } from 'siyuan';
 import { Sparkles, CheckCircle2, FileText } from 'lucide-vue-next';
-import { usePlugin } from '../main';
+import { usePlugin } from '../utils/plugin-context';
 import type { AssetInfo, BlockRef } from '../utils/siyuan-db';
-import { isCanvasRef, isStandaloneDatabaseRef } from '../utils/siyuan-db';
-import { filterExistingBlockIds } from '../utils/siyuan-block';
-import { openCanvasInTab } from '../utils/canvas-asset';
+import { openBlockRefInTab } from '../utils/doc-jump';
 import {
   isImageFile,
   scanDuplicates,
   normalizeDuplicateGroup,
   batchNormalizeDuplicateGroups,
+  buildBatchMergeConfirmMessage,
   saveDeduplicateCache,
   loadDeduplicateCache,
   carryOverGroupState,
@@ -828,32 +826,13 @@ async function handleBatchMerge() {
   const groupsToMerge = pendingGroups.value;
   if (groupsToMerge.length === 0) return;
 
-  // 统计受影响文档与引用块概况
-  let totalRefs = 0;
-  const allDocIds = new Set<string>();
-  for (const g of groupsToMerge) {
-    for (const it of g.items) {
-      if (it.asset.name !== g.canonicalAssetName) {
-        totalRefs += it.asset.references?.length || 0;
-        for (const r of it.asset.references || []) {
-          if (r.root_id) allDocIds.add(r.root_id);
-        }
-      }
-    }
-  }
-
   const isSimilarMode = activeTab.value === 'similar';
-  const confirmMsg = [
-    isSimilarMode ? t('dedup.batchCheckTitleSimilar') : t('dedup.batchCheckTitleExact'),
-    t('dedup.batchCheckGroups', { n: groupsToMerge.length }),
-    t('dedup.batchCheckDocs', { n: allDocIds.size }),
-    t('dedup.batchCheckRefs', { n: totalRefs }),
-    t('dedup.batchCheckFiles', { n: totalRedundantCount.value }),
-    t('dedup.batchCheckSpace', { size: totalReclaimableSizeText.value }),
-    '',
-    isSimilarMode ? t('dedup.batchWarnSimilar') : t('dedup.batchWarnExact'),
-    t('dedup.batchCheckConfirm'),
-  ].join('\n');
+  const confirmMsg = buildBatchMergeConfirmMessage({
+    groups: groupsToMerge,
+    totalRedundantCount: totalRedundantCount.value,
+    totalReclaimableSizeText: totalReclaimableSizeText.value,
+    isSimilarMode,
+  });
 
   const ok = await showConfirm({
     title: t('dedup.batchConfirmTitle'),
@@ -897,48 +876,20 @@ function docGroups(asset: AssetInfo) {
 
 /**
  * 点击引用文档，在思源后台标签页中打开定位。
- * 先校验引用有效性（伪引用 / 块已失效），避免 openTab 产生"已在后台打开"的假成功提示。
+ * 伪引用 / 画布 / 失效预检 / openTab 契约统一在 doc-jump 内核处理。
  */
 async function handleOpenDocRef(ref: BlockRef) {
-  if (!ref || !ref.id) return;
-  const docLabel = ref.readablePath || ref.hpath || ref.id;
-
-  // 画布引用：root_id 是画布路径，交给画布插件打开
-  if (isCanvasRef(ref)) {
-    const canvasPath = ref.path || ref.root_id;
-    const ok = await openCanvasInTab(canvasPath, docLabel);
-    pushMsg(ok ? t('main.canvasOpenedWithTitle', { title: docLabel }) : t('main.canvasPluginMissing'));
-    return;
-  }
-
-  // 独立数据库伪引用：av-<avId> 不是真实块 id，无法作为文档打开
-  if (isStandaloneDatabaseRef(ref)) {
-    pushMsg(t('main.refVirtualSource', { source: docLabel }));
-    return;
-  }
-
-  try {
-    const existingIds = await filterExistingBlockIds([ref.id]);
-    if (!existingIds.has(ref.id)) {
-      pushMsg(t('main.refBlockMissing', { source: docLabel }));
-      return;
-    }
-    const plugin = usePlugin();
-    if (plugin && plugin.app) {
-      await openTab({
-        app: plugin.app,
-        doc: {
-          id: ref.id,
-          action: ['cb-get-hl', 'cb-get-focus', 'cb-get-context'],
-        },
-        keepCursor: true,
-      });
-      pushMsg(t('dedup.docOpenedMsg', { doc: docLabel }));
-    }
-  } catch (e) {
-    warn('[DeduplicateDialog] 打开引用文档失败:', e);
-    pushMsg(t('main.openDocFailed'));
-  }
+  await openBlockRefInTab(ref, {
+    notify: pushMsg,
+    docOpenedText: (label) => t('dedup.docOpenedMsg', { doc: label }),
+    canvasOpenedText: (title) => t('main.canvasOpenedWithTitle', { title }),
+    canvasPluginMissingText: t('main.canvasPluginMissing'),
+    refVirtualSourceText: (source) => t('main.refVirtualSource', { source }),
+    refBlockMissingText: (source) => t('main.refBlockMissing', { source }),
+    openDocFailedText: t('main.openDocFailed'),
+    canvasTitle: ref?.readablePath || ref?.hpath || ref?.id,
+    onOpenError: (e) => warn('[DeduplicateDialog] 打开引用文档失败:', e),
+  });
 }
 
 /**

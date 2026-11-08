@@ -718,3 +718,45 @@ export async function clearDeduplicateCache(): Promise<boolean> {
 
   return false;
 }
+
+export interface BatchMergeConfirmInput {
+  groups: IDuplicateGroup[]
+  /** 当前待处理的冗余文件总数（与确认文案中的删除文件数一致） */
+  totalRedundantCount: number
+  /** 预计释放空间的可读文本（如 "1.2 MB"） */
+  totalReclaimableSizeText: string
+  /** 视觉相似模式为 true（文案切换为高风险提醒） */
+  isSimilarMode: boolean
+}
+
+/**
+ * 构建批量一键归一化的确认文案（从 DeduplicateDialog.vue 抽离的纯函数，
+ * 与 cleanup-workflow 的 build*ConfirmMessage 同风格）。
+ * 统计口径：仅统计非主资源条目的引用（主资源自身引用不计入影响面）。
+ */
+export function buildBatchMergeConfirmMessage(input: BatchMergeConfirmInput): string {
+  let totalRefs = 0;
+  const allDocIds = new Set<string>();
+  for (const g of input.groups) {
+    for (const it of g.items) {
+      if (it.asset.name !== g.canonicalAssetName) {
+        totalRefs += it.asset.references?.length || 0;
+        for (const r of it.asset.references || []) {
+          if (r.root_id) allDocIds.add(r.root_id);
+        }
+      }
+    }
+  }
+
+  return [
+    input.isSimilarMode ? t('dedup.batchCheckTitleSimilar') : t('dedup.batchCheckTitleExact'),
+    t('dedup.batchCheckGroups', { n: input.groups.length }),
+    t('dedup.batchCheckDocs', { n: allDocIds.size }),
+    t('dedup.batchCheckRefs', { n: totalRefs }),
+    t('dedup.batchCheckFiles', { n: input.totalRedundantCount }),
+    t('dedup.batchCheckSpace', { size: input.totalReclaimableSizeText }),
+    '',
+    input.isSimilarMode ? t('dedup.batchWarnSimilar') : t('dedup.batchWarnExact'),
+    t('dedup.batchCheckConfirm'),
+  ].join('\n');
+}

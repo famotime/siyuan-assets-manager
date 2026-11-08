@@ -3,7 +3,7 @@ import { sql } from '../api';
 import { defaultStorage, blobToText } from './storage';
 import { extractAssetNamesFromMarkdown, escapeRegExp, removeAssetFromMarkdown } from './asset-markdown';
 import { restoreAssetReference } from './inverse-reference';
-import { type BlockRef, formatReadableDocPath } from './siyuan-db';
+import { type BlockRef, formatReadableDocPath } from './asset-model';
 import { log, warn, error } from './logger';
 
 /** 思源数据库（属性视图）文件存储目录 */
@@ -177,6 +177,32 @@ export async function queryAllAttributeViewBlocks(): Promise<any[]> {
 }
 
 /**
+ * 列出属性视图存储目录下的全部 JSON 文件条目
+ * （收敛原先在 5 个函数中逐字重复的 list + filter 样板）
+ */
+async function listAttributeViewJsonFiles(): Promise<Array<{ name: string, isDir: boolean }>> {
+  const entries = await defaultStorage.list(ATTRIBUTE_VIEW_STORAGE_DIR);
+  return entries.filter((e) => !e.isDir && e.name.endsWith('.json'));
+}
+
+/**
+ * 读取单个属性视图文件文本；文件缺失或内容为空时返回 null
+ * （收敛 read → blobToText → 空值跳过样板）
+ */
+async function readAttributeViewText(filePath: string): Promise<string | null> {
+  const blob = await defaultStorage.read(filePath);
+  if (!blob) return null;
+  const text = await blobToText(blob);
+  return text || null;
+}
+
+/** 按原文件缩进风格序列化并写回属性视图文件（收敛 fileChanged 收尾样板） */
+async function writeAttributeViewJson(filePath: string, parsed: any, originalText: string): Promise<void> {
+  const nextText = serializeLikeOriginal(parsed, originalText);
+  await defaultStorage.write(filePath, new Blob([nextText], { type: 'application/json' }));
+}
+
+/**
  * 扫描并解析工作空间内所有的属性视图文件，构建 资产名 -> BlockRef[] 的映射
  */
 export async function resolveAttributeViewReferences(
@@ -186,8 +212,7 @@ export async function resolveAttributeViewReferences(
 
   try {
     // 1. 列出并读取所有的属性视图 JSON 文件
-    const entries = await defaultStorage.list(ATTRIBUTE_VIEW_STORAGE_DIR);
-    const jsonFiles = entries.filter((e) => !e.isDir && e.name.endsWith('.json'));
+    const jsonFiles = await listAttributeViewJsonFiles();
     if (jsonFiles.length === 0) {
       return assetToRefsMap;
     }
@@ -211,10 +236,7 @@ export async function resolveAttributeViewReferences(
     // 3. 逐一读取并解析每个数据库文件
     for (const file of jsonFiles) {
       const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${file.name}`;
-      const blob = await defaultStorage.read(filePath);
-      if (!blob) continue;
-
-      const text = await blobToText(blob);
+      const text = await readAttributeViewText(filePath);
       if (!text) continue;
 
       const parsed = extractAssetsFromAttributeViewJson(text);
@@ -295,8 +317,7 @@ export async function replaceAssetInAttributeViews(oldAssetName: string, newAsse
   let updatedCount = 0;
 
   try {
-    const entries = await defaultStorage.list(ATTRIBUTE_VIEW_STORAGE_DIR);
-    const jsonFiles = entries.filter((e) => !e.isDir && e.name.endsWith('.json'));
+    const jsonFiles = await listAttributeViewJsonFiles();
 
     const oldEscaped = escapeRegExp(oldAssetName);
     let oldEncoded = '';
@@ -312,10 +333,7 @@ export async function replaceAssetInAttributeViews(oldAssetName: string, newAsse
 
     for (const file of jsonFiles) {
       const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${file.name}`;
-      const blob = await defaultStorage.read(filePath);
-      if (!blob) continue;
-
-      const text = await blobToText(blob);
+      const text = await readAttributeViewText(filePath);
       if (!text) continue;
 
       let replacedText = text;
@@ -361,8 +379,7 @@ export async function removeAssetFromAttributeViews(assetName: string): Promise<
   let updatedCount = 0;
 
   try {
-    const entries = await defaultStorage.list(ATTRIBUTE_VIEW_STORAGE_DIR);
-    const jsonFiles = entries.filter((e) => !e.isDir && e.name.endsWith('.json'));
+    const jsonFiles = await listAttributeViewJsonFiles();
 
     let encodedName = '';
     try {
@@ -373,10 +390,7 @@ export async function removeAssetFromAttributeViews(assetName: string): Promise<
 
     for (const file of jsonFiles) {
       const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${file.name}`;
-      const blob = await defaultStorage.read(filePath);
-      if (!blob) continue;
-
-      const text = await blobToText(blob);
+      const text = await readAttributeViewText(filePath);
       if (!text) continue;
 
       let parsed: any = null;
@@ -435,8 +449,7 @@ export async function removeAssetFromAttributeViews(assetName: string): Promise<
       }
 
       if (fileChanged) {
-        const nextText = serializeLikeOriginal(parsed, text);
-        await defaultStorage.write(filePath, new Blob([nextText], { type: 'application/json' }));
+        await writeAttributeViewJson(filePath, parsed, text);
         updatedCount++;
         log(`[attribute-view] 已从数据库文件移除资源引用: ${file.name} (${assetName})`);
       }
@@ -517,14 +530,11 @@ export async function captureAttributeViewAssetCells(
   if (targets.length === 0) return result;
 
   try {
-    const entries = await defaultStorage.list(ATTRIBUTE_VIEW_STORAGE_DIR);
-    const jsonFiles = entries.filter((e) => !e.isDir && e.name.endsWith('.json'));
+    const jsonFiles = await listAttributeViewJsonFiles();
 
     for (const file of jsonFiles) {
       const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${file.name}`;
-      const blob = await defaultStorage.read(filePath);
-      if (!blob) continue;
-      const text = await blobToText(blob);
+      const text = await readAttributeViewText(filePath);
       if (!text) continue;
 
       let parsed: any = null;
@@ -590,6 +600,31 @@ function serializeLikeOriginal(parsed: any, originalText: string): string {
   return JSON.stringify(parsed, null, isPretty ? '\t' : undefined);
 }
 
+/** 将单元格快照按 viewId 分组（两个还原流程共用的逐字等价逻辑） */
+function groupCellsByView(cells: IAffectedViewCell[]): Map<string, IAffectedViewCell[]> {
+  const cellsByView = new Map<string, IAffectedViewCell[]>();
+  for (const cell of cells) {
+    if (!cell?.viewId || !cell.keyId || !cell.rowId) continue;
+    let list = cellsByView.get(cell.viewId);
+    if (!list) {
+      list = [];
+      cellsByView.set(cell.viewId, list);
+    }
+    list.push(cell);
+  }
+  return cellsByView;
+}
+
+/** 在解析后的属性视图 JSON 中定位单元格快照对应的行值节点 */
+function findViewCellValue(parsed: any, cell: { keyId: string, rowId: string }): any {
+  const keyValue = parsed.keyValues.find((kv: any) => String(kv?.key?.id) === cell.keyId);
+  return Array.isArray(keyValue?.values)
+    ? keyValue.values.find(
+        (v: any) => String(v?.blockID || v?.itemID || v?.id) === cell.rowId
+      )
+    : null;
+}
+
 /**
  * 按单元格快照精确逆向还原数据库引用
  *
@@ -607,26 +642,16 @@ export async function restoreAttributeViewAssetCells(
     return stats;
   }
 
-  const cellsByView = new Map<string, IAffectedViewCell[]>();
-  for (const cell of cells) {
-    if (!cell?.viewId || !cell.keyId || !cell.rowId) continue;
-    let list = cellsByView.get(cell.viewId);
-    if (!list) {
-      list = [];
-      cellsByView.set(cell.viewId, list);
-    }
-    list.push(cell);
-  }
+  const cellsByView = groupCellsByView(cells);
 
   for (const [viewId, viewCells] of cellsByView) {
     const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${viewId}.json`;
     try {
-      const blob = await defaultStorage.read(filePath);
-      if (!blob) {
+      const text = await readAttributeViewText(filePath);
+      if (!text) {
         stats.skippedCount += countRestorableFields(viewCells);
         continue;
       }
-      const text = await blobToText(blob);
       let parsed: any = null;
       try {
         parsed = JSON.parse(text);
@@ -643,12 +668,7 @@ export async function restoreAttributeViewAssetCells(
       let fileChanged = false;
 
       for (const cell of viewCells) {
-        const keyValue = parsed.keyValues.find((kv: any) => String(kv?.key?.id) === cell.keyId);
-        const value = Array.isArray(keyValue?.values)
-          ? keyValue.values.find(
-              (v: any) => String(v?.blockID || v?.itemID || v?.id) === cell.rowId
-            )
-          : null;
+        const value = findViewCellValue(parsed, cell);
 
         if (!value) {
           stats.skippedCount += countRestorableFields([cell]);
@@ -695,8 +715,7 @@ export async function restoreAttributeViewAssetCells(
       }
 
       if (fileChanged) {
-        const nextText = serializeLikeOriginal(parsed, text);
-        await defaultStorage.write(filePath, new Blob([nextText], { type: 'application/json' }));
+        await writeAttributeViewJson(filePath, parsed, text);
         log(`[attribute-view] 已按单元格快照还原数据库文件: ${viewId}.json`);
       }
     } catch (err) {
@@ -736,26 +755,16 @@ export async function restoreAttributeViewCellsAfterDeletion(
   const stats: IDeletionViewCellRestoreStats = { restoredCount: 0, skippedCount: 0 };
   if (!Array.isArray(cells) || cells.length === 0) return stats;
 
-  const cellsByView = new Map<string, IAffectedViewCell[]>();
-  for (const cell of cells) {
-    if (!cell?.viewId || !cell.keyId || !cell.rowId) continue;
-    let list = cellsByView.get(cell.viewId);
-    if (!list) {
-      list = [];
-      cellsByView.set(cell.viewId, list);
-    }
-    list.push(cell);
-  }
+  const cellsByView = groupCellsByView(cells);
 
   for (const [viewId, viewCells] of cellsByView) {
     const filePath = `${ATTRIBUTE_VIEW_STORAGE_DIR}/${viewId}.json`;
     try {
-      const blob = await defaultStorage.read(filePath);
-      if (!blob) {
+      const text = await readAttributeViewText(filePath);
+      if (!text) {
         stats.skippedCount += viewCells.length;
         continue;
       }
-      const text = await blobToText(blob);
       let parsed: any = null;
       try {
         parsed = JSON.parse(text);
@@ -772,10 +781,7 @@ export async function restoreAttributeViewCellsAfterDeletion(
       let fileChanged = false;
 
       for (const cell of viewCells) {
-        const keyValue = parsed.keyValues.find((kv: any) => String(kv?.key?.id) === cell.keyId);
-        const value = Array.isArray(keyValue?.values)
-          ? keyValue.values.find((v: any) => String(v?.blockID || v?.itemID || v?.id) === cell.rowId)
-          : null;
+        const value = findViewCellValue(parsed, cell);
 
         if (!value) {
           stats.skippedCount++;
@@ -818,8 +824,7 @@ export async function restoreAttributeViewCellsAfterDeletion(
       }
 
       if (fileChanged) {
-        const nextText = serializeLikeOriginal(parsed, text);
-        await defaultStorage.write(filePath, new Blob([nextText], { type: 'application/json' }));
+        await writeAttributeViewJson(filePath, parsed, text);
         log(`[attribute-view] 已按单元格快照整值还原数据库文件: ${viewId}.json`);
       }
     } catch (err) {

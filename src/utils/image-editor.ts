@@ -574,14 +574,6 @@ export async function prepareCanvasExport(
   }
 }
 
-export {
-  resetHostViewport,
-  lockHostScroll,
-  unlockHostScroll,
-  cleanTuiSvgArtifacts,
-  removeTuiSvgArtifacts,
-} from './host-isolation';
-
 /**
  * 为指定图片快速生成轻量 WebP 缩略图 DataURL（供删除后在日志列表中悬浮预览）
  * 宽/高自动等比缩放至最大边 maxSize 像素内（默认 160px），体积仅约 1.5~3KB

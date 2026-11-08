@@ -3,7 +3,7 @@ import { t } from '@/i18n'
 import type {
   AssetInfo,
   BlockRef,
-} from './siyuan-db'
+} from './asset-model'
 import {
   readDirGuarded,
   removeFile,
@@ -16,10 +16,8 @@ import {
   warn,
 } from './logger'
 import {
-
-
   isIgnoredSystemAsset,
-} from './siyuan-db'
+} from './asset-model'
 import {
   blobToText,
   defaultStorage,

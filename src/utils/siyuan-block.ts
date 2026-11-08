@@ -1,5 +1,5 @@
 import { updateBlock, deleteBlock, sql, sqlGuarded, getBlockAttrs, setBlockAttrs, flushTransaction, getBlockKramdown } from "../api";
-import { BlockRef } from "./siyuan-db";
+import { BlockRef } from "./asset-model";
 import {
   removeAssetFromMarkdown,
   replaceAssetInMarkdown,

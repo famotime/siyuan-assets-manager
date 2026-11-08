@@ -9,13 +9,15 @@ import {
   exportEditorCanvasDataUrl,
   getEditorShortcutAction,
   resetCanvasObjects,
+  captureAssetThumbnail,
+} from '../src/utils/image-editor'
+import {
   resetHostViewport,
   lockHostScroll,
   unlockHostScroll,
   cleanTuiSvgArtifacts,
   removeTuiSvgArtifacts,
-  captureAssetThumbnail,
-} from '../src/utils/image-editor'
+} from '../src/utils/host-isolation'
 import { resolveImageEditorConstructor } from '../src/utils/tui-image-editor-bridge'
 
 describe('image editor helpers', () => {
