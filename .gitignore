@@ -15,3 +15,5 @@ developer_docs/
 
 *.zip
 package.zip
+/.zcode/
+/docs/reference/
