@@ -1,4 +1,5 @@
 import { openTab } from 'siyuan'
+import type { TProtyleAction } from 'siyuan'
 import { isCanvasRef, isStandaloneDatabaseRef, type BlockRef } from './asset-model'
 import { openCanvasInTab } from './canvas-asset'
 import { usePlugin } from './plugin-context'
@@ -19,11 +20,11 @@ import { filterExistingBlockIds } from './siyuan-block'
  */
 
 /** 后台打开文档并高亮引用块的统一 action 契约 */
-export const OPEN_DOC_TAB_ACTIONS = ['cb-get-hl', 'cb-get-focus', 'cb-get-context']
+export const OPEN_DOC_TAB_ACTIONS: TProtyleAction[] = ['cb-get-hl', 'cb-get-focus', 'cb-get-context']
 
 export interface OpenTabOptions {
   app: any
-  doc: { id: string, action: string[] }
+  doc: { id: string, action: TProtyleAction[] }
   keepCursor: boolean
 }
 

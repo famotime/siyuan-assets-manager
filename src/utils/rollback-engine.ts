@@ -1,5 +1,5 @@
 import { sql, updateBlock, insertBlock, getBlockAttrs, setBlockAttrs } from '../api';
-import { replaceAssetInMarkdown, countAssetOccurrences, safeEncodeURIComponent } from './asset-markdown';
+import { countAssetOccurrences, safeEncodeURIComponent } from './asset-markdown';
 import { replaceAssetInAttributeViews, restoreAttributeViewAssetCells, restoreAttributeViewCellsAfterDeletion } from './attribute-view';
 import { restoreAssetReference } from './inverse-reference';
 import { createChildBlocksCache, planInsertAnchors } from './rollback-anchor';

@@ -535,6 +535,117 @@ describe('attribute-view helper module', () => {
     });
   });
 
+  describe('url 字段快照与还原一致性（对齐内核 URL 列资产引用规则）', () => {
+    const buildUrlAvJson = (values: any[]) =>
+      JSON.stringify({
+        spec: 1,
+        id: 'av-url-db',
+        name: '链接库',
+        keyValues: [
+          {
+            key: { id: 'key-link', name: '链接', type: 'url' },
+            values,
+          },
+        ],
+      });
+
+    it('采集仅存在于 url 字段的引用单元格（此前被 extractValueFields 漏采）', async () => {
+      const json = buildUrlAvJson([
+        { id: 'v1', blockID: 'row-1', url: { content: 'assets/dup.png' } },
+        { id: 'v2', blockID: 'row-2', url: { content: 'assets/other.png' } },
+      ]);
+      vi.spyOn(defaultStorage, 'list').mockResolvedValue([
+        { name: 'av-url-db.json', isDir: false, size: 100, updated: 100 },
+      ]);
+      vi.spyOn(defaultStorage, 'read').mockResolvedValue(new Blob([json], { type: 'application/json' }));
+
+      const captured = await captureAttributeViewAssetCells(['dup.png']);
+
+      const cells = captured.get('dup.png') || [];
+      expect(cells).toHaveLength(1);
+      expect(cells[0]).toMatchObject({ viewId: 'av-url-db', keyId: 'key-link', rowId: 'row-1' });
+      expect(cells[0].originalUrlContent).toBe('assets/dup.png');
+    });
+
+    it('去重回退同时还原被文本级合并改写的 url 字段', async () => {
+      const preMerge = buildUrlAvJson([
+        { id: 'v1', blockID: 'row-1', mAsset: [{ content: 'assets/dup.png' }], url: { content: 'assets/dup.png' } },
+      ]);
+      const postMerge = buildUrlAvJson([
+        { id: 'v1', blockID: 'row-1', mAsset: [{ content: 'assets/main.png' }], url: { content: 'assets/main.png' } },
+      ]);
+      vi.spyOn(defaultStorage, 'list').mockResolvedValue([
+        { name: 'av-url-db.json', isDir: false, size: 100, updated: 100 },
+      ]);
+      const readSpy = vi.spyOn(defaultStorage, 'read');
+      const writeSpy = vi.spyOn(defaultStorage, 'write').mockResolvedValue(undefined);
+
+      readSpy.mockResolvedValueOnce(new Blob([preMerge], { type: 'application/json' }));
+      const captured = await captureAttributeViewAssetCells(['dup.png']);
+      const cells = captured.get('dup.png') || [];
+      expect(cells).toHaveLength(1);
+
+      readSpy.mockResolvedValueOnce(new Blob([postMerge], { type: 'application/json' }));
+      const stats = await restoreAttributeViewAssetCells(cells, 'main.png', 'dup.png');
+
+      expect(stats.restoredCount).toBe(2);
+      expect(stats.skippedCount).toBe(0);
+      const written = await blobToText(writeSpy.mock.calls[0][1]);
+      const row = JSON.parse(written).keyValues[0].values[0];
+      expect(row.mAsset[0].content).toBe('assets/dup.png');
+      expect(row.url.content).toBe('assets/dup.png');
+    });
+
+    it('文件缺失时 skip 计数包含 url 字段（countRestorableFields 对齐）', async () => {
+      vi.spyOn(defaultStorage, 'read').mockResolvedValue(null);
+
+      const stats = await restoreAttributeViewAssetCells(
+        [
+          { viewId: 'av-url-db', keyId: 'key-link', rowId: 'row-1', originalUrlContent: 'assets/dup.png' },
+          { viewId: 'av-url-db', keyId: 'key-link', rowId: 'row-2', originalContent: 'assets/dup.png' },
+        ],
+        'main.png',
+        'dup.png',
+      );
+
+      expect(stats.restoredCount).toBe(0);
+      expect(stats.skippedCount).toBe(2);
+    });
+
+    it('删除链路全流程：url-only 引用被清理后可按快照整值还原', async () => {
+      const preDelete = buildUrlAvJson([
+        { id: 'v1', blockID: 'row-1', url: { content: 'assets/dup.png' } },
+      ]);
+      vi.spyOn(defaultStorage, 'list').mockResolvedValue([
+        { name: 'av-url-db.json', isDir: false, size: 100, updated: 100 },
+      ]);
+      const readSpy = vi.spyOn(defaultStorage, 'read');
+      const writeSpy = vi.spyOn(defaultStorage, 'write').mockResolvedValue(undefined);
+
+      readSpy.mockResolvedValueOnce(new Blob([preDelete], { type: 'application/json' }));
+      const captured = await captureAttributeViewAssetCells(['dup.png']);
+      const cells = captured.get('dup.png') || [];
+      expect(cells).toHaveLength(1);
+
+      // 模拟删除清理：读入清理前文件，url 引用片段被抹除
+      readSpy.mockResolvedValueOnce(new Blob([preDelete], { type: 'application/json' }));
+      const removed = await removeAssetFromAttributeViews('dup.png');
+      expect(removed).toBe(1);
+      const cleanedText = await blobToText(writeSpy.mock.calls[0][1]);
+      expect(JSON.parse(cleanedText).keyValues[0].values[0].url.content).toBe('');
+
+      // 模拟删除回退：整值还原
+      readSpy.mockResolvedValueOnce(new Blob([buildUrlAvJson([{ id: 'v1', blockID: 'row-1', url: { content: '' } }])], { type: 'application/json' }));
+      const stats = await restoreAttributeViewCellsAfterDeletion(cells);
+
+      expect(stats.restoredCount).toBe(1);
+      expect(stats.skippedCount).toBe(0);
+      const written = await blobToText(writeSpy.mock.calls[writeSpy.mock.calls.length - 1][1]);
+      const row = JSON.parse(written).keyValues[0].values[0];
+      expect(row.url.content).toBe('assets/dup.png');
+    });
+  });
+
   describe('queryAllAttributeViewBlocks', () => {
     it('returns av blocks on SQL success and degrades to empty array on failure', async () => {
       sqlMock.mockResolvedValueOnce([

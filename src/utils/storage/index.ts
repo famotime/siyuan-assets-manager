@@ -147,6 +147,17 @@ export class StorageClient {
       : false;
   }
 
+  /**
+   * 通用回收站删除：适配器支持时移入系统回收站，否则回退永久删除。
+   * 供 /data/assets 之外的绝对路径使用（如画布专属资产）。
+   */
+  async deleteToTrash(absolutePath: string): Promise<boolean> {
+    if (typeof (this.adapter as any).deleteToTrash === 'function') {
+      return (this.adapter as any).deleteToTrash(absolutePath);
+    }
+    return this.delete(absolutePath);
+  }
+
   async deleteAssetToTrash(fileName: string): Promise<boolean> {
     const absolutePath = `/data/assets/${fileName}`;
     if (typeof (this.adapter as any).deleteToTrash === 'function') {

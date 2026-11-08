@@ -65,6 +65,9 @@
 | RF-006 | 2026-11-08 | 2026-11-08 | `npx vitest run`（catalog 相关 7 文件 51 例）；`pnpm test` | pass（全量 53 suites / 512 tests） | 无（待 RF-008） | 新增 `catalog-resolve.ts`（445 行零 I/O 纯装配层：类型契约 + 流水线 + resolve/inventory/merge）；`asset-catalog.ts` 1010→645 行转为纯编排门面，全量 re-export 保持 100% 接口兼容（AssetsManager.vue 等 14 符号消费方零改动）；扫描契约类型族随装配层下沉，仅类型引用 canvas-asset（运行时零边） |
 | RF-007 | 2026-11-08 | 2026-11-08 | `npx vitest run`（dedup-batch-confirm/deduplicate/image-editor/tui-bridge/plugin-context/plugin-entry）；`pnpm test` | pass（全量 54 suites / 514 tests） | 无（RF-008 统一刷新） | ① DeduplicateDialog `usePlugin` 改从 `plugin-context` 导入，补齐组件层边界规则缺口；② `buildBatchMergeConfirmMessage` 抽入 deduplicate.ts（同 cleanup-workflow 风格）+2 例单测，组件只读结果；③ 删除 image-editor.ts 对 host-isolation 的冗余转发层（零消费方），image-editor.test.ts 的 host-isolation 断言改为直接导入 |
 | RF-008 | 2026-11-08 | 2026-11-08 | 脚本核对文档↔目录对齐；`pnpm test`；`pnpm run build` | pass（54 suites / 514 tests；构建成功） | `docs/project-structure.md`（全面重写：新增模型/装配/分层小节、依赖方向约定、54 套件分类索引、pnpm 命令）；README 双语核对后无需改动 | 用户先前未提交的 docs 删除/`docs/reference/` 新增未触碰 |
+| 遗留-1 | 2026-11-08 | 2026-11-08 | 内核源码核对（assets_test.go URL 列用例）；`npx vitest run tests/attribute-view.test.ts`（25 例，4 红→绿）；`pnpm test` | pass（55 suites / 526 tests） | `docs/refactor-plan.md`、`docs/project-structure.md` | url 字段疑点确认为缺陷并修复：extractValueFields 采集 +url、去重回退还原 +url、skip 计数 +url，与内核"URL 列计引用"规则及删除链路全对齐 |
+| 遗留-2 | 2026-11-08 | 2026-11-08 | `npx vitest run tests/asset-catalog-fetch.test.ts`（8 例新增）；`pnpm test` | pass | `docs/project-structure.md` | fetchCatalogFiles 三级降级链与 fetchCatalogSupportData Sidecar 迁移写路径补齐测试，degraded 标记锁定 |
+| 遗留-3 | 2026-11-08 | 2026-11-08 | `npx tsc --noEmit`（22→0）；`pnpm test`；`pnpm run build` | pass（构建成功） | `docs/project-structure.md`（shims-vue.d.ts 条目、计数 55/526） | 17 处机械类型修复 + 1 个真实缺陷：storage 门面补 deleteToTrash，画布资产回收站删除恢复生效 |
 
 ## 5. 决策与确认
 
@@ -96,13 +99,18 @@
 
 净效果：+10 个新模块（全部有独立单测）、54 套件 / 514 测试（基线 49/454）、utils 最大单文件 1060→645 行、三条循环依赖清零；行为契约经 454 存量测试 + 60 新增测试双重锁定。
 
-## 8. 行为疑点登记（本轮不改动，仅记录）
+## 8. 遗留事项处理结果（2026-11-08 第二批，全部闭环）
 
-1. `attribute-view.ts` `extractValueFields`（L491–506）仅采集 content/mAsset 字段，与 capture 路径（L568）不一致，url 字段疑未纳入快照——需后续单独确认是否为缺陷及修复方案。
-2. `asset-catalog.ts` `fetchCatalogSupportData` 名为采集，内嵌 IAL→Sidecar 元数据自动迁移**写操作**，且该路径零测试覆盖——RF-006 分层时保持现状，测试补齐列为后续事项。
+1. **url 字段疑点 → 确认为缺陷并已修复**（4 例红转绿测试锁定）：
+   - 依据内核源码 `kernel/model/assets_test.go` TestGetAttributeViewAssetsLinkDestsFiltersItems：官方将 URL 列 `value.URL.Content` 计入资产引用；插件引用计数口径 `extractAssetsFromAttributeViewJson` 1.3 分支早已解析 url——但快照采集 `extractValueFields` 只看 content/mAsset，去重回退 `restoreAttributeViewAssetCells` 不还原 url，`countRestorableFields` 漏数 url。
+   - 且去重合并经 `replaceAssetInAttributeViews` 文本级替换**确实会改写** url.content，构成"url 被改写却无快照、不可回退"的完整缺口（删除链路同理：removeAsset 清理 url 但 capture 漏采 url-only 单元格）。
+   - 修复：三处对齐（采集 +url 字段、去重回退 +url 还原、skip 计数 +url），url 匹配沿用与引用计数同一 `extractAssetNamesFromMarkdown` 口径，采集语义 ⊇ 引用计数语义。
+2. **Sidecar 迁移写路径零覆盖 → 已补测试**（`tests/asset-catalog-fetch.test.ts` 8 例）：fetchCatalogFiles 三级降级链（local-fs → 内核递归 → dirAvailable=false）、IAL→Sidecar 迁移写（落盘合入/已存在不写/写失败容错）、degraded 标记（属性视图失败/画布失败）。
+3. **tsc 存量告警 → 22→0 清零**：17 处机械修复（unused 导入/死绑定、`*.vue` shims、`in` 收窄替代非 strict 下失效的布尔判别式收窄、SerializedStatCacheV1 投入使用、SettingsHostPlugin 类型化、TProtyleAction 契约类型、orphanOriginals 补 path 可选字段）；**顺带修复 1 个真实运行时缺陷**：storage 门面缺 `deleteToTrash` 方法导致画布资产"移入回收站"从未生效、静默走永久删除——补通用 `deleteToTrash(absolutePath)` 门面方法（适配器不支持时回退永久删除，与原意图一致）。
 
 ## 9. 下一步建议
 
-1. 为 `fetchCatalogFiles` 降级分支与 `fetchCatalogSupportData` Sidecar 迁移写路径补测试（当前零覆盖）。
-2. 确认 `extractValueFields` 是否应采集 url 字段并与删除回退快照对齐（疑似缺陷，需设计确认）。
-3. tsc 存量 21 个历史类型告警可分批清理（不阻塞构建与测试）。
+1. （已闭环）fetchCatalogFiles 降级分支与 Sidecar 迁移写路径测试 → `tests/asset-catalog-fetch.test.ts`。
+2. （已闭环）extractValueFields url 字段对齐 → 采集/两套回退/skip 计数全链路一致。
+3. （已闭环）tsc 存量告警清零 → `npx tsc --noEmit` 0 错误。
+4. 后续可选：`removeAssetFromAttributeViews` 对 http 前缀完整 URL 的 `includes` 判定偏宽（会清理形如 `https://cdn.example.com/assets/x.png` 的外链 url），与引用计数口径（extract 不提取带协议前缀的引用）不一致——影响面小，记录待议。

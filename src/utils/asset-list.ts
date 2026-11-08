@@ -66,7 +66,8 @@ export interface AssetCleanupSummary {
 
 export interface TotalCleanupSummary {
   unreferencedAssets: AssetInfo[]
-  orphanOriginals: AssetInfo[]
+  /** 孤立底图条目：来自资产装配时为 AssetInfo，来自孤儿扫描时含 path 字段 */
+  orphanOriginals: Array<AssetInfo & { path?: string }>
   totalCount: number
   totalSize: number
   sizeText: string

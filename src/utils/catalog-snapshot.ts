@@ -225,10 +225,10 @@ export async function loadCatalogStatCache(): Promise<Map<string, { size: number
     if (!blob) return null
     const text = await blobToText(blob)
     if (!text) return null
-    const data = JSON.parse(text)
+    const data = JSON.parse(text) as SerializedStatCacheV1 | null
     if (!data || data.v !== 1 || !Array.isArray(data.stats)) return null
     const map = new Map<string, { size: number, updated: number }>()
-    for (const tuple of data.stats as Array<[string, number, number]>) {
+    for (const tuple of data.stats) {
       if (!Array.isArray(tuple) || !tuple[0] || !(Number(tuple[1]) > 0)) continue
       map.set(String(tuple[0]), { size: Number(tuple[1]), updated: Number(tuple[2]) || 0 })
     }

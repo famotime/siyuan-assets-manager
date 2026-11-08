@@ -4,7 +4,6 @@ import {
   queryCurrentAssetBlockReferences,
   verifyAssetZeroReferences,
   getImageBlockReEditData,
-  setImageBlockReEditData,
 } from './siyuan-block';
 import { replaceAssetInAttributeViews, captureAttributeViewAssetCells, type IAffectedViewCell } from './attribute-view';
 import type { AssetInfo, BlockRef } from './siyuan-db';

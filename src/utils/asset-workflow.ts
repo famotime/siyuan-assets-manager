@@ -23,7 +23,7 @@ import {
   buildEditedAssetName,
   resolveRenameAssetName,
 } from './asset-actions'
-import { log, warn, error } from './logger'
+import { warn, error } from './logger'
 
 export interface SaveEditedAssetParams {
   oldName: string
@@ -90,7 +90,6 @@ export async function executeSaveEditedAssetWorkflow(
   const replaceAssetInBlocks = deps.replaceAssetInBlocks || defaultReplaceAssetInBlocks
   const readAssetFile = deps.readAssetFile || defaultReadAssetFile
   const saveOriginalImage = deps.saveOriginalImage || defaultSaveOriginalImage
-  const setImageBlockReEditData = deps.setImageBlockReEditData || defaultSetImageBlockReEditData
   const deleteAssetFile = deps.deleteAssetFile || defaultDeleteAssetFile
   const saveAssetMetadata = deps.saveAssetMetadata || defaultSaveAssetMetadataFile
   const deleteAssetMetadata = deps.deleteAssetMetadata || defaultDeleteAssetMetadataFile
@@ -110,8 +109,10 @@ export async function executeSaveEditedAssetWorkflow(
     targetReferences.push({
       id: blockId,
       root_id: '',
+      box: '',
       content: '',
       markdown: '',
+      path: '',
     })
   }
   if (targetReferences.length > 0) {
@@ -263,7 +264,8 @@ export async function executeRenameAssetWorkflow(
     onConfirmExtChange || (async () => true),
   )
 
-  if (!renameResult.ok) {
+  // 非 strict 模式下布尔字面量判别式收窄失效，用 in 判别两种结果形态
+  if ("reason" in renameResult) {
     return {
       ok: false,
       reason: renameResult.reason,

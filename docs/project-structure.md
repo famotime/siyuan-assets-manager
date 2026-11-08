@@ -7,7 +7,7 @@
 | 路径 | 职责 |
 | --- | --- |
 | `src/` | 插件源码，包含 Siyuan 插件入口、Vue 应用、组件、工具函数和类型声明 |
-| `tests/` | Vitest 单元测试（54 套件 / 514 测试），覆盖资源解析、目录扫描装配、工作流编排、块引用更新、列表逻辑、跳转内核、选中/缩略图状态机、图片编辑辅助逻辑、元数据压缩、TUI/Fabric 桥接与底图管理 |
+| `tests/` | Vitest 单元测试（55 套件 / 526 测试），覆盖资源解析、目录扫描装配、工作流编排、块引用更新、列表逻辑、跳转内核、选中/缩略图状态机、图片编辑辅助逻辑、元数据压缩、TUI/Fabric 桥接与底图管理 |
 | `docs/` | 项目维护与重构文档（结构说明、设计方案、重构计划）；`docs/reference/` 为本地参考资料（不入库） |
 | `developer_docs/` | Siyuan 插件和 API 参考资料，不参与运行时代码（仅本机，不入库） |
 | `dist/` | 构建输出目录，由 `pnpm run build` 生成 |
@@ -143,6 +143,7 @@ utils 禁止 import src/main（组件层同样约定，DeduplicateDialog 已对�
 | `src/types/index.d.ts` | Siyuan 常用全局类型、窗口扩展和前端平台枚举 |
 | `src/types/api.d.ts` | Siyuan API 返回结构补充声明 |
 | `src/types/reedit.d.ts` | 二次编辑元数据 `IAssetReEditMetadata`、矢量图层载荷与保存事件类型定义 |
+| `src/shims-vue.d.ts` | `*.vue` 模块类型声明（供 tsc 解析 SFC 导入） |
 
 ## 测试 (54 Suites / 514 Tests)
 
@@ -153,6 +154,7 @@ utils 禁止 import src/main（组件层同样约定，DeduplicateDialog 已对�
 | `tests/asset-catalog.test.ts` | 装配管线：Sidecar 保护、AV 引用、`.pdf.sya` 伴生、系统保护、AI 会话、avRawContents 保底 |
 | `tests/asset-catalog-cache.test.ts` | 库存 TTL 缓存：命中/过期/失效/合并 |
 | `tests/asset-catalog-incremental.test.ts` | 增量三路查询与两入口一致性 |
+| `tests/asset-catalog-fetch.test.ts` | 采集编排：本地快速枚举/内核 readDir/双失败降级链、IAL→Sidecar 自动迁移写路径、degraded 降级标记 |
 | `tests/catalog-snapshot.test.ts` | 快照序列化/载入与 stat 缓存叠加 |
 | `tests/stat-fill-priority.test.ts` | stat 补全优先级与节流契约 |
 | `tests/missing-assets.test.ts` | 丢失资源识别与统计 |
@@ -235,7 +237,7 @@ utils 禁止 import src/main（组件层同样约定，DeduplicateDialog 已对�
 | 命令 | 说明 |
 | --- | --- |
 | `pnpm install` | 安装依赖（强制 pnpm，`preinstall` 以 only-allow 校验） |
-| `pnpm test` | 运行全部 Vitest 单元测试（54 套件 / 514 测试，jsdom 环境） |
+| `pnpm test` | 运行全部 Vitest 单元测试（55 套件 / 526 测试，jsdom 环境） |
 | `pnpm run build` | 生产构建，输出 `dist/` 并生成 `package.zip`（含集市规范校验） |
 | `pnpm run dev` | Vite watch 构建到配置的 Siyuan 工作空间插件目录 |
-| `npx tsc --noEmit` | 类型检查（非发布门槛；当前存量 21 个历史类型告警与构建无碍） |
+| `npx tsc --noEmit` | 类型检查（当前 0 告警） |

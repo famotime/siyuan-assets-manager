@@ -11,7 +11,7 @@ export interface ConfirmOptions {
 export const confirmState = ref({
   visible: false,
   options: {} as ConfirmOptions,
-  resolve: (value: boolean) => {},
+  resolve: (_value: boolean) => {},
 });
 
 export function showConfirm(options: ConfirmOptions): Promise<boolean> {

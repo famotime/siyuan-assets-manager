@@ -9,7 +9,7 @@ import {
   type IAssetFingerprint,
   type IFingerprintStore,
 } from './dedup-fingerprint-store';
-import { log, warn, error } from './logger';
+import { log, warn } from './logger';
 import { mapWithConcurrency, normalizeConcurrency } from './concurrency';
 
 // 重新导出纯算法模块中的函数与常量
@@ -36,7 +36,6 @@ import {
   isImageFile,
   computeFileHash,
   computeImageDHash,
-  calculateHammingDistance,
   calculateDHashSimilarity,
 } from './dedup-hash';
 

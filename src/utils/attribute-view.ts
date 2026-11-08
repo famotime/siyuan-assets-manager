@@ -495,7 +495,7 @@ export interface IViewCellRestoreStats {
 }
 
 interface IViewValueField {
-  kind: 'content' | 'asset';
+  kind: 'content' | 'url' | 'asset';
   index?: number;
   text: string;
 }
@@ -507,6 +507,12 @@ function extractValueFields(value: any): IViewValueField[] {
 
   if (typeof value.content === 'string' && value.content) {
     fields.push({ kind: 'content', text: value.content });
+  }
+  // url 列单元格同样承载资产引用（对齐思源官方 getAttributeViewValueAssetsLinkDests
+  // 的 value.URL 规则；引用计数口径 extractAssetsFromAttributeViewJson 早已解析 url，
+  // 此处若漏采会造成"url-only 引用被清理/改写却无快照、无法回退"的缺口）
+  if (value.url && typeof value.url.content === 'string' && value.url.content) {
+    fields.push({ kind: 'url', text: value.url.content });
   }
   if (Array.isArray(value.mAsset)) {
     value.mAsset.forEach((item: any, index: number) => {
@@ -704,6 +710,13 @@ export async function restoreAttributeViewAssetCells(
           });
         }
 
+        // url 字段与 content 同机制还原（合并的文本级替换同样会改写 url.content）
+        if (value.url && typeof value.url.content === 'string' && value.url.content) {
+          applyField(value.url.content, cell.originalUrlContent, (next) => {
+            value.url.content = next;
+          });
+        }
+
         if (Array.isArray(value.mAsset)) {
           value.mAsset.forEach((item: any, index: number) => {
             if (!item || typeof item.content !== 'string' || !item.content) return;
@@ -732,6 +745,7 @@ function countRestorableFields(cells: IAffectedViewCell[]): number {
   let count = 0;
   for (const cell of cells) {
     if (typeof cell.originalContent === 'string') count++;
+    if (typeof cell.originalUrlContent === 'string') count++;
     if (Array.isArray(cell.originalAssetContents)) count += cell.originalAssetContents.length;
   }
   return count;

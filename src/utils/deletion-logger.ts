@@ -82,12 +82,19 @@ export function sanitizeHistoryLimit(limit: any): number {
   return num;
 }
 
+import type { SettingsHostPlugin } from './plugin-settings';
+
+/** usePlugin() 返回的思源基类 Plugin 无 settings 字段；本插件配置包见 plugin-settings.ts */
+type PluginWithSettings = SettingsHostPlugin & {
+  loadData?: (cdPath?: string) => Promise<any>
+}
+
 /**
  * 获取历史保留上限 N（0~100，默认 10）
  */
 export async function getDeletionHistoryLimit(): Promise<number> {
   try {
-    const plugin = usePlugin();
+    const plugin = usePlugin() as unknown as PluginWithSettings | null;
     if (plugin?.settings?.deletionHistoryLimit !== undefined) {
       return sanitizeHistoryLimit(plugin.settings.deletionHistoryLimit);
     }
@@ -120,10 +127,18 @@ export async function getDeletionHistoryLimit(): Promise<number> {
 export async function setDeletionHistoryLimit(limit: number): Promise<number> {
   const safeLimit = sanitizeHistoryLimit(limit);
   try {
-    const plugin = usePlugin();
+    const plugin = usePlugin() as unknown as PluginWithSettings | null;
     if (plugin) {
       if (!plugin.settings) {
-        plugin.settings = {} as any;
+        plugin.settings = {
+          promptOnDeleteOriginal: false,
+          enableLogging: false,
+          openInTab: false,
+          imageEditorTools: [],
+          deletionHistoryLimit: safeLimit,
+          dedupHashConcurrency: 0,
+          dedupDecodeConcurrency: 0,
+        };
       }
       plugin.settings.deletionHistoryLimit = safeLimit;
       if (typeof plugin.saveData === 'function') {
